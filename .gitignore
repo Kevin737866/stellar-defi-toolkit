@@ -1,0 +1,80 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
+
+# Node.js (if using for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts
+/dist/
+/build/
+
+# Coverage reports
+/coverage/
+*.lcov
+
+# Backup files
+*.bak
+*.backup
+
+# Configuration files with secrets
+config.toml
+secrets.toml
+
+# Soroban specific
+*.wasm
+soroban/
+
+# Stellar specific
+*.xdr
+
+# Test data
+test-data/
+fixtures/
+
+# Documentation build
+/docs/build/
+/book/
+
+# Rust analyzer
+.rust-analyzer/
+
+# Clippy
+clippy.toml
+
+# Local development
+.local/
+local/

@@ -1,0 +1,60 @@
+[package]
+name = "stellar-defi-toolkit"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A comprehensive DeFi toolkit for Stellar blockchain with Soroban smart contracts"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/stellar-defi-toolkit"
+homepage = "https://github.com/yourusername/stellar-defi-toolkit"
+keywords = ["stellar", "soroban", "defi", "blockchain", "smart-contracts"]
+categories = ["cryptography::cryptocurrencies", "web-programming"]
+
+[dependencies]
+# Soroban SDK for smart contract development
+soroban-sdk = "21.0.0"
+
+# Stellar SDK for blockchain interactions
+stellar-sdk = "0.24.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# HTTP client for API calls
+reqwest = { version = "0.11", features = ["json"] }
+
+# Utilities
+hex = "0.4"
+base64 = "0.21"
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+
+[[bin]]
+name = "stellar-defi-cli"
+path = "src/main.rs"
+
+[lib]
+name = "stellar_defi_toolkit"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
