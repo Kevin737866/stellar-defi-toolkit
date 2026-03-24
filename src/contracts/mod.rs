@@ -10,9 +10,11 @@ pub mod token;
 pub mod liquidity_pool;
 pub mod staking;
 pub mod governance;
+pub mod vault;
 
 // Re-export main contract types
 pub use token::TokenContract;
 pub use liquidity_pool::LiquidityPoolContract;
 pub use staking::StakingContract;
 pub use governance::GovernanceContract;
+pub use vault::YieldVaultContract;
