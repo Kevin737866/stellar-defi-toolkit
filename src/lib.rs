@@ -26,7 +26,7 @@ pub mod utils;
 pub mod types;
 
 // Re-export commonly used types
-pub use contracts::{TokenContract, LiquidityPoolContract, StakingContract};
+pub use contracts::{TokenContract, LiquidityPoolContract, StakingContract, YieldVaultContract};
 pub use utils::StellarClient;
 pub use types::*;
 
