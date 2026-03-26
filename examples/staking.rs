@@ -1,24 +1,30 @@
 //! Example: Setting up and using a staking contract
 
+use soroban_sdk::Env;
 use stellar_defi_toolkit::{StakingContract, StellarClient};
 use tokio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize the Soroban environment
+    let env = Env::default();
+    
     // Initialize the Stellar client
     let client = StellarClient::new().await?;
     
     // Create a new staking contract
-    let staking = StakingContract::new(
+    let staking = StakingContract::new_std(
+        &env,
         "STAKING_TOKEN_CONTRACT_ID".to_string(),
         "REWARD_TOKEN_CONTRACT_ID".to_string(),
         1000, // 1000 reward tokens per second
     );
     
     println!("🌾 Creating staking contract...");
-    println!("Staking Token: {}", staking.get_info().staking_token);
-    println!("Reward Token: {}", staking.get_info().reward_token);
-    println!("Reward Rate: {} tokens per second", staking.get_info().reward_rate);
+    let info = staking.get_info(&env);
+    println!("Staking Token: {:?}", info.staking_token);
+    println!("Reward Token: {:?}", info.reward_token);
+    println!("Reward Rate: {} tokens per second", info.reward_rate);
     
     // Deploy the staking contract
     println!("\n🚀 Deploying staking contract...");
@@ -40,7 +46,8 @@ async fn main() -> anyhow::Result<()> {
     // Calculate rewards
     println!("\n💰 Calculating rewards...");
     let staking_duration_days = 30;
-    let rewards_per_day = staking.get_info().reward_rate * 86400; // 86400 seconds in a day
+    let reward_rate = staking.get_info(&env).reward_rate;
+    let rewards_per_day = reward_rate * 86400; // 86400 seconds in a day
     let total_rewards = rewards_per_day * staking_duration_days;
     
     println!("Staking duration: {} days", staking_duration_days);
@@ -74,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let new_reward_rate = 1500; // Increased to 1500 tokens per second
     
     println!("Updating reward rate from {} to {} tokens per second", 
-             staking.get_info().reward_rate, 
+             staking.get_info(&env).reward_rate, 
              new_reward_rate);
     
     // Note: In a real implementation, this would be called through a governance proposal

@@ -1,0 +1,88 @@
+    Checking stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+error[E0425]: cannot find value `reward_token` in this scope
+  --> src/contracts/staking.rs:33:13
+   |
+15 |     reward_token: soroban_sdk::String,
+   |     ------------ a field by that name exists in `Self`
+...
+33 |             reward_token,
+   |             ^^^^^^^^^^^^
+   |
+help: a local variable with a similar name exists
+   |
+33 |             rewards_token,
+   |                   +
+
+warning: unused import: `contractimpl`
+ --> src/contracts/flash_loan.rs:6:29
+  |
+6 | ...contract, contractimpl, Address, ...
+  |              ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `FlashLoanEvent`
+ --> src/contracts/flash_loan.rs:7:47
+  |
+7 | ...oanInfo, FlashLoanEvent, LoanTake...
+  |             ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::StellarClient`
+ --> src/contracts/flash_loan.rs:8:5
+  |
+8 | use crate::utils::StellarClient;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Address` and `Env`
+ --> src/utils/client.rs:3:19
+  |
+3 | use soroban_sdk::{Address, Env};
+  |                   ^^^^^^^  ^^^
+
+warning: unused imports: `Deserialize` and `Serialize`
+ --> src/types/token.rs:3:13
+  |
+3 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused import: `Env`
+ --> src/types/vault.rs:3:34
+  |
+3 | ...self, Address, Env, Symbol, String};
+  |                   ^^^
+
+warning: unused imports: `Deserialize` and `Serialize`
+ --> src/types/flash_loan.rs:3:13
+  |
+3 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:41:47
+   |
+41 | ...t(&self, contract: &TokenContrac...
+   |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:54:56
+   |
+54 | ...t(&self, contract: &LiquidityPoo...
+   |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+
+warning: unused variable: `env`
+  --> src/contracts/flash_loan.rs:29:16
+   |
+29 | ...pub fn new(env: &Env, token: sor...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `params`
+  --> src/contracts/flash_loan.rs:77:9
+   |
+77 |         params: Bytes,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_params`
+
+For more information about this error, try `rustc --explain E0425`.
+warning: `stellar-defi-toolkit` (lib) generated 11 warnings
+error: could not compile `stellar-defi-toolkit` (lib) due to 1 previous error; 11 warnings emitted

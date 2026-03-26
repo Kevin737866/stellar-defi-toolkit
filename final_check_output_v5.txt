@@ -1,0 +1,89 @@
+    Checking stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+warning: field `address` is never read
+  --> src/contracts/token.rs:22:5
+   |
+12 | pub struct TokenContract {
+   |            ------------- field in this struct
+...
+22 |     address: Option<Address>,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `address` is never read
+  --> src/contracts/liquidity_pool.rs:26:5
+   |
+12 | pub struct LiquidityPoolContract {
+   |            --------------------- field in this struct
+...
+26 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: field `address` is never read
+  --> src/contracts/staking.rs:25:5
+   |
+11 | pub struct StakingContract {
+   |            --------------- field in this struct
+...
+25 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: field `address` is never read
+  --> src/contracts/governance.rs:21:5
+   |
+11 | pub struct GovernanceContract {
+   |            ------------------ field in this struct
+...
+21 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: constant `KEY_ADMIN` is never used
+  --> src/contracts/vault.rs:25:7
+   |
+25 | const KEY_ADMIN: &str = "admin";
+   |       ^^^^^^^^^
+
+warning: constant `KEY_PAUSED` is never used
+  --> src/contracts/vault.rs:26:7
+   |
+26 | const KEY_PAUSED: &str = "paused";
+   |       ^^^^^^^^^^
+
+warning: constant `KEY_TOTAL_SHARES` is never used
+  --> src/contracts/vault.rs:27:7
+   |
+27 | const KEY_TOTAL_SHARES: &str = "tot...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_TOTAL_ASSETS` is never used
+  --> src/contracts/vault.rs:28:7
+   |
+28 | const KEY_TOTAL_ASSETS: &str = "tot...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_PERFORMANCE_FEE_BPS` is never used
+  --> src/contracts/vault.rs:29:7
+   |
+29 | const KEY_PERFORMANCE_FEE_BPS: &str...
+   |       ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_TREASURY` is never used
+  --> src/contracts/vault.rs:30:7
+   |
+30 | const KEY_TREASURY: &str = "treasury";
+   |       ^^^^^^^^^^^^
+
+warning: constant `KEY_LAST_HARVEST` is never used
+  --> src/contracts/vault.rs:31:7
+   |
+31 | const KEY_LAST_HARVEST: &str = "las...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_ACCUMULATED_FEES` is never used
+  --> src/contracts/vault.rs:32:7
+   |
+32 | const KEY_ACCUMULATED_FEES: &str = ...
+   |       ^^^^^^^^^^^^^^^^^^^^
+
+warning: `stellar-defi-toolkit` (lib) generated 12 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.20s

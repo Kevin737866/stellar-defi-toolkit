@@ -1,0 +1,20 @@
+    Checking stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+error: this file contains an unclosed delimiter
+   --> src/contracts/token.rs:225:3
+    |
+ 25 | impl TokenContract {
+    |                    - unclosed delimiter
+...
+ 58 |     pub async fn deploy(self, client: &StellarClient) -> anyhow::Result<String> {
+    |                                                                                 - unclosed delimiter
+...
+ 77 |     pub fn burn(&mut self, _from: Address, amount: u64) -> Result<(), String> {
+    |                                                                               - this delimiter might not be properly closed...
+...
+162 | }
+    | - ...as it matches this but it has different indentation
+...
+225 | }
+    |  ^
+
+error: could not compile `stellar-defi-toolkit` (lib) due to 1 previous error

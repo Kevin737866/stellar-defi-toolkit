@@ -1,0 +1,12 @@
+   Compiling stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+warning: unused import: `soroban_sdk::testutils::Address`
+   --> src/contracts/vault.rs:560:9
+    |
+560 |     use soroban_sdk::testutils::Address as _;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `stellar-defi-toolkit` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.12s
+  Executable unittests src/lib.rs (target/debug/deps/stellar_defi_toolkit-d36d312387ca979e)

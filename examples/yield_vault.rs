@@ -9,7 +9,8 @@
 
 use stellar_defi_toolkit::contracts::vault::YieldVaultContract;
 use stellar_defi_toolkit::types::vault::{VaultStrategy, StrategyType};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Symbol, String as SorobanString};
+use soroban_sdk::testutils::Address as _;
 
 fn main() {
     let env = Env::default();
@@ -20,37 +21,41 @@ fn main() {
 
     // ── 1. Create and initialize the vault ───────────────────────────────────
     let mut vault =
-        YieldVaultContract::new("USDC_CONTRACT".to_string(), "vUSDC_CONTRACT".to_string())
-            .initialize(admin.clone(), treasury.clone(), 1000) // 10% performance fee
-            .expect("vault initialization failed");
+        YieldVaultContract::new(
+            &env, 
+            SorobanString::from_str(&env, "USDC_CONTRACT"), 
+            SorobanString::from_str(&env, "vUSDC_CONTRACT")
+        )
+        .initialize(&env, admin.clone(), treasury.clone(), 1000) // 10% performance fee
+        .expect("vault initialization failed");
 
     println!("Vault initialized");
     println!("  Share price: {:.4}", vault.get_share_price());
 
     // ── 2. Register yield strategies ─────────────────────────────────────────
     let staking_strategy = VaultStrategy {
-        name: "XLM Staking".to_string(),
-        contract_address: "STAKING_CONTRACT_XLM".to_string(),
+        name: Symbol::new(&env, "XLM_STAK"),
+        contract_address: Address::generate(&env),
         strategy_type: StrategyType::Staking,
-        estimated_apy: 8.5,
+        estimated_apy: 850, // 8.5% in basis points
         allocated_amount: 0,
         active: true,
     };
 
     let lp_strategy = VaultStrategy {
-        name: "USDC/XLM LP".to_string(),
-        contract_address: "LP_CONTRACT_USDC_XLM".to_string(),
+        name: Symbol::new(&env, "USDC_XLM"),
+        contract_address: Address::generate(&env),
         strategy_type: StrategyType::LiquidityPool,
-        estimated_apy: 18.2,
+        estimated_apy: 1820, // 18.2%
         allocated_amount: 0,
         active: true,
     };
 
     let lending_strategy = VaultStrategy {
-        name: "USDC Lending".to_string(),
-        contract_address: "LENDING_CONTRACT_USDC".to_string(),
+        name: Symbol::new(&env, "USDC_LEND"),
+        contract_address: Address::generate(&env),
         strategy_type: StrategyType::Lending,
-        estimated_apy: 6.0,
+        estimated_apy: 600, // 6.0%
         allocated_amount: 0,
         active: true,
     };
@@ -59,7 +64,7 @@ fn main() {
     vault.add_strategy(lp_strategy).expect("add lp strategy");
     vault.add_strategy(lending_strategy).expect("add lending strategy");
 
-    println!("\nStrategies registered: {}", vault.get_info().strategy_count);
+    println!("\nStrategies registered: {}", vault.get_info(&env).strategy_count);
 
     // ── 3. Deposit assets ────────────────────────────────────────────────────
     let deposit_a = vault
@@ -116,13 +121,13 @@ fn main() {
 
     // ── 8. Emergency pause demo ──────────────────────────────────────────────
     vault.pause().expect("pause");
-    println!("\nVault paused: {}", vault.get_info().paused);
+    println!("\nVault paused: {}", vault.get_info(&env).paused);
 
     let blocked = vault.deposit(user_b.clone(), 100_000);
     println!("Deposit while paused (should fail): {}", blocked.is_err());
 
     vault.unpause().expect("unpause");
-    println!("Vault unpaused: {}", !vault.get_info().paused);
+    println!("Vault unpaused: {}", !vault.get_info(&env).paused);
 
     // ── 9. Final stats ───────────────────────────────────────────────────────
     let stats = vault.get_stats();

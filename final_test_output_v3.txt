@@ -1,0 +1,1238 @@
+   Compiling stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+warning: field `address` is never read
+  --> src/contracts/token.rs:22:5
+   |
+12 | pub struct TokenContract {
+   |            ------------- field in this struct
+...
+22 |     address: Option<Address>,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `address` is never read
+  --> src/contracts/liquidity_pool.rs:26:5
+   |
+12 | pub struct LiquidityPoolContract {
+   |            --------------------- field in this struct
+...
+26 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: field `address` is never read
+  --> src/contracts/staking.rs:25:5
+   |
+11 | pub struct StakingContract {
+   |            --------------- field in this struct
+...
+25 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: field `address` is never read
+  --> src/contracts/governance.rs:21:5
+   |
+11 | pub struct GovernanceContract {
+   |            ------------------ field in this struct
+...
+21 |     address: Option<Address>,
+   |     ^^^^^^^
+
+warning: constant `KEY_ADMIN` is never used
+  --> src/contracts/vault.rs:25:7
+   |
+25 | const KEY_ADMIN: &str = "admin";
+   |       ^^^^^^^^^
+
+warning: constant `KEY_PAUSED` is never used
+  --> src/contracts/vault.rs:26:7
+   |
+26 | const KEY_PAUSED: &str = "paused";
+   |       ^^^^^^^^^^
+
+warning: constant `KEY_TOTAL_SHARES` is never used
+  --> src/contracts/vault.rs:27:7
+   |
+27 | const KEY_TOTAL_SHARES: &str = "tot...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_TOTAL_ASSETS` is never used
+  --> src/contracts/vault.rs:28:7
+   |
+28 | const KEY_TOTAL_ASSETS: &str = "tot...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_PERFORMANCE_FEE_BPS` is never used
+  --> src/contracts/vault.rs:29:7
+   |
+29 | const KEY_PERFORMANCE_FEE_BPS: &str...
+   |       ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_TREASURY` is never used
+  --> src/contracts/vault.rs:30:7
+   |
+30 | const KEY_TREASURY: &str = "treasury";
+   |       ^^^^^^^^^^^^
+
+warning: constant `KEY_LAST_HARVEST` is never used
+  --> src/contracts/vault.rs:31:7
+   |
+31 | const KEY_LAST_HARVEST: &str = "las...
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `KEY_ACCUMULATED_FEES` is never used
+  --> src/contracts/vault.rs:32:7
+   |
+32 | const KEY_ACCUMULATED_FEES: &str = ...
+   |       ^^^^^^^^^^^^^^^^^^^^
+
+warning: `stellar-defi-toolkit` (lib) generated 12 warnings
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> examples/yield_vault.rs:16:26
+    |
+ 16 | ...Address::generate(&env);
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+ 10 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> examples/yield_vault.rs:17:29
+    |
+ 17 | ...Address::generate(&env);
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+ 10 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+  --> examples/staking.rs:12:19
+   |
+12 | ...et staking = StakingContract::new(
+   |                 ^^^^^^^^^^^^^^^^^^^^
+13 | ...   "STAKING_TOKEN_CONTRACT_ID".to_string(),
+   |       --------------------------------------- expected `&Env`, found `String`
+14 | ...   "REWARD_TOKEN_CONTRACT_ID".to_string(),
+   |       -------------------------------------- expected `soroban_sdk::string::String`, found `String`
+15 | ...   1000, // 1000 reward tokens per second
+   |       ---- argument #3 of type `soroban_sdk::string::String` is missing
+   |
+   = note: `String` and `soroban_sdk::string::String` have similar names, but are actually distinct types
+note: `String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::string::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/staking.rs:30:12
+   |
+30 |     pub fn new(_env: &Env, staking_...
+   |            ^^^
+help: provide the argument
+   |
+12 -     let staking = StakingContract::new(
+13 -         "STAKING_TOKEN_CONTRACT_ID".to_string(),
+14 -         "REWARD_TOKEN_CONTRACT_ID".to_string(),
+15 -         1000, // 1000 reward tokens per second
+16 -     );
+12 +     let staking = StakingContract::new(/* &soroban_sdk::env::Env */, /* soroban_sdk::string::String */, /* soroban_sdk::string::String */, 1000);
+   |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> examples/yield_vault.rs:18:27
+    |
+ 18 | ...Address::generate(&env);
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+ 10 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> examples/yield_vault.rs:19:27
+    |
+ 19 | ...Address::generate(&env);
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+ 10 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0432]: unresolved import `tokio_test`
+ --> tests/integration_tests.rs:6:5
+  |
+6 | use tokio_test;
+  |     ^^^^^^^^^^ no external crate `tokio_test`
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/staking.rs:19:43
+   |
+19 | ... staking.get_info().staking_token);
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+19 |     println!("Staking Token: {}", staking.get_info(/* &soroban_sdk::env::Env */).staking_token);
+   |                                                    ++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+  --> examples/token_deployment.rs:12:17
+   |
+12 | ...et token = TokenContract::new(
+   |               ^^^^^^^^^^^^^^^^^^
+13 | ...   "Example Token".to_string(),
+   |       --------------------------- expected `&Env`, found `String`
+14 | ...   "EXMPL".to_string(),
+   |       ------------------- expected `soroban_sdk::string::String`, found `std::string::String`
+15 | ...   1000000000, // 1 billion token...
+   |       ---------- argument #3 of type `soroban_sdk::string::String` is missing
+   |
+   = note: `std::string::String` and `soroban_sdk::string::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::string::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/token.rs:27:12
+   |
+27 |     pub fn new(_env: &Env, name: so...
+   |            ^^^
+help: provide the argument
+   |
+12 -     let token = TokenContract::new(
+13 -         "Example Token".to_string(),
+14 -         "EXMPL".to_string(),
+15 -         1000000000, // 1 billion tokens with 7 decimals
+16 -     );
+12 +     let token = TokenContract::new(/* &soroban_sdk::env::Env */, /* soroban_sdk::string::String */, /* soroban_sdk::string::String */, 1000000000);
+   |
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/staking.rs:19:35
+   |
+19 | ...n: {}", staking.get_info().staking_token);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/token_deployment.rs:19:26
+   |
+19 | ...e: {}", token.get_info().name);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+  --> examples/liquidity_pool.rs:12:16
+   |
+12 |       let pool = LiquidityPoolContract::new(
+   |  ________________^^^^^^^^^^^^^^^^^^^^^^^^^^-
+13 | |         "TOKEN_A_CONTRACT_ID".to_string(),
+   | |         --------------------------------- expected `&Env`, found `String`
+14 | |         "TOKEN_B_CONTRACT_ID".to_string(),
+   | |         --------------------------------- expected `soroban_sdk::string::String`, found `String`
+15 | |     );
+   | |_____- argument #3 of type `soroban_sdk::string::String` is missing
+   |
+   = note: `String` and `soroban_sdk::string::String` have similar names, but are actually distinct types
+note: `String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::string::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/liquidity_pool.rs:31:12
+   |
+31 |     pub fn new(_env: &Env, token_a:...
+   |            ^^^
+help: provide the argument
+   |
+12 -     let pool = LiquidityPoolContract::new(
+13 -         "TOKEN_A_CONTRACT_ID".to_string(),
+14 -         "TOKEN_B_CONTRACT_ID".to_string(),
+15 -     );
+12 +     let pool = LiquidityPoolContract::new(/* &soroban_sdk::env::Env */, /* soroban_sdk::string::String */, /* soroban_sdk::string::String */);
+   |
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/token_deployment.rs:20:28
+   |
+20 | ...l: {}", token.get_info().symbol);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/staking.rs:20:42
+   |
+20 | ... staking.get_info().reward_token);
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+20 |     println!("Reward Token: {}", staking.get_info(/* &soroban_sdk::env::Env */).reward_token);
+   |                                                   ++++++++++++++++++++++++++++
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/staking.rs:20:34
+   |
+20 | ...n: {}", staking.get_info().reward_token);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+  --> examples/yield_vault.rs:23:9
+   |
+23 | ...   YieldVaultContract::new("USDC_CONTRACT".to_string(), "vUSDC_CONTRACT".to_string())
+   |       ^^^^^^^^^^^^^^^^^^^^^^^-----------------------------------------------------------
+   |                              ||                            |
+   |                              ||                            expected `soroban_sdk::String`, found `std::string::String`
+   |                              |expected `&Env`, found `String`
+   |                              argument #3 of type `soroban_sdk::String` is missing
+   |
+   = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/vault.rs:76:12
+   |
+76 |     pub fn new(env: &Env, asset_tok...
+   |            ^^^
+help: provide the argument
+   |
+23 -         YieldVaultContract::new("USDC_CONTRACT".to_string(), "vUSDC_CONTRACT".to_string())
+23 +         YieldVaultContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */)
+   |
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/liquidity_pool.rs:18:34
+   |
+18 | ...}", pool.get_info().token_a);
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/liquidity_pool.rs:66:12
+   |
+66 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+18 |     println!("Token A: {}", pool.get_info(/* &soroban_sdk::env::Env */).token_a);
+   |                                           ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/staking.rs:21:59
+   |
+21 | ... staking.get_info().reward_rate);
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+21 |     println!("Reward Rate: {} tokens per second", staking.get_info(/* &soroban_sdk::env::Env */).reward_rate);
+   |                                                                    ++++++++++++++++++++++++++++
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:32:15
+   |
+32 | ...e: "XLM Staking".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Symbol`, found `String`
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/liquidity_pool.rs:18:29
+   |
+18 | ...A: {}", pool.get_info().token_a);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:33:27
+   |
+33 | ...s: "STAKING_CONTRACT_XLM".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Address`, found `String`
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:35:24
+   |
+35 |         estimated_apy: 8.5,
+   |                        ^^^ expected `u32`, found floating-point number
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:41:15
+   |
+41 | ...e: "USDC/XLM LP".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Symbol`, found `String`
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/staking.rs:43:35
+   |
+43 | ... staking.get_info().reward_rate ...
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+43 |     let rewards_per_day = staking.get_info(/* &soroban_sdk::env::Env */).reward_rate * 86400; // 86400 seconds in a day
+   |                                            ++++++++++++++++++++++++++++
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:42:27
+   |
+42 | ...s: "LP_CONTRACT_USDC_XLM".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Address`, found `String`
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:44:24
+   |
+44 |         estimated_apy: 18.2,
+   |                        ^^^^ expected `u32`, found floating-point number
+
+Some errors have detailed explanations: E0061, E0277.
+For more information about an error, try `rustc --explain E0061`.
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:50:15
+   |
+50 | ...e: "USDC Lending".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Symbol`, found `String`
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/liquidity_pool.rs:19:34
+   |
+19 | ...}", pool.get_info().token_b);
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/liquidity_pool.rs:66:12
+   |
+66 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+19 |     println!("Token B: {}", pool.get_info(/* &soroban_sdk::env::Env */).token_b);
+   |                                           ++++++++++++++++++++++++++++
+
+error[E0277]: `soroban_sdk::string::String` doesn't implement `std::fmt::Display`
+  --> examples/liquidity_pool.rs:19:29
+   |
+19 | ...B: {}", pool.get_info().token_b);
+   |       --   ^^^^^^^^^^^^^^^^^^^^^^^ `soroban_sdk::string::String` cannot be formatted with the default formatter
+   |       |
+   |       required by this formatting parameter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `soroban_sdk::string::String`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+   = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:51:27
+   |
+51 | ...s: "LENDING_CONTRACT_USDC".to_string(),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Address`, found `String`
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/staking.rs:77:22
+   |
+77 | ... staking.get_info().reward_rate, 
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+77 |              staking.get_info(/* &soroban_sdk::env::Env */).reward_rate, 
+   |                               ++++++++++++++++++++++++++++
+
+error[E0308]: mismatched types
+  --> examples/yield_vault.rs:53:24
+   |
+53 |         estimated_apy: 6.0,
+   |                        ^^^ expected `u32`, found floating-point number
+
+error: could not compile `stellar-defi-toolkit` (example "token_deployment") due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/liquidity_pool.rs:20:51
+   |
+20 | ...)", pool.get_info().fee_percenta...
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/liquidity_pool.rs:66:12
+   |
+66 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+20 |     println!("Fee Percentage: {} bps ({}%)", pool.get_info(/* &soroban_sdk::env::Env */).fee_percentage, pool.get_info().fee_percentage as f64 / 100.0);
+   |                                                            ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+   --> examples/yield_vault.rs:62:51
+    |
+ 62 | ...", vault.get_info().strategy_co...
+    |             ^^^^^^^^-- argument #1 of type `&Env` is missing
+    |
+note: method defined here
+   --> src/contracts/vault.rs:406:12
+    |
+406 |     pub fn get_info(&self, _env: &...
+    |            ^^^^^^^^
+help: provide the argument
+    |
+ 62 |     println!("\nStrategies registered: {}", vault.get_info(/* &Env */).strategy_count);
+    |                                                            ++++++++++
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> examples/liquidity_pool.rs:20:83
+   |
+20 | ...ge, pool.get_info().fee_percenta...
+   |             ^^^^^^^^-- argument #1 of type `&soroban_sdk::env::Env` is missing
+   |
+note: method defined here
+  --> src/contracts/liquidity_pool.rs:66:12
+   |
+66 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+20 |     println!("Fee Percentage: {} bps ({}%)", pool.get_info().fee_percentage, pool.get_info(/* &soroban_sdk::env::Env */).fee_percentage as f64 / 100.0);
+   |                                                                                            ++++++++++++++++++++++++++++
+
+error: could not compile `stellar-defi-toolkit` (example "staking") due to 8 previous errors
+error[E0624]: method `calculate_swap_output` is private
+   --> examples/liquidity_pool.rs:55:30
+    |
+ 55 | ...ol.calculate_swap_output(swap_a...
+    |       ^^^^^^^^^^^^^^^^^^^^^ private method
+    |
+   ::: src/contracts/liquidity_pool.rs:208:5
+    |
+208 |     fn cal...e_out: u64) -> u64 {
+    |     ------...------------------ private method defined here
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+   --> examples/yield_vault.rs:119:42
+    |
+119 | ...", vault.get_info().paused);
+    |             ^^^^^^^^-- argument #1 of type `&Env` is missing
+    |
+note: method defined here
+   --> src/contracts/vault.rs:406:12
+    |
+406 |     pub fn get_info(&self, _env: &...
+    |            ^^^^^^^^
+help: provide the argument
+    |
+119 |     println!("\nVault paused: {}", vault.get_info(/* &Env */).paused);
+    |                                                   ++++++++++
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+   --> examples/yield_vault.rs:125:43
+    |
+125 | ..., !vault.get_info().paused);
+    |             ^^^^^^^^-- argument #1 of type `&Env` is missing
+    |
+note: method defined here
+   --> src/contracts/vault.rs:406:12
+    |
+406 |     pub fn get_info(&self, _env: &...
+    |            ^^^^^^^^
+help: provide the argument
+    |
+125 |     println!("Vault unpaused: {}", !vault.get_info(/* &Env */).paused);
+    |                                                    ++++++++++
+
+Some errors have detailed explanations: E0061, E0308, E0599.
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+  --> tests/integration_tests.rs:12:17
+   |
+12 |     let token = TokenContract::new(
+   |                 ^^^^^^^^^^^^^^^^^^
+13 |         "Test Token".to_string(),
+   |         ------------------------ expected `&Env`, found `String`
+14 |         "TEST".to_string(),
+   |         ------------------ expected `soroban_sdk::String`, found `std::string::String`
+15 |         1000000,
+   |         ------- argument #3 of type `soroban_sdk::String` is missing
+   |
+   = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/token.rs:27:12
+   |
+27 |     pub fn new(_env: &Env, name: so...
+   |            ^^^
+help: provide the argument
+   |
+12 -     let token = TokenContract::new(
+13 -         "Test Token".to_string(),
+14 -         "TEST".to_string(),
+15 -         1000000,
+16 -     );
+12 +     let token = TokenContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */, 1000000);
+   |
+
+error: could not compile `stellar-defi-toolkit` (example "yield_vault") due to 17 previous errors
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:20:27
+   |
+20 | ....name, "Test Token");
+   |           ^^^^^^^^^^^^ expected `String`, found `&str`
+
+Some errors have detailed explanations: E0061, E0277, E0624.
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:21:29
+   |
+21 |     assert_eq!(info.symbol, "TEST");
+   |                             ^^^^^^ expected `String`, found `&str`
+
+error: could not compile `stellar-defi-toolkit` (example "liquidity_pool") due to 8 previous errors
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+  --> tests/integration_tests.rs:35:16
+   |
+35 |       let pool = LiquidityPoolContract::new(
+   |  ________________^^^^^^^^^^^^^^^^^^^^^^^^^^-
+36 | |         "TOKEN_A_CONTRACT".to_string(),
+   | |         ------------------------------ expected `&Env`, found `String`
+37 | |         "TOKEN_B_CONTRACT".to_string(),
+   | |         ------------------------------ expected `soroban_sdk::String`, found `std::string::String`
+38 | |     );
+   | |_____- argument #3 of type `soroban_sdk::String` is missing
+   |
+   = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/liquidity_pool.rs:31:12
+   |
+31 |     pub fn new(_env: &Env, token_a:...
+   |            ^^^
+help: provide the argument
+   |
+35 -     let pool = LiquidityPoolContract::new(
+36 -         "TOKEN_A_CONTRACT".to_string(),
+37 -         "TOKEN_B_CONTRACT".to_string(),
+38 -     );
+35 +     let pool = LiquidityPoolContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */);
+   |
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> tests/integration_tests.rs:41:21
+   |
+41 |     let info = pool.get_info();
+   |                     ^^^^^^^^-- argument #1 of type `&Env` is missing
+   |
+note: method defined here
+  --> src/contracts/liquidity_pool.rs:66:12
+   |
+66 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+41 |     let info = pool.get_info(/* &Env */);
+   |                              ++++++++++
+
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:42:30
+   |
+42 | ...n_a, "TOKEN_A_CONTRACT");
+   |         ^^^^^^^^^^^^^^^^^^ expected `String`, found `&str`
+
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:43:30
+   |
+43 | ...n_b, "TOKEN_B_CONTRACT");
+   |         ^^^^^^^^^^^^^^^^^^ expected `String`, found `&str`
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+  --> tests/integration_tests.rs:59:19
+   |
+59 | ...et staking = StakingContract::new(
+   |                 ^^^^^^^^^^^^^^^^^^^^
+60 | ...   "STAKING_TOKEN".to_string(),
+   |       --------------------------- expected `&Env`, found `String`
+61 | ...   "REWARD_TOKEN".to_string(),
+   |       -------------------------- expected `soroban_sdk::String`, found `std::string::String`
+62 | ...   1000,
+   |       ---- argument #3 of type `soroban_sdk::String` is missing
+   |
+   = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+   |
+37 | pub struct String {
+   | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+  --> src/contracts/staking.rs:30:12
+   |
+30 |     pub fn new(_env: &Env, staking_...
+   |            ^^^
+help: provide the argument
+   |
+59 -     let staking = StakingContract::new(
+60 -         "STAKING_TOKEN".to_string(),
+61 -         "REWARD_TOKEN".to_string(),
+62 -         1000,
+63 -     );
+59 +     let staking = StakingContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */, 1000);
+   |
+
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> tests/integration_tests.rs:66:24
+   |
+66 |     let info = staking.get_info();
+   |                        ^^^^^^^^-- argument #1 of type `&Env` is missing
+   |
+note: method defined here
+  --> src/contracts/staking.rs:53:12
+   |
+53 |     pub fn get_info(&self, _env: &E...
+   |            ^^^^^^^^
+help: provide the argument
+   |
+66 |     let info = staking.get_info(/* &Env */);
+   |                                 ++++++++++
+
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:67:36
+   |
+67 | ...token, "STAKING_TOKEN");
+   |           ^^^^^^^^^^^^^^^ expected `String`, found `&str`
+
+error[E0308]: mismatched types
+  --> tests/integration_tests.rs:68:35
+   |
+68 | ...token, "REWARD_TOKEN");
+   |           ^^^^^^^^^^^^^^ expected `String`, found `&str`
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+  --> tests/integration_tests.rs:87:18
+   |
+87 | ...!(info.contains_key("network"));
+   |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+   |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+   |
+86 | /     pub fn contains_key<Q>(&self, key: ...
+87 | |     where
+88 | |         String: Borrow<Q>,
+89 | |         Q: ?Sized + Ord + Eq + Hash,
+   | |____________________________________^
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+  --> tests/integration_tests.rs:88:18
+   |
+88 | ...!(info.contains_key("horizon_url...
+   |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+   |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+   |
+86 | /     pub fn contains_key<Q>(&self, key: ...
+87 | |     where
+88 | |         String: Borrow<Q>,
+89 | |         Q: ?Sized + Ord + Eq + Hash,
+   | |____________________________________^
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+  --> tests/integration_tests.rs:89:18
+   |
+89 | ...!(info.contains_key("status"));
+   |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+   |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+   |
+86 | /     pub fn contains_key<Q>(&self, key: ...
+87 | |     where
+88 | |         String: Borrow<Q>,
+89 | |         Q: ?Sized + Ord + Eq + Hash,
+   | |____________________________________^
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+   --> tests/integration_tests.rs:100:26
+    |
+100 | ...t_info.contains_key("balance"));
+    |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+    |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+    |
+ 86 | /     pub fn contains_key<Q>(&self, key: ...
+ 87 | |     where
+ 88 | |         String: Borrow<Q>,
+ 89 | |         Q: ?Sized + Ord + Eq + Hash,
+    | |____________________________________^
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+   --> tests/integration_tests.rs:101:26
+    |
+101 | ...t_info.contains_key("sequence"));
+    |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+    |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+    |
+ 86 | /     pub fn contains_key<Q>(&self, key: ...
+ 87 | |     where
+ 88 | |         String: Borrow<Q>,
+ 89 | |         Q: ?Sized + Ord + Eq + Hash,
+    | |____________________________________^
+
+error[E0599]: no method named `contains_key` found for enum `serde_json::value::Value` in the current scope
+   --> tests/integration_tests.rs:102:26
+    |
+102 | ...t_info.contains_key("network"));
+    |           ^^^^^^^^^^^^ method not found in `serde_json::value::Value`
+    |
+note: the method `contains_key` exists on the type `serde_json::map::Map<std::string::String, serde_json::value::Value>`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/map.rs:86:5
+    |
+ 86 | /     pub fn contains_key<Q>(&self, key: ...
+ 87 | |     where
+ 88 | |         String: Borrow<Q>,
+ 89 | |         Q: ?Sized + Ord + Eq + Hash,
+    | |____________________________________^
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+   --> tests/integration_tests.rs:124:21
+    |
+124 | ...et mut token = TokenContract::new(
+    |                   ^^^^^^^^^^^^^^^^^^
+125 | ...   "Test Token".to_string(),
+    |       ------------------------ expected `&Env`, found `String`
+126 | ...   "TEST".to_string(),
+    |       ------------------ expected `soroban_sdk::String`, found `std::string::String`
+127 | ...   1000000,
+    |       ------- argument #3 of type `soroban_sdk::String` is missing
+    |
+    = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+   --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+    |
+ 37 | pub struct String {
+    | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+   --> src/contracts/token.rs:27:12
+    |
+ 27 |     pub fn new(_env: &Env, name: s...
+    |            ^^^
+help: provide the argument
+    |
+124 -     let mut token = TokenContract::new(
+125 -         "Test Token".to_string(),
+126 -         "TEST".to_string(),
+127 -         1000000,
+128 -     );
+124 +     let mut token = TokenContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */, 1000000);
+    |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> tests/integration_tests.rs:131:41
+    |
+131 | ...Address::generate(&soroban_sdk:...
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+  3 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0616]: field `total_supply` of struct `TokenContract` is private
+   --> tests/integration_tests.rs:132:32
+    |
+132 | ... token.total_supply;
+    |           ^^^^^^^^^^^^ private field
+
+error[E0616]: field `total_supply` of struct `TokenContract` is private
+   --> tests/integration_tests.rs:134:22
+    |
+134 | ...(token.total_supply, initial_su...
+    |           ^^^^^^^^^^^^ private field
+
+error[E0616]: field `total_supply` of struct `TokenContract` is private
+   --> tests/integration_tests.rs:138:22
+    |
+138 | ...(token.total_supply, initial_su...
+    |           ^^^^^^^^^^^^ private field
+
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+   --> tests/integration_tests.rs:143:20
+    |
+143 |       let mut pool = LiquidityPoolContract::new(
+    |  ____________________^^^^^^^^^^^^^^^^^^^^^^^^^^-
+144 | |         "TOKEN_A_CONTRACT".to_string(),
+    | |         ------------------------------ expected `&Env`, found `String`
+145 | |         "TOKEN_B_CONTRACT".to_string(),
+    | |         ------------------------------ expected `soroban_sdk::String`, found `std::string::String`
+146 | |     );
+    | |_____- argument #3 of type `soroban_sdk::String` is missing
+    |
+    = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+   --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+    |
+ 37 | pub struct String {
+    | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+   --> src/contracts/liquidity_pool.rs:31:12
+    |
+ 31 |     pub fn new(_env: &Env, token_a...
+    |            ^^^
+help: provide the argument
+    |
+143 -     let mut pool = LiquidityPoolContract::new(
+144 -         "TOKEN_A_CONTRACT".to_string(),
+145 -         "TOKEN_B_CONTRACT".to_string(),
+146 -     );
+143 +     let mut pool = LiquidityPoolContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */);
+    |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> tests/integration_tests.rs:148:42
+    |
+148 | ...Address::generate(&soroban_sdk:...
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+  3 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0616]: field `reserve_a` of struct `LiquidityPoolContract` is private
+   --> tests/integration_tests.rs:154:21
+    |
+154 |     assert_eq!(pool.reserve_a, 1000);
+    |                     ^^^^^^^^^ private field
+
+error[E0616]: field `reserve_b` of struct `LiquidityPoolContract` is private
+   --> tests/integration_tests.rs:155:21
+    |
+155 |     assert_eq!(pool.reserve_b, 2000);
+    |                     ^^^^^^^^^ private field
+
+error[E0616]: field `total_liquidity` of struct `LiquidityPoolContract` is private
+   --> tests/integration_tests.rs:156:21
+    |
+156 | ...!(pool.total_liquidity, liquidi...
+    |           ^^^^^^^^^^^^^^^ private field
+
+error[E0624]: method `calculate_swap_output` is private
+   --> tests/integration_tests.rs:165:23
+    |
+165 | ...ol.calculate_swap_output(100, p...
+    |       ^^^^^^^^^^^^^^^^^^^^^ private method
+    |
+   ::: src/contracts/liquidity_pool.rs:208:5
+    |
+208 |     fn cal...e_out: u64) -> u64 {
+    |     ------...------------------ private method defined here
+
+error[E0616]: field `reserve_a` of struct `LiquidityPoolContract` is private
+   --> tests/integration_tests.rs:165:55
+    |
+165 | ...ool.reserve_a, pool.reserve_b);
+    |        ^^^^^^^^^ private field
+
+error[E0616]: field `reserve_b` of struct `LiquidityPoolContract` is private
+   --> tests/integration_tests.rs:165:71
+    |
+165 | ...ool.reserve_b);
+    |        ^^^^^^^^^ private field
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+   --> tests/integration_tests.rs:171:23
+    |
+171 | ...et mut staking = StakingContract::new(
+    |                     ^^^^^^^^^^^^^^^^^^^^
+172 | ...   "STAKING_TOKEN".to_string(),
+    |       --------------------------- expected `&Env`, found `String`
+173 | ...   "REWARD_TOKEN".to_string(),
+    |       -------------------------- expected `soroban_sdk::String`, found `std::string::String`
+174 | ...   1000,
+    |       ---- argument #3 of type `soroban_sdk::String` is missing
+    |
+    = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+   --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+    |
+ 37 | pub struct String {
+    | ^^^^^^^^^^^^^^^^^
+note: associated function defined here
+   --> src/contracts/staking.rs:30:12
+    |
+ 30 |     pub fn new(_env: &Env, staking...
+    |            ^^^
+help: provide the argument
+    |
+171 -     let mut staking = StakingContract::new(
+172 -         "STAKING_TOKEN".to_string(),
+173 -         "REWARD_TOKEN".to_string(),
+174 -         1000,
+175 -     );
+171 +     let mut staking = StakingContract::new(/* &Env */, /* soroban_sdk::String */, /* soroban_sdk::String */, 1000);
+    |
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> tests/integration_tests.rs:177:38
+    |
+177 | ...Address::generate(&soroban_sdk:...
+    |             ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Address` which provides `generate` is implemented but not in scope; perhaps you want to import it
+    |
+  3 + use soroban_sdk::testutils::Address;
+    |
+
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
+   --> tests/integration_tests.rs:197:19
+    |
+197 |     let address = generate_address();
+    |                   ^^^^^^^^^^^^^^^^-- argument #1 of type `&Env` is missing
+    |
+note: function defined here
+   --> src/utils/helpers.rs:8:8
+    |
+  8 | pub fn generate_address(_env: &Env...
+    |        ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+197 |     let address = generate_address(/* &Env */);
+    |                                    ++++++++++
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+   --> tests/integration_tests.rs:226:24
+    |
+226 | ... = token::TokenMetadata::new("Test Token".to_string(), "...
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^ ------------------------ argument #1 of type `&Env` is missing
+    |
+note: associated function defined here
+   --> src/types/token.rs:123:12
+    |
+123 |     pub fn new(env: &Env, name: St...
+    |            ^^^
+help: provide the argument
+    |
+226 -     let mut metadata = token::TokenMetadata::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+226 +     let mut metadata = token::TokenMetadata::new(/* &Env */, "TEST".to_string(), "Test Token".to_string(), 1000000);
+    |
+
+error[E0308]: mismatched types
+   --> tests/integration_tests.rs:230:21
+    |
+230 |     metadata.name = "".to_string();
+    |     -------------   ^^^^^^^^^^^^^^ expected `soroban_sdk::String`, found `std::string::String`
+    |     |
+    |     expected due to the type of this binding
+    |
+    = note: `std::string::String` and `soroban_sdk::String` have similar names, but are actually distinct types
+note: `std::string::String` is defined in crate `alloc`
+   --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/alloc/src/string.rs:353:0
+note: `soroban_sdk::String` is defined in crate `soroban_sdk`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/string.rs:37:1
+    |
+ 37 | pub struct String {
+    | ^^^^^^^^^^^^^^^^^
+
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+   --> tests/integration_tests.rs:234:21
+    |
+234 | ... = pool::PoolInfo::new("TOKEN_A".to_string(), "...
+    |       ^^^^^^^^^^^^^^^^^^^ --------------------- argument #1 of type `&Env` is missing
+    |
+note: associated function defined here
+   --> src/types/pool.rs:226:12
+    |
+226 |     pub fn new(env: &Env, token_a:...
+    |            ^^^
+help: provide the argument
+    |
+234 -     let pool_info = pool::PoolInfo::new("TOKEN_A".to_string(), "TOKEN_B".to_string(), 30);
+234 +     let pool_info = pool::PoolInfo::new(/* &Env */, "TOKEN_B".to_string(), "TOKEN_A".to_string(), 30);
+    |
+
+error[E0308]: mismatched types
+   --> tests/integration_tests.rs:235:35
+    |
+235 | ...token_a, "TOKEN_A");
+    |             ^^^^^^^^^ expected `String`, found `&str`
+
+error[E0308]: mismatched types
+   --> tests/integration_tests.rs:236:35
+    |
+236 | ...token_b, "TOKEN_B");
+    |             ^^^^^^^^^ expected `String`, found `&str`
+
+error[E0599]: no function or associated item named `default` found for struct `PoolInfo` in the current scope
+   --> tests/integration_tests.rs:240:41
+    |
+240 | ...oolInfo::default();
+    |             ^^^^^^^ function or associated item not found in `PoolInfo`
+    |
+note: if you're trying to build a new `PoolInfo`, consider using `PoolInfo::new` which returns `PoolInfo`
+   --> src/types/pool.rs:226:5
+    |
+226 |     pub fn...tage: u32) -> Self {
+    |     ^^^^^^...^^^^^^^^^^^^^^^^^^
+
+warning: `stellar-defi-toolkit` (lib test) generated 12 warnings (12 duplicates)
+Some errors have detailed explanations: E0061, E0308, E0432, E0599, E0616, E0624.
+error: could not compile `stellar-defi-toolkit` (test "integration_tests") due to 40 previous errors
