@@ -7,6 +7,7 @@ A comprehensive DeFi toolkit for building decentralized finance applications on 
 - **🪙 Token Contracts**: Complete ERC-20-like token implementation on Stellar
 - **💧 Liquidity Pools**: Automated market maker (AMM) liquidity pools
 - **🌾 Yield Farming**: Staking and reward distribution mechanisms
+- **⚡ Flash Loans**: Borrow assets without collateral (0.09% fee)
 - **🌉 Cross-chain Bridges**: Asset transfer between different blockchains
 - **🏛️ Governance**: Decentralized governance and voting systems
 - **📊 Analytics**: Real-time DeFi protocol analytics and monitoring
@@ -206,6 +207,7 @@ at your option.
 ### Phase 2: Advanced Features (Q2 2024)
 - [ ] Yield farming protocols
 - [ ] Cross-chain bridges
+- [x] Flash loans with atomic borrowing (0.09% fee)
 - [ ] Governance contracts with voting
 - [ ] Advanced analytics dashboard
 - [ ] Web GUI for easy interaction

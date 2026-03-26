@@ -1,0 +1,454 @@
+    Checking stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+warning: unused imports: `Symbol`, `Vec`, and `contractimpl`
+ --> src/contracts/token.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec};
+  |       ^^^^^^^^^^^^                ^^^^^^  ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `TokenMetadata`
+ --> src/contracts/token.rs:7:38
+  |
+7 | ...okenInfo, TokenMetadata};
+  |              ^^^^^^^^^^^^^
+
+warning: unused imports: `Map`, `Symbol`, and `contractimpl`
+ --> src/contracts/liquidity_pool.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^                ^^^^^^       ^^^
+
+warning: unused import: `SwapParams`
+ --> src/contracts/liquidity_pool.rs:7:55
+  |
+7 | ...yPosition, SwapParams};
+  |               ^^^^^^^^^^
+
+warning: unused imports: `Map`, `Symbol`, `Vec`, and `contractimpl`
+ --> src/contracts/staking.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^                ^^^^^^  ^^^  ^^^
+
+warning: unused import: `crate::types::token::TokenInfo`
+ --> src/contracts/staking.rs:7:5
+  |
+7 | use crate::types::token::TokenInfo;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Map`, `Symbol`, and `contractimpl`
+ --> src/contracts/governance.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^                ^^^^^^       ^^^
+
+warning: unused imports: `Symbol` and `contractimpl`
+  --> src/contracts/vault.rs:17:29
+   |
+17 | ...t, contractimpl, Address, Env, Symbol, V...
+   |       ^^^^^^^^^^^^                ^^^^^^
+
+warning: unused imports: `PerformanceFeeConfig` and `StrategyType`
+  --> src/contracts/vault.rs:19:31
+   |
+19 | ...VaultStrategy, StrategyType, Vau...
+   |                   ^^^^^^^^^^^^
+20 | ...ult, PerformanceFeeConfig,
+   |         ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `contractimpl`
+ --> src/contracts/flash_loan.rs:6:29
+  |
+6 | ...contract, contractimpl, Address, ...
+  |              ^^^^^^^^^^^^
+
+warning: unused import: `FlashLoanEvent`
+ --> src/contracts/flash_loan.rs:7:47
+  |
+7 | ...oanInfo, FlashLoanEvent, LoanTake...
+  |             ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::StellarClient`
+ --> src/contracts/flash_loan.rs:8:5
+  |
+8 | use crate::utils::StellarClient;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Address` and `Env`
+ --> src/utils/client.rs:3:19
+  |
+3 | use soroban_sdk::{Address, Env};
+  |                   ^^^^^^^  ^^^
+
+warning: unexpected `cfg` condition value: `testutils`
+ --> src/utils/helpers.rs:9:21
+  |
+9 | ...est, feature = "testutils"))]
+  |         ^^^^^^^^^^^^^^^^^^^^^ help: remove the condition
+  |
+  = note: no expected values for `feature`
+  = help: consider adding `testutils` as a feature in `Cargo.toml`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition value: `testutils`
+  --> src/utils/helpers.rs:14:25
+   |
+14 | ...est, feature = "testutils")))]
+   |         ^^^^^^^^^^^^^^^^^^^^^ help: remove the condition
+   |
+   = note: no expected values for `feature`
+   = help: consider adding `testutils` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `testutils`
+  --> src/utils/helpers.rs:36:21
+   |
+36 | ...est, feature = "testutils"))]
+   |         ^^^^^^^^^^^^^^^^^^^^^ help: remove the condition
+   |
+   = note: no expected values for `feature`
+   = help: consider adding `testutils` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `testutils`
+  --> src/utils/helpers.rs:42:25
+   |
+42 | ...est, feature = "testutils")))]
+   |         ^^^^^^^^^^^^^^^^^^^^^ help: remove the condition
+   |
+   = note: no expected values for `feature`
+   = help: consider adding `testutils` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unused imports: `Deserialize` and `Serialize`
+ --> src/types/token.rs:3:13
+  |
+3 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused import: `Env`
+ --> src/types/vault.rs:3:34
+  |
+3 | ...self, Address, Env, Symbol, String};
+  |                   ^^^
+
+warning: unused imports: `Deserialize` and `Serialize`
+ --> src/types/flash_loan.rs:3:13
+  |
+3 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: variable does not need to be mutable
+  --> src/contracts/token.rs:58:25
+   |
+58 | ...n deploy(mut self, client: &Stel...
+   |             ----^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src/contracts/liquidity_pool.rs:78:25
+   |
+78 | ...n deploy(mut self, client: &Stel...
+   |             ----^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/contracts/staking.rs:66:25
+   |
+66 | ...n deploy(mut self, client: &Stel...
+   |             ----^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/contracts/governance.rs:64:25
+   |
+64 | ...n deploy(mut self, client: &Stel...
+   |             ----^^^^
+   |             |
+   |             help: remove this `mut`
+
+error[E0599]: no method named `map_err` found for struct `soroban_sdk::Address` in the current scope
+  --> src/utils/helpers.rs:45:14
+   |
+44 | /         Address::from_string(&sor...
+45 | |             .map_err(|_| anyhow::...
+   | |             -^^^^^^^ method not found in `soroban_sdk::Address`
+   | |_____________|
+   |
+
+warning: unused variable: `env`
+  --> src/contracts/token.rs:27:16
+   |
+27 | ...pub fn new(env: &Env, name: soro...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:41:47
+   |
+41 | ...t(&self, contract: &TokenContrac...
+   |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+
+warning: unused variable: `to`
+  --> src/contracts/token.rs:65:28
+   |
+65 | ...&mut self, to: Address, amount: ...
+   |               ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `from`
+  --> src/contracts/token.rs:76:28
+   |
+76 | ...&mut self, from: Address, amount...
+   |               ^^^^ help: if this is intentional, prefix it with an underscore: `_from`
+
+warning: unused variable: `address`
+   --> src/contracts/token.rs:109:30
+    |
+109 | ...f(&self, address: Address) -> u...
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `owner`
+   --> src/contracts/token.rs:116:27
+    |
+116 | ...ove(&self, owner: Address, spen...
+    |               ^^^^^ help: if this is intentional, prefix it with an underscore: `_owner`
+
+warning: unused variable: `spender`
+   --> src/contracts/token.rs:116:43
+    |
+116 | ...Address, spender: Address, amou...
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_spender`
+
+warning: unused variable: `owner`
+   --> src/contracts/token.rs:129:29
+    |
+129 | ...nce(&self, owner: Address, spen...
+    |               ^^^^^ help: if this is intentional, prefix it with an underscore: `_owner`
+
+warning: unused variable: `spender`
+   --> src/contracts/token.rs:129:45
+    |
+129 | ...Address, spender: Address) -> u...
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_spender`
+
+warning: unused variable: `to`
+   --> src/contracts/token.rs:140:9
+    |
+140 |         to: Address,
+    |         ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `env`
+  --> src/contracts/liquidity_pool.rs:31:16
+   |
+31 | ...pub fn new(env: &Env, token_a: s...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+  --> src/contracts/liquidity_pool.rs:53:25
+   |
+53 | ...w_with_fee(env: &Env, token_a: s...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:54:56
+   |
+54 | ...t(&self, contract: &LiquidityPoo...
+   |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+
+warning: unused variable: `provider`
+  --> src/contracts/liquidity_pool.rs:87:9
+   |
+87 |         provider: Address,
+   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `provider`
+   --> src/contracts/liquidity_pool.rs:127:9
+    |
+127 |         provider: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `user`
+   --> src/contracts/liquidity_pool.rs:160:9
+    |
+160 |         user: Address,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/liquidity_pool.rs:185:9
+    |
+185 |         user: Address,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `env`
+  --> src/contracts/staking.rs:31:16
+   |
+31 | ...pub fn new(env: &Env, staking_to...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `user`
+  --> src/contracts/staking.rs:73:29
+   |
+73 | ...&mut self, user: Address, amount...
+   |               ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+  --> src/contracts/staking.rs:90:31
+   |
+90 | ...&mut self, user: Address, amount...
+   |               ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/staking.rs:126:45
+    |
+126 | ...rds(&self, user: Address) -> u64 {
+    |               ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/staking.rs:138:38
+    |
+138 | ...nce(&self, user: Address) -> u64 {
+    |               ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `env`
+  --> src/contracts/governance.rs:27:9
+   |
+27 |         env: &Env,
+   |         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+  --> src/contracts/governance.rs:73:9
+   |
+73 |         env: Env,
+   |         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `proposer`
+  --> src/contracts/governance.rs:74:9
+   |
+74 |         proposer: Address,
+   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposer`
+
+warning: unused variable: `voter`
+   --> src/contracts/governance.rs:106:9
+    |
+106 |         voter: Address,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_voter`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:107:9
+    |
+107 |         proposal_id: u64,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `support`
+   --> src/contracts/governance.rs:108:9
+    |
+108 |         support: bool,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_support`
+
+warning: unused variable: `executor`
+   --> src/contracts/governance.rs:129:9
+    |
+129 |         executor: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_executor`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:130:9
+    |
+130 |         proposal_id: u64,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposer`
+   --> src/contracts/governance.rs:147:9
+    |
+147 |         proposer: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposer`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:148:9
+    |
+148 |         proposal_id: u64,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:161:32
+    |
+161 | ...&self, proposal_id: u64) -> Opt...
+    |           ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:182:39
+    |
+182 | ...&self, proposal_id: u64) -> bool {
+    |           ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `voter`
+   --> src/contracts/governance.rs:194:36
+    |
+194 | ...wer(&self, voter: Address) -> u...
+    |               ^^^^^ help: if this is intentional, prefix it with an underscore: `_voter`
+
+warning: unused variable: `delegator`
+   --> src/contracts/governance.rs:225:9
+    |
+225 |         delegator: Address,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegator`
+
+warning: unused variable: `delegatee`
+   --> src/contracts/governance.rs:226:9
+    |
+226 |         delegatee: Address,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegatee`
+
+warning: unused variable: `delegator`
+   --> src/contracts/governance.rs:238:34
+    |
+238 | ...n(&self, delegator: Address) ->...
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegator`
+
+warning: unused variable: `amount`
+   --> src/contracts/vault.rs:502:49
+    |
+502 | ...ex: u32, amount: u64) -> Result...
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `env`
+  --> src/contracts/flash_loan.rs:29:16
+   |
+29 | ...pub fn new(env: &Env, token: sor...
+   |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `params`
+  --> src/contracts/flash_loan.rs:77:9
+   |
+77 |         params: Bytes,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_params`
+
+warning: unused variable: `env`
+ --> src/utils/helpers.rs:8:25
+  |
+8 | ...te_address(env: &Env) -> Address {
+  |               ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `address`
+  --> src/utils/helpers.rs:28:26
+   |
+28 | ...o_string(address: &Address) -> S...
+   |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `initial_price_ratio`
+   --> src/utils/helpers.rs:148:5
+    |
+148 |     initial_price_ratio: f64,
+    |     ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_initial_price_ratio`
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `stellar-defi-toolkit` (lib) generated 68 warnings
+error: could not compile `stellar-defi-toolkit` (lib) due to 1 previous error; 68 warnings emitted

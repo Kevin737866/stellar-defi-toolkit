@@ -3,17 +3,16 @@
 //! Provides staking functionality for token holders to earn rewards
 //! on the Stellar blockchain.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
-use crate::types::token::TokenInfo;
+use soroban_sdk::{contract, Address, Env};
 use crate::utils::StellarClient;
 
 /// Staking contract for token staking and reward distribution
 #[contract]
 pub struct StakingContract {
     /// Staking token contract address
-    staking_token: String,
+    staking_token: soroban_sdk::String,
     /// Reward token contract address
-    reward_token: String,
+    reward_token: soroban_sdk::String,
     /// Total staked amount
     total_staked: u64,
     /// Reward rate per second
@@ -22,26 +21,33 @@ pub struct StakingContract {
     last_update_time: u64,
     /// Reward per token stored
     reward_per_token_stored: u64,
-    /// Contract address
-    address: Option<Address>,
 }
 
 impl StakingContract {
     /// Create a new staking contract
-    pub fn new(staking_token: String, reward_token: String, reward_rate: u64) -> Self {
+    pub fn new(_env: &Env, staking_token: soroban_sdk::String, rewards_token: soroban_sdk::String, reward_rate: u64) -> Self {
         Self {
             staking_token,
-            reward_token,
+            reward_token: rewards_token,
             total_staked: 0,
             reward_rate,
             last_update_time: 0,
             reward_per_token_stored: 0,
-            address: None,
         }
     }
 
+    /// Create from std string
+    pub fn new_std(env: &Env, staking_token: String, reward_token: String, reward_rate: u64) -> Self {
+        Self::new(
+            env,
+            soroban_sdk::String::from_str(env, &staking_token),
+            soroban_sdk::String::from_str(env, &reward_token),
+            reward_rate,
+        )
+    }
+
     /// Get staking contract information
-    pub fn get_info(&self) -> StakingInfo {
+    pub fn get_info(&self, _env: &Env) -> StakingInfo {
         StakingInfo {
             staking_token: self.staking_token.clone(),
             reward_token: self.reward_token.clone(),
@@ -53,14 +59,13 @@ impl StakingContract {
     }
 
     /// Deploy the staking contract to Stellar
-    pub async fn deploy(mut self, client: &StellarClient) -> anyhow::Result<String> {
+    pub async fn deploy(self, client: &StellarClient) -> anyhow::Result<String> {
         let contract_id = client.deploy_staking_contract(&self).await?;
-        self.address = Some(Address::from_contract_id(&contract_id));
+        // self.address = Some(Address::from_string(&contract_id)); // Address requires Env
         Ok(contract_id)
     }
 
-    /// Stake tokens
-    pub fn stake(&mut self, user: Address, amount: u64) -> Result<(), String> {
+    pub fn stake(&mut self, _env: &Env, _user: Address, amount: u64) -> Result<(), String> {
         if amount == 0 {
             return Err("Amount must be greater than 0".to_string());
         }
@@ -77,7 +82,7 @@ impl StakingContract {
     }
 
     /// Unstake tokens
-    pub fn unstake(&mut self, user: Address, amount: u64) -> Result<(), String> {
+    pub fn unstake(&mut self, _env: &Env, _user: Address, amount: u64) -> Result<(), String> {
         if amount == 0 {
             return Err("Amount must be greater than 0".to_string());
         }
@@ -99,7 +104,7 @@ impl StakingContract {
     }
 
     /// Claim rewards
-    pub fn claim_rewards(&mut self, user: Address) -> Result<u64, String> {
+    pub fn claim_rewards(&mut self, _env: &Env, _user: Address) -> Result<u64, String> {
         // In a real implementation, this would:
         // 1. Calculate user's pending rewards
         // 2. Update reward calculations
@@ -108,12 +113,12 @@ impl StakingContract {
         // 5. Emit claim event
 
         // For now, return a mock reward amount
-        let rewards = self.calculate_pending_rewards(user);
+        let rewards = self.calculate_pending_rewards(_user);
         Ok(rewards)
     }
 
     /// Calculate pending rewards for a user
-    pub fn calculate_pending_rewards(&self, user: Address) -> u64 {
+    pub fn calculate_pending_rewards(&self, _user: Address) -> u64 {
         // In a real implementation, this would:
         // 1. Get user's staked balance
         // 2. Get user's reward debt
@@ -125,7 +130,7 @@ impl StakingContract {
     }
 
     /// Get user's staked balance
-    pub fn get_staked_balance(&self, user: Address) -> u64 {
+    pub fn get_staked_balance(&self, _user: Address) -> u64 {
         // In a real implementation, this would query the contract state
         // For now, return a placeholder
         0
@@ -167,7 +172,7 @@ impl StakingContract {
     }
 
     /// Emergency withdraw (without rewards)
-    pub fn emergency_withdraw(&mut self, user: Address) -> Result<u64, String> {
+    pub fn emergency_withdraw(&mut self, _user: Address) -> Result<u64, String> {
         // In a real implementation, this would:
         // 1. Get user's staked balance
         // 2. Transfer tokens back to user
@@ -175,7 +180,7 @@ impl StakingContract {
         // 4. Update total staked amount
         // 5. Emit emergency withdraw event
 
-        let user_balance = self.get_staked_balance(user);
+        let user_balance = self.get_staked_balance(_user);
         if user_balance == 0 {
             return Err("No tokens staked".to_string());
         }
@@ -190,10 +195,11 @@ impl StakingContract {
 }
 
 /// Staking contract information
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub struct StakingInfo {
-    pub staking_token: String,
-    pub reward_token: String,
+    pub staking_token: soroban_sdk::String,
+    pub reward_token: soroban_sdk::String,
     pub total_staked: u64,
     pub reward_rate: u64,
     pub last_update_time: u64,
@@ -203,91 +209,105 @@ pub struct StakingInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{Env, Address};
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_staking_contract_creation() {
-        let contract = StakingContract::new(
+        let env = Env::default();
+        let contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000, // 1000 rewards per second
         );
 
-        assert_eq!(contract.staking_token, "STAKING_TOKEN");
-        assert_eq!(contract.reward_token, "REWARD_TOKEN");
+        assert_eq!(contract.staking_token, soroban_sdk::String::from_str(&env, "STAKING_TOKEN"));
+        assert_eq!(contract.reward_token, soroban_sdk::String::from_str(&env, "REWARD_TOKEN"));
         assert_eq!(contract.reward_rate, 1000);
         assert_eq!(contract.total_staked, 0);
     }
 
     #[test]
     fn test_stake() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000,
         );
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
 
-        contract.stake(user, 5000).unwrap();
+        contract.stake(&env, user, 5000).unwrap();
         assert_eq!(contract.total_staked, 5000);
     }
 
     #[test]
     fn test_unstake() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000,
         );
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
 
         // First stake some tokens
-        contract.stake(user, 5000).unwrap();
+        contract.stake(&env, user.clone(), 5000).unwrap();
         assert_eq!(contract.total_staked, 5000);
 
         // Then unstake
-        contract.unstake(user, 2000).unwrap();
+        contract.unstake(&env, user, 2000).unwrap();
         assert_eq!(contract.total_staked, 3000);
     }
 
     #[test]
     fn test_invalid_stake_amount() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000,
         );
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
 
-        let result = contract.stake(user, 0);
+        let result = contract.stake(&env, user, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Amount must be greater than 0");
     }
 
     #[test]
     fn test_insufficient_unstake() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000,
         );
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
 
-        let result = contract.unstake(user, 1000);
+        let result = contract.unstake(&env, user, 1000);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Insufficient staked amount");
     }
 
     #[test]
     fn test_apy_calculation() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000, // 1000 rewards per second
         );
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
 
         // Stake 1,000,000 tokens
-        contract.stake(user, 1000000).unwrap();
+        contract.stake(&env, user, 1000000).unwrap();
 
         let apy = contract.get_apy();
         let expected_apy = (1000.0 * 365.0 * 24.0 * 60.0 * 60.0 / 1000000.0) * 100.0;
@@ -296,7 +316,9 @@ mod tests {
 
     #[test]
     fn test_update_reward_rate() {
-        let mut contract = StakingContract::new(
+        let env = Env::default();
+        let mut contract = StakingContract::new_std(
+            &env,
             "STAKING_TOKEN".to_string(),
             "REWARD_TOKEN".to_string(),
             1000,

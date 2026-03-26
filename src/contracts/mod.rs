@@ -11,6 +11,7 @@ pub mod liquidity_pool;
 pub mod staking;
 pub mod governance;
 pub mod vault;
+pub mod flash_loan;
 
 // Re-export main contract types
 pub use token::TokenContract;
@@ -18,3 +19,4 @@ pub use liquidity_pool::LiquidityPoolContract;
 pub use staking::StakingContract;
 pub use governance::GovernanceContract;
 pub use vault::YieldVaultContract;
+pub use flash_loan::FlashLoanContract;

@@ -14,23 +14,16 @@
 //! - Strategy switching logic
 //! - Harvest and reinvest functions
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
-use crate::types::vault::{
-    VaultInfo, VaultStrategy, StrategyType, VaultStats, HarvestResult, DepositResult,
-    WithdrawResult, PerformanceFeeConfig,
+use soroban_sdk::{contract, Address, Env, Vec};
+use soroban_sdk::testutils::Address as _;
+use crate::types::{
+    VaultInfo, VaultStrategy, VaultStats, HarvestResult, DepositResult,
+    WithdrawResult,
 };
-use crate::utils::StellarClient;
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
-const KEY_ADMIN: &str = "admin";
-const KEY_PAUSED: &str = "paused";
-const KEY_TOTAL_SHARES: &str = "total_shares";
-const KEY_TOTAL_ASSETS: &str = "total_assets";
-const KEY_PERFORMANCE_FEE_BPS: &str = "perf_fee_bps";
-const KEY_TREASURY: &str = "treasury";
-const KEY_LAST_HARVEST: &str = "last_harvest";
-const KEY_ACCUMULATED_FEES: &str = "acc_fees";
+// Storage keys are not used as fields are stored directly in the contract struct
 
 /// Default performance fee: 10% (1000 bps)
 const DEFAULT_PERFORMANCE_FEE_BPS: u32 = 1000;
@@ -45,42 +38,42 @@ const MIN_HARVEST_INTERVAL: u64 = 3600;
 #[contract]
 pub struct YieldVaultContract {
     /// Underlying asset token address (what users deposit)
-    asset_token: String,
+    pub asset_token: Address,
     /// Vault share token address (SEP-41 compliant)
-    share_token: String,
+    pub share_token: Address,
     /// Total shares issued
-    total_shares: u64,
+    pub total_shares: u64,
     /// Total assets under management
-    total_assets: u64,
+    pub total_assets: u64,
     /// Active strategies
-    strategies: Vec<VaultStrategy>,
+    pub strategies: Vec<VaultStrategy>,
     /// Active strategy index
-    active_strategy_index: usize,
+    pub active_strategy_index: u32,
     /// Performance fee in basis points
-    performance_fee_bps: u32,
+    pub performance_fee_bps: u32,
     /// Treasury address for fee collection
-    treasury: Option<Address>,
+    pub treasury: Option<Address>,
     /// Admin address
-    admin: Option<Address>,
+    pub admin: Option<Address>,
     /// Whether the vault is paused
-    paused: bool,
+    pub paused: bool,
     /// Last harvest timestamp
-    last_harvest: u64,
+    pub last_harvest: u64,
     /// Accumulated uncollected fees
-    accumulated_fees: u64,
+    pub accumulated_fees: u64,
     /// Contract address
-    address: Option<Address>,
+    pub address: Option<Address>,
 }
 
 impl YieldVaultContract {
     /// Create a new yield vault
-    pub fn new(asset_token: String, share_token: String) -> Self {
+    pub fn new(env: &Env, asset_token: Address, share_token: Address) -> Self {
         Self {
             asset_token,
             share_token,
             total_shares: 0,
             total_assets: 0,
-            strategies: Vec::new(),
+            strategies: Vec::new(env),
             active_strategy_index: 0,
             performance_fee_bps: DEFAULT_PERFORMANCE_FEE_BPS,
             treasury: None,
@@ -90,6 +83,15 @@ impl YieldVaultContract {
             accumulated_fees: 0,
             address: None,
         }
+    }
+
+    /// Create from std string
+    pub fn new_std(env: &Env, _asset_token: String, _share_token: String) -> Self {
+        Self::new(
+            env,
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
+        )
     }
 
     /// Initialize vault with admin and treasury
@@ -113,57 +115,56 @@ impl YieldVaultContract {
 
     // ─── Strategy Management ──────────────────────────────────────────────────
 
-    /// Add a yield strategy to the vault
-    pub fn add_strategy(&mut self, strategy: VaultStrategy) -> Result<usize, String> {
+    pub fn add_strategy(&mut self, strategy: VaultStrategy) -> Result<u32, String> {
         self.require_admin()?;
         if self.strategies.len() >= 10 {
             return Err("Maximum of 10 strategies allowed".to_string());
         }
-        self.strategies.push(strategy);
+        self.strategies.push_back(strategy);
         Ok(self.strategies.len() - 1)
     }
 
     /// Switch to a different strategy (admin only)
     ///
     /// Withdraws all funds from the current strategy, then deposits into the new one.
-    pub fn switch_strategy(&mut self, new_index: usize) -> Result<(), String> {
+    pub fn switch_strategy(&mut self, new_index: u32) -> Result<(), String> {
         self.require_admin()?;
         self.require_not_paused()?;
-
+ 
         if new_index >= self.strategies.len() {
             return Err("Strategy index out of bounds".to_string());
         }
-
+ 
         if new_index == self.active_strategy_index {
             return Err("Already using this strategy".to_string());
         }
-
+ 
         // 1. Harvest pending rewards from current strategy before switching
         let _ = self.harvest_from_strategy(self.active_strategy_index);
-
+ 
         // 2. Withdraw all assets from current strategy
         let withdrawn = self.withdraw_from_strategy(self.active_strategy_index, self.total_assets)?;
-
+ 
         // 3. Deposit into new strategy
         self.deposit_into_strategy(new_index, withdrawn)?;
-
+ 
         self.active_strategy_index = new_index;
         Ok(())
     }
 
     /// Get the best strategy by estimated APY
-    pub fn get_optimal_strategy_index(&self) -> usize {
+    pub fn get_optimal_strategy_index(&self) -> u32 {
         if self.strategies.is_empty() {
             return 0;
         }
 
         let mut best_index = 0;
-        let mut best_apy = 0.0_f64;
+        let mut best_apy = 0;
 
         for (i, strategy) in self.strategies.iter().enumerate() {
             if strategy.estimated_apy > best_apy {
                 best_apy = strategy.estimated_apy;
-                best_index = i;
+                best_index = i as u32;
             }
         }
 
@@ -186,15 +187,21 @@ impl YieldVaultContract {
             .strategies
             .get(self.active_strategy_index)
             .map(|s| s.estimated_apy)
-            .unwrap_or(0.0);
+            .unwrap_or(0);
 
         let optimal_apy = self
             .strategies
             .get(optimal)
             .map(|s| s.estimated_apy)
-            .unwrap_or(0.0);
+            .unwrap_or(0);
 
-        let improvement_bps = ((optimal_apy - current_apy) / current_apy * 10000.0) as u32;
+        let improvement_bps = if current_apy > 0 {
+            (optimal_apy.saturating_sub(current_apy) as u64 * 10000 / current_apy as u64) as u32
+        } else if optimal_apy > 0 {
+            10000 // Infinite improvement
+        } else {
+            0
+        };
 
         if improvement_bps >= threshold_bps {
             self.switch_strategy(optimal)?;
@@ -390,17 +397,14 @@ impl YieldVaultContract {
     }
 
     /// Get vault info snapshot
-    pub fn get_info(&self) -> VaultInfo {
+    pub fn get_info(&self, _env: &Env) -> VaultInfo {
         VaultInfo {
             asset_token: self.asset_token.clone(),
             share_token: self.share_token.clone(),
             total_shares: self.total_shares,
             total_assets: self.total_assets,
-            share_price: self.get_share_price(),
-            active_strategy: self
-                .strategies
-                .get(self.active_strategy_index)
-                .cloned(),
+            share_price: (self.get_share_price() * 10000.0) as u32,
+            active_strategy_index: if self.strategies.len() > 0 { self.active_strategy_index as i32 } else { -1 },
             strategy_count: self.strategies.len(),
             performance_fee_bps: self.performance_fee_bps,
             paused: self.paused,
@@ -414,13 +418,13 @@ impl YieldVaultContract {
             .strategies
             .get(self.active_strategy_index)
             .map(|s| s.estimated_apy)
-            .unwrap_or(0.0);
+            .unwrap_or(0);
 
         VaultStats {
             total_assets: self.total_assets,
             total_shares: self.total_shares,
             share_price: self.get_share_price(),
-            current_apy,
+            current_apy: current_apy as f64,
             accumulated_fees: self.accumulated_fees,
             last_harvest: self.last_harvest,
             paused: self.paused,
@@ -487,7 +491,7 @@ impl YieldVaultContract {
     }
 
     /// Simulate depositing into a strategy (cross-contract call in production)
-    fn deposit_into_strategy(&self, index: usize, amount: u64) -> Result<(), String> {
+    fn deposit_into_strategy(&self, index: u32, _amount: u64) -> Result<(), String> {
         if index >= self.strategies.len() {
             return Err("Strategy index out of bounds".to_string());
         }
@@ -497,7 +501,7 @@ impl YieldVaultContract {
     }
 
     /// Simulate withdrawing from a strategy (cross-contract call in production)
-    fn withdraw_from_strategy(&self, index: usize, amount: u64) -> Result<u64, String> {
+    fn withdraw_from_strategy(&self, index: u32, amount: u64) -> Result<u64, String> {
         if index >= self.strategies.len() {
             return Err("Strategy index out of bounds".to_string());
         }
@@ -507,17 +511,17 @@ impl YieldVaultContract {
     }
 
     /// Simulate harvesting rewards from a strategy (cross-contract call in production)
-    fn harvest_from_strategy(&self, index: usize) -> Result<u64, String> {
+    fn harvest_from_strategy(&self, index: u32) -> Result<u64, String> {
         if index >= self.strategies.len() {
             return Ok(0);
         }
-        let strategy = &self.strategies[index];
+        let strategy = self.strategies.get(index).unwrap();
         // Estimate rewards based on APY and time since last harvest
         let elapsed = self
             .get_current_timestamp()
             .saturating_sub(self.last_harvest);
         let annual_rewards =
-            (self.total_assets as f64 * strategy.estimated_apy / 100.0) as u64;
+            (self.total_assets as f64 * (strategy.estimated_apy as f64 / 10000.0)) as u64;
         let rewards = annual_rewards
             .checked_mul(elapsed)
             .unwrap_or(0)
@@ -551,23 +555,24 @@ impl YieldVaultContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::vault::{VaultStrategy, StrategyType};
+    use crate::types::{VaultStrategy, StrategyType};
     use soroban_sdk::{Address, Env};
+    use soroban_sdk::testutils::Address as _;
 
-    fn make_vault() -> YieldVaultContract {
-        let admin = Address::generate(&Env::default());
-        let treasury = Address::generate(&Env::default());
-        YieldVaultContract::new("ASSET_TOKEN".to_string(), "VAULT_SHARE".to_string())
+    fn make_vault(env: &Env) -> YieldVaultContract {
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        YieldVaultContract::new_std(env, "ASSET_TOKEN".to_string(), "VAULT_SHARE".to_string())
             .initialize(admin, treasury, DEFAULT_PERFORMANCE_FEE_BPS)
             .unwrap()
     }
 
-    fn make_strategy(name: &str, apy: f64) -> VaultStrategy {
+    fn make_strategy(env: &Env, name: &str, apy: f64) -> VaultStrategy {
         VaultStrategy {
-            name: name.to_string(),
-            contract_address: format!("CONTRACT_{}", name),
+            name: soroban_sdk::Symbol::new(env, name),
+            contract_address: Address::generate(&env),
             strategy_type: StrategyType::LiquidityPool,
-            estimated_apy: apy,
+            estimated_apy: (apy * 100.0) as u32,
             allocated_amount: 0,
             active: true,
         }
@@ -575,9 +580,8 @@ mod tests {
 
     #[test]
     fn test_vault_creation() {
-        let vault = make_vault();
-        assert_eq!(vault.asset_token, "ASSET_TOKEN");
-        assert_eq!(vault.share_token, "VAULT_SHARE");
+        let env = Env::default();
+        let vault = make_vault(&env);
         assert_eq!(vault.total_shares, 0);
         assert_eq!(vault.total_assets, 0);
         assert_eq!(vault.performance_fee_bps, DEFAULT_PERFORMANCE_FEE_BPS);
@@ -586,8 +590,9 @@ mod tests {
 
     #[test]
     fn test_deposit_first() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
 
         let result = vault.deposit(user, 1_000_000).unwrap();
         assert_eq!(result.amount_deposited, 1_000_000);
@@ -598,8 +603,9 @@ mod tests {
 
     #[test]
     fn test_deposit_subsequent_share_price() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
 
         vault.deposit(user.clone(), 1_000_000).unwrap();
         // Simulate yield: total_assets grows without new shares
@@ -613,8 +619,9 @@ mod tests {
 
     #[test]
     fn test_withdraw() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
 
         vault.deposit(user.clone(), 1_000_000).unwrap();
         let result = vault.withdraw(user, 500_000).unwrap();
@@ -627,33 +634,37 @@ mod tests {
 
     #[test]
     fn test_withdraw_zero_fails() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
         vault.deposit(user.clone(), 1_000_000).unwrap();
         assert!(vault.withdraw(user, 0).is_err());
     }
 
     #[test]
     fn test_withdraw_excess_fails() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
         vault.deposit(user.clone(), 1_000_000).unwrap();
         assert!(vault.withdraw(user, 2_000_000).is_err());
     }
 
     #[test]
     fn test_add_strategy() {
-        let mut vault = make_vault();
-        let idx = vault.add_strategy(make_strategy("LP_STRATEGY", 12.5)).unwrap();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let idx = vault.add_strategy(make_strategy(&env, "LP_STRATEGY", 12.5)).unwrap();
         assert_eq!(idx, 0);
         assert_eq!(vault.strategies.len(), 1);
     }
 
     #[test]
     fn test_switch_strategy() {
-        let mut vault = make_vault();
-        vault.add_strategy(make_strategy("STAKING", 8.0)).unwrap();
-        vault.add_strategy(make_strategy("LP", 15.0)).unwrap();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        vault.add_strategy(make_strategy(&env, "STAKING", 8.0)).unwrap();
+        vault.add_strategy(make_strategy(&env, "LP", 15.0)).unwrap();
 
         vault.switch_strategy(1).unwrap();
         assert_eq!(vault.active_strategy_index, 1);
@@ -661,50 +672,56 @@ mod tests {
 
     #[test]
     fn test_switch_same_strategy_fails() {
-        let mut vault = make_vault();
-        vault.add_strategy(make_strategy("STAKING", 8.0)).unwrap();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        vault.add_strategy(make_strategy(&env, "STAKING", 8.0)).unwrap();
         assert!(vault.switch_strategy(0).is_err());
     }
 
     #[test]
     fn test_get_optimal_strategy() {
-        let mut vault = make_vault();
-        vault.add_strategy(make_strategy("LOW", 5.0)).unwrap();
-        vault.add_strategy(make_strategy("MID", 10.0)).unwrap();
-        vault.add_strategy(make_strategy("HIGH", 20.0)).unwrap();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        vault.add_strategy(make_strategy(&env, "LOW", 5.0)).unwrap();
+        vault.add_strategy(make_strategy(&env, "MID", 10.0)).unwrap();
+        vault.add_strategy(make_strategy(&env, "HIGH", 20.0)).unwrap();
 
         assert_eq!(vault.get_optimal_strategy_index(), 2);
     }
 
     #[test]
     fn test_performance_fee_calculation() {
-        let vault = make_vault(); // 1000 bps = 10%
+        let env = Env::default();
+        let vault = make_vault(&env); // 1000 bps = 10%
         let fee = vault.calculate_performance_fee(100_000);
         assert_eq!(fee, 10_000); // 10% of 100_000
     }
 
     #[test]
     fn test_set_performance_fee() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         vault.set_performance_fee(500).unwrap(); // 5%
         assert_eq!(vault.performance_fee_bps, 500);
     }
 
     #[test]
     fn test_set_performance_fee_exceeds_max() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         assert!(vault.set_performance_fee(5000).is_err()); // 50% > 30% max
     }
 
     #[test]
     fn test_pause_unpause() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
 
         vault.pause().unwrap();
         assert!(vault.paused);
 
         // Operations should fail while paused
-        let user = Address::generate(&Env::default());
+        let user = Address::generate(&env);
         assert!(vault.deposit(user.clone(), 1000).is_err());
         assert!(vault.withdraw(user, 1000).is_err());
         assert!(vault.harvest().is_err());
@@ -715,27 +732,31 @@ mod tests {
 
     #[test]
     fn test_double_pause_fails() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         vault.pause().unwrap();
         assert!(vault.pause().is_err());
     }
 
     #[test]
     fn test_unpause_when_not_paused_fails() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         assert!(vault.unpause().is_err());
     }
 
     #[test]
     fn test_share_price_initial() {
-        let vault = make_vault();
+        let env = Env::default();
+        let vault = make_vault(&env);
         assert_eq!(vault.get_share_price(), 1.0);
     }
 
     #[test]
     fn test_share_price_after_yield() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
         vault.deposit(user, 1_000_000).unwrap();
         vault.total_assets = 1_200_000; // 20% yield
         assert!((vault.get_share_price() - 1.2).abs() < f64::EPSILON);
@@ -743,8 +764,9 @@ mod tests {
 
     #[test]
     fn test_preview_deposit() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
         vault.deposit(user, 1_000_000).unwrap();
         vault.total_assets = 1_100_000;
 
@@ -754,8 +776,9 @@ mod tests {
 
     #[test]
     fn test_preview_withdraw() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
         vault.deposit(user, 1_000_000).unwrap();
 
         let assets = vault.preview_withdraw(500_000);
@@ -764,21 +787,24 @@ mod tests {
 
     #[test]
     fn test_collect_fees_no_fees() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         assert!(vault.collect_fees().is_err());
     }
 
     #[test]
     fn test_emergency_exit_no_strategy() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         assert!(vault.emergency_exit().is_err());
     }
 
     #[test]
     fn test_emergency_exit_with_strategy() {
-        let mut vault = make_vault();
-        let user = Address::generate(&Env::default());
-        vault.add_strategy(make_strategy("STAKING", 10.0)).unwrap();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
+        let user = Address::generate(&env);
+        vault.add_strategy(make_strategy(&env, "STAKING", 10.0)).unwrap();
         vault.deposit(user, 1_000_000).unwrap();
 
         let withdrawn = vault.emergency_exit().unwrap();
@@ -787,20 +813,22 @@ mod tests {
 
     #[test]
     fn test_max_strategies() {
-        let mut vault = make_vault();
+        let env = Env::default();
+        let mut vault = make_vault(&env);
         for i in 0..10 {
             vault
-                .add_strategy(make_strategy(&format!("S{}", i), i as f64))
+                .add_strategy(make_strategy(&env, &format!("S{}", i), i as f64))
                 .unwrap();
         }
-        assert!(vault.add_strategy(make_strategy("S11", 99.0)).is_err());
+        assert!(vault.add_strategy(make_strategy(&env, "S11", 99.0)).is_err());
     }
 
     #[test]
     fn test_initialize_fee_too_high() {
-        let admin = Address::generate(&Env::default());
-        let treasury = Address::generate(&Env::default());
-        let result = YieldVaultContract::new("A".to_string(), "B".to_string())
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        let result = YieldVaultContract::new_std(&env, "A".to_string(), "B".to_string())
             .initialize(admin, treasury, 5000); // 50% > 30% max
         assert!(result.is_err());
     }

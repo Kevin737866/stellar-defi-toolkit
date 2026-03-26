@@ -1,25 +1,31 @@
 //! Example: Deploying a new token contract
 
+use soroban_sdk::Env;
 use stellar_defi_toolkit::{TokenContract, StellarClient};
 use tokio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize the Soroban environment
+    let env = Env::default();
+    
     // Initialize the Stellar client
     let client = StellarClient::new().await?;
     
     // Create a new token
-    let token = TokenContract::new(
+    let token = TokenContract::new_std(
+        &env,
         "Example Token".to_string(),
         "EXMPL".to_string(),
         1000000000, // 1 billion tokens with 7 decimals
     );
     
     println!("🪙 Creating token contract...");
-    println!("Name: {}", token.get_info().name);
-    println!("Symbol: {}", token.get_info().symbol);
-    println!("Initial Supply: {}", token.get_info().total_supply);
-    println!("Decimals: {}", token.get_info().decimals);
+    let info = token.get_info(&env);
+    println!("Name: {:?}", info.name);
+    println!("Symbol: {:?}", info.symbol);
+    println!("Initial Supply: {}", info.total_supply);
+    println!("Decimals: {}", info.decimals);
     
     // Deploy the token contract
     println!("\n🚀 Deploying token contract...");

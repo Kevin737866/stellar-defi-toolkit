@@ -1,44 +1,46 @@
 //! Token-related type definitions
 
-use serde::{Deserialize, Serialize};
-use soroban_sdk::Address;
+// use serde::{Deserialize, Serialize};
+use soroban_sdk::{Address, Env};
 
 /// Token information structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone)]
 pub struct TokenInfo {
     /// Token name
-    pub name: String,
+    pub name: soroban_sdk::String,
     /// Token symbol
-    pub symbol: String,
+    pub symbol: soroban_sdk::String,
     /// Total supply
     pub total_supply: u64,
     /// Number of decimal places
-    pub decimals: u8,
+    pub decimals: u32,
 }
 
 /// Token metadata for contract deployment
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone)]
 pub struct TokenMetadata {
     /// Token name
-    pub name: String,
+    pub name: soroban_sdk::String,
     /// Token symbol
-    pub symbol: String,
+    pub symbol: soroban_sdk::String,
     /// Token decimals
-    pub decimals: u8,
+    pub decimals: u32,
     /// Initial supply
     pub initial_supply: u64,
     /// Token admin address
     pub admin: Option<Address>,
     /// Token description
-    pub description: Option<String>,
+    pub description: Option<soroban_sdk::String>,
     /// Token logo URL
-    pub logo_url: Option<String>,
+    pub logo_url: Option<soroban_sdk::String>,
     /// Token website
-    pub website: Option<String>,
+    pub website: Option<soroban_sdk::String>,
 }
 
 /// Token balance information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TokenBalance {
     /// Token contract address
     pub contract_id: String,
@@ -51,7 +53,7 @@ pub struct TokenBalance {
 }
 
 /// Token transfer event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TokenTransfer {
     /// From address
     pub from: Address,
@@ -68,7 +70,7 @@ pub struct TokenTransfer {
 }
 
 /// Token approval event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TokenApproval {
     /// Owner address
     pub owner: Address,
@@ -85,7 +87,7 @@ pub struct TokenApproval {
 }
 
 /// Token mint event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TokenMint {
     /// Recipient address
     pub to: Address,
@@ -100,7 +102,7 @@ pub struct TokenMint {
 }
 
 /// Token burn event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TokenBurn {
     /// Burner address
     pub from: Address,
@@ -114,27 +116,14 @@ pub struct TokenBurn {
     pub timestamp: u64,
 }
 
-impl Default for TokenMetadata {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            symbol: String::new(),
-            decimals: 7, // Stellar standard
-            initial_supply: 0,
-            admin: None,
-            description: None,
-            logo_url: None,
-            website: None,
-        }
-    }
-}
+// Default removed as soroban_sdk::String requires Env
 
 impl TokenMetadata {
     /// Create new token metadata
-    pub fn new(name: String, symbol: String, initial_supply: u64) -> Self {
+    pub fn new(env: &Env, name: String, symbol: String, initial_supply: u64) -> Self {
         Self {
-            name,
-            symbol,
+            name: soroban_sdk::String::from_str(env, &name),
+            symbol: soroban_sdk::String::from_str(env, &symbol),
             decimals: 7,
             initial_supply,
             admin: None,
@@ -151,20 +140,20 @@ impl TokenMetadata {
     }
 
     /// Set token description
-    pub fn with_description(mut self, description: String) -> Self {
-        self.description = Some(description);
+    pub fn with_description(mut self, env: &Env, description: String) -> Self {
+        self.description = Some(soroban_sdk::String::from_str(env, &description));
         self
     }
 
     /// Set token logo URL
-    pub fn with_logo_url(mut self, logo_url: String) -> Self {
-        self.logo_url = Some(logo_url);
+    pub fn with_logo_url(mut self, env: &Env, logo_url: String) -> Self {
+        self.logo_url = Some(soroban_sdk::String::from_str(env, &logo_url));
         self
     }
 
     /// Set token website
-    pub fn with_website(mut self, website: String) -> Self {
-        self.website = Some(website);
+    pub fn with_website(mut self, env: &Env, website: String) -> Self {
+        self.website = Some(soroban_sdk::String::from_str(env, &website));
         self
     }
 

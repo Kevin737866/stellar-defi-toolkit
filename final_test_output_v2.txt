@@ -1,0 +1,59 @@
+   Compiling stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+error[E0277]: the trait bound `ScVal: TryFrom<&...>` is not satisfied
+  --> src/types/vault.rs:30:1
+   |
+30 | #[soroban_sdk::contracttype]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `From<VaultStrategy>` is not implemented for `soroban_sdk::xdr::ScVal`
+   = help: the following other types implement trait `From<T>`:
+             `&soroban_sdk::xdr::ScVal` implements `From<ScValObjRef<'_>>`
+             `soroban_sdk::xdr::ScVal` implements `From<&()>`
+             `soroban_sdk::xdr::ScVal` implements `From<&bool>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i128>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i32>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i64>`
+             `soroban_sdk::xdr::ScVal` implements `From<&soroban_sdk::Address>`
+             `soroban_sdk::xdr::ScVal` implements `From<&soroban_sdk::Bytes>`
+           and 36 others
+   = note: required for `VaultStrategy` to implement `Into<ScVal>`
+   = note: required for `soroban_sdk::xdr::ScVal` to implement `From<&Option<...>>`
+   = note: 1 redundant requirement hidden
+   = note: required for `&Option<...>` to implement `Into<ScVal>`
+   = note: required for `soroban_sdk::xdr::ScVal` to implement `TryFrom<&Option<...>>`
+   = note: required for `&Option<...>` to implement `TryInto<ScVal>`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-a22c4504e01fd6c0.long-type-7754268958266386547.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the attribute macro `soroban_sdk::contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `ScVal: TryFrom<&...>` is not satisfied
+  --> src/types/vault.rs:30:1
+   |
+30 | #[soroban_sdk::contracttype]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `From<VaultStrategy>` is not implemented for `soroban_sdk::xdr::ScVal`
+   = help: the following other types implement trait `From<T>`:
+             `&soroban_sdk::xdr::ScVal` implements `From<ScValObjRef<'_>>`
+             `soroban_sdk::xdr::ScVal` implements `From<&()>`
+             `soroban_sdk::xdr::ScVal` implements `From<&bool>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i128>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i32>`
+             `soroban_sdk::xdr::ScVal` implements `From<&i64>`
+             `soroban_sdk::xdr::ScVal` implements `From<&soroban_sdk::Address>`
+             `soroban_sdk::xdr::ScVal` implements `From<&soroban_sdk::Bytes>`
+           and 36 others
+   = note: required for `VaultStrategy` to implement `Into<ScVal>`
+   = note: required for `soroban_sdk::xdr::ScVal` to implement `From<&Option<...>>`
+   = note: 1 redundant requirement hidden
+   = note: required for `&Option<...>` to implement `Into<ScVal>`
+   = note: required for `soroban_sdk::xdr::ScVal` to implement `TryFrom<&Option<...>>`
+   = note: required for `&Option<...>` to implement `TryInto<ScVal>`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-d36d312387ca979e.long-type-1270598564096855009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the attribute macro `soroban_sdk::contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `stellar-defi-toolkit` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `stellar-defi-toolkit` (lib test) due to 1 previous error

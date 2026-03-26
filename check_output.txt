@@ -1,0 +1,3778 @@
+   Compiling serde_json v1.0.149
+   Compiling serde v1.0.228
+   Compiling darling_macro v0.23.0
+    Checking hex v0.4.3
+    Checking elliptic-curve v0.13.8
+    Checking ppv-lite86 v0.2.21
+    Checking idna_adapter v1.2.1
+    Checking openssl v0.10.76
+    Checking soroban-wasmi v0.31.1-soroban.20.0.1
+    Checking tracing v0.1.44
+    Checking tokio-util v0.7.18
+   Compiling wasmparser v0.116.1
+    Checking ed25519 v2.2.3
+    Checking aho-corasick v1.1.4
+    Checking keccak v0.1.6
+    Checking try-lock v0.2.5
+    Checking idna v1.1.0
+    Checking openssl-probe v0.2.1
+    Checking simd-adler32 v0.3.8
+    Checking ethnum v1.5.2
+    Checking utf8parse v0.2.2
+   Compiling cfg-if v1.0.4
+    Checking regex-syntax v0.8.10
+   Compiling base64 v0.13.1
+    Checking slab v0.4.12
+    Checking adler2 v2.0.1
+   Compiling darling v0.23.0
+    Checking ecdsa v0.16.9
+    Checking primeorder v0.13.6
+   Compiling cpufeatures v0.2.17
+   Compiling serde_with_macros v3.18.0
+   Compiling soroban-env-host v21.2.1
+    Checking rand_chacha v0.3.1
+    Checking static_assertions v1.1.0
+   Compiling sha2 v0.10.9
+    Checking miniz_oxide v0.8.9
+    Checking url v2.5.8
+    Checking anstyle-parse v1.0.0
+    Checking h2 v0.3.27
+    Checking rand v0.8.5
+    Checking sha3 v0.10.8
+    Checking k256 v0.13.4
+    Checking p256 v0.13.2
+    Checking ed25519-dalek v2.2.0
+    Checking want v0.3.1
+    Checking libsodium-sys v0.2.7
+    Checking num-bigint v0.3.3
+   Compiling crate-git-revision v0.0.6
+   Compiling darling_macro v0.20.11
+    Checking crc32fast v1.5.0
+    Checking rustls-webpki v0.103.10
+    Checking httparse v1.10.1
+    Checking http-body v0.4.6
+    Checking webpki-roots v1.0.6
+    Checking futures-channel v0.3.32
+    Checking socket2 v0.5.10
+    Checking is_terminal_polyfill v1.70.2
+    Checking tower-service v0.3.3
+    Checking base64 v0.11.0
+    Checking httpdate v1.0.3
+    Checking anstyle v1.0.14
+    Checking colorchoice v1.0.5
+    Checking arrayvec v0.7.6
+    Checking iana-time-zone v0.1.65
+    Checking anstyle-query v1.1.5
+   Compiling stellar-strkey v0.0.8
+   Compiling stellar-xdr v21.2.0
+   Compiling soroban-env-common v21.2.1
+   Compiling soroban-sdk-macros v21.7.7
+    Checking json v0.12.4
+    Checking hex-literal v0.4.1
+    Checking rustls v0.23.37
+    Checking rust_decimal v1.40.0
+   Compiling serde_with v3.18.0
+    Checking anstream v1.0.0
+    Checking chrono v0.4.44
+   Compiling darling v0.20.11
+    Checking webpki-roots v0.26.11
+    Checking flate2 v1.1.9
+    Checking sodiumoxide v0.2.6
+    Checking num-bigint v0.2.6
+    Checking xdr-rs-serialize v0.2.5
+    Checking crc16 v0.4.0
+   Compiling soroban-sdk v21.7.7
+    Checking base64 v0.21.7
+    Checking regex-automata v0.4.14
+    Checking num-rational v0.3.2
+    Checking crc-catalog v2.4.0
+    Checking clap_lex v1.1.0
+    Checking byteorder v1.5.0
+    Checking strsim v0.11.1
+    Checking bitflags v1.3.2
+    Checking base64 v0.22.1
+    Checking ryu v1.0.23
+    Checking rustls-pemfile v1.0.4
+    Checking crc v3.4.0
+    Checking clap_builder v4.6.0
+    Checking serde_urlencoded v0.7.1
+    Checking getrandom v0.4.2
+    Checking anyhow v1.0.102
+    Checking toml v0.5.11
+    Checking is-terminal v0.4.17
+    Checking encoding_rs v0.8.35
+    Checking mime v0.3.17
+    Checking sync_wrapper v0.1.2
+    Checking stellar-base v0.5.0
+    Checking nacl v0.5.3
+    Checking humantime v2.3.0
+    Checking ipnet v2.12.0
+    Checking data-encoding v2.10.0
+    Checking termcolor v1.4.1
+    Checking uuid v1.22.0
+    Checking hyper v0.14.32
+    Checking native-tls v0.2.18
+    Checking tokio-native-tls v0.3.1
+    Checking clap v4.6.0
+    Checking regex v1.12.3
+    Checking ureq v2.12.1
+    Checking env_logger v0.10.2
+    Checking hyper-tls v0.5.0
+    Checking reqwest v0.11.27
+    Checking stellar_sdk v0.1.4
+   Compiling soroban-spec v21.7.7
+   Compiling soroban-spec-rust v21.7.7
+   Compiling soroban-env-macros v21.2.1
+    Checking soroban-ledger-snapshot v21.7.7
+    Checking stellar-defi-toolkit v0.1.0 (/home/phantom-call/stellar-defi-toolkit)
+error[E0432]: unresolved imports `stellar_sdk::Network`, `stellar_sdk::PublicKey`, `stellar_sdk::Transaction`, `stellar_sdk::TransactionBuilder`
+ --> src/utils/client.rs:4:19
+  |
+4 | ...::{Network, PublicKey, Transaction, TransactionBuilder};
+  |       ^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^ no `TransactionBuilder` in the root
+  |       |        |          |
+  |       |        |          no `Transaction` in the root
+  |       |        no `PublicKey` in the root
+  |       no `Network` in the root
+  |
+  = help: consider importing one of these items instead:
+          soroban_sdk::xdr::PublicKey
+          soroban_sdk::xdr::Type::PublicKey
+          soroban_sdk::xdr::TypeVariant::PublicKey
+  = help: consider importing one of these items instead:
+          soroban_sdk::xdr::MessageType::Transaction
+          soroban_sdk::xdr::StellarMessage::Transaction
+          soroban_sdk::xdr::Transaction
+          soroban_sdk::xdr::Type::Transaction
+          soroban_sdk::xdr::TypeVariant::Transaction
+          stellar_sdk::types::Transaction
+
+error[E0432]: unresolved import `stellar_sdk::PublicKey`
+ --> src/utils/helpers.rs:4:5
+  |
+4 | use stellar_sdk::PublicKey;
+  |     ^^^^^^^^^^^^^^^^^^^^^^ no `PublicKey` in the root
+  |
+help: consider importing one of these items instead
+  |
+4 - use stellar_sdk::PublicKey;
+4 + use soroban_sdk::xdr::PublicKey;
+  |
+4 - use stellar_sdk::PublicKey;
+4 + use soroban_sdk::xdr::Type::PublicKey;
+  |
+4 - use stellar_sdk::PublicKey;
+4 + use soroban_sdk::xdr::TypeVariant::PublicKey;
+  |
+
+error[E0432]: unresolved import `soroban_token_sdk`
+ --> src/contracts/token.rs:7:5
+  |
+7 | use soroban_token_sdk::{Token, TokenInter...
+  |     ^^^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `soroban_token_sdk`
+  |
+  = help: if you wanted to use a crate named `soroban_token_sdk`, use `cargo add soroban_token_sdk` to add it to your `Cargo.toml`
+
+warning: unused imports: `Env`, `Symbol`, `Vec`, and `contractimpl`
+ --> src/contracts/token.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec};
+  |       ^^^^^^^^^^^^           ^^^  ^^^^^^  ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `TokenMetadata`
+ --> src/contracts/token.rs:8:38
+  |
+8 | ...{TokenInfo, TokenMetadata};
+  |                ^^^^^^^^^^^^^
+
+warning: unused imports: `Map`, `Symbol`, and `contractimpl`
+ --> src/contracts/liquidity_pool.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^                ^^^^^^       ^^^
+
+warning: unused import: `SwapParams`
+ --> src/contracts/liquidity_pool.rs:7:55
+  |
+7 | ...dityPosition, SwapParams};
+  |                  ^^^^^^^^^^
+
+warning: unused imports: `Env`, `Map`, `Symbol`, `Vec`, and `contractimpl`
+ --> src/contracts/staking.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^           ^^^  ^^^^^^  ^^^  ^^^
+
+warning: unused import: `crate::types::token::TokenInfo`
+ --> src/contracts/staking.rs:7:5
+  |
+7 | use crate::types::token::TokenInfo;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Map`, `Symbol`, and `contractimpl`
+ --> src/contracts/governance.rs:6:29
+  |
+6 | ...t, contractimpl, Address, Env, Symbol, Vec, Map};
+  |       ^^^^^^^^^^^^                ^^^^^^       ^^^
+
+warning: unused imports: `Env`, `Symbol`, and `contractimpl`
+  --> src/contracts/vault.rs:17:29
+   |
+17 | ...t, contractimpl, Address, Env, Symbol};
+   |       ^^^^^^^^^^^^           ^^^  ^^^^^^
+
+warning: unused imports: `PerformanceFeeConfig` and `StrategyType`
+  --> src/contracts/vault.rs:19:31
+   |
+19 | ..., VaultStrategy, StrategyType, VaultS...
+   |                     ^^^^^^^^^^^^
+20 | ...esult, PerformanceFeeConfig,
+   |           ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::StellarClient`
+  --> src/contracts/vault.rs:22:5
+   |
+22 | use crate::utils::StellarClient;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `contractimpl`
+ --> src/contracts/flash_loan.rs:6:29
+  |
+6 | ...::{contract, contractimpl, Address, En...
+  |                 ^^^^^^^^^^^^
+
+warning: unused import: `FlashLoanEvent`
+ --> src/contracts/flash_loan.rs:7:47
+  |
+7 | ...shLoanInfo, FlashLoanEvent, LoanTakenE...
+  |                ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::utils::StellarClient`
+ --> src/contracts/flash_loan.rs:8:5
+  |
+8 | use crate::utils::StellarClient;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Address` and `Env`
+ --> src/utils/client.rs:3:19
+  |
+3 | use soroban_sdk::{Address, Env};
+  |                   ^^^^^^^  ^^^
+
+warning: unused import: `Env`
+ --> src/types/flash_loan.rs:4:35
+  |
+4 | use soroban_sdk::{Address, Bytes, Env};
+  |                                   ^^^
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/contracts/token.rs:51:38
+    |
+ 51 | ...dress::from_contract_id(&contract_id));
+    |           ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/contracts/token.rs:51:29
+    |
+ 51 | ...me(Address::from_contract_id(&contract_id));
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^--------------
+    |                                ||
+    |                                |expected `&Env`, found `&String`
+    |                                argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&std::string::String`
+note: associated function defined here
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env:...
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 51 -         self.address = Some(Address::from_contract_id(&contract_id));
+ 51 +         self.address = Some(Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/contracts/liquidity_pool.rs:71:38
+    |
+ 71 | ...dress::from_contract_id(&contract_id));
+    |           ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/contracts/liquidity_pool.rs:71:29
+    |
+ 71 | ...me(Address::from_contract_id(&contract_id));
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^--------------
+    |                                ||
+    |                                |expected `&Env`, found `&String`
+    |                                argument #2 of type `[u8; 32]` is missing
+    |
+    = note: expected reference `&Env`
+               found reference `&std::string::String`
+note: associated function defined here
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env:...
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 71 -         self.address = Some(Address::from_contract_id(&contract_id));
+ 71 +         self.address = Some(Address::from_contract_id(/* &Env */, /* [u8; 32] */));
+    |
+
+error[E0599]: no method named `deploy_staking_contract` found for reference `&StellarClient` in the current scope
+  --> src/contracts/staking.rs:57:34
+   |
+57 | ...client.deploy_staking_contract(&self)...
+   |           ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `deploy_token_contract` with a similar name
+   |
+57 -         let contract_id = client.deploy_staking_contract(&self).await?;
+57 +         let contract_id = client.deploy_token_contract(&self).await?;
+   |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/contracts/staking.rs:58:38
+    |
+ 58 | ...dress::from_contract_id(&contract_id));
+    |           ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/contracts/staking.rs:58:29
+    |
+ 58 | ...me(Address::from_contract_id(&contract_id));
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^-------------- argument #2 of type `[u8; 32]` is missing
+    |
+note: associated function defined here
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env:...
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 58 |         self.address = Some(Address::from_contract_id(&contract_id, /* [u8; 32] */));
+    |                                                                   ++++++++++++++++
+
+error[E0308]: mismatched types
+  --> src/contracts/staking.rs:59:12
+   |
+58 | ...   self.address = Some(Address::from_contract_id(&contract_id));
+   |                                                      ----------- here the type of `contract_id` is inferred to be `Env`
+59 | ...   Ok(contract_id)
+   |       -- ^^^^^^^^^^^ expected `String`, found `Env`
+   |       |
+   |       arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `Env` due to the type of the argument passed
+  --> src/contracts/staking.rs:59:9
+   |
+59 |         Ok(contract_id)
+   |         ^^^-----------^
+   |            |
+   |            this argument influences the type of `Ok`
+note: tuple variant defined here
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/core/src/result.rs:561:4
+
+error[E0599]: no method named `deploy_governance_contract` found for reference `&StellarClient` in the current scope
+  --> src/contracts/governance.rs:53:34
+   |
+53 | ...ient.deploy_governance_contract(&self...
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `deploy_token_contract` with a similar name
+   |
+53 -         let contract_id = client.deploy_governance_contract(&self).await?;
+53 +         let contract_id = client.deploy_token_contract(&self).await?;
+   |
+
+error[E0624]: associated function `from_contract_id` is private
+   --> src/contracts/governance.rs:54:38
+    |
+ 54 | ...dress::from_contract_id(&contract_id));
+    |           ^^^^^^^^^^^^^^^^ private associated function
+    |
+   ::: /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:5
+    |
+330 |     pub(crate) fn from_contract_id(env: &Env, contract_id: [u8; 32]) -> Self {
+    |     ------------------------------------------------------------------------ private associated function defined here
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+   --> src/contracts/governance.rs:54:29
+    |
+ 54 | ...me(Address::from_contract_id(&contract_id));
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^-------------- argument #2 of type `[u8; 32]` is missing
+    |
+note: associated function defined here
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:330:19
+    |
+330 |     pub(crate) fn from_contract_id(env:...
+    |                   ^^^^^^^^^^^^^^^^
+help: provide the argument
+    |
+ 54 |         self.address = Some(Address::from_contract_id(&contract_id, /* [u8; 32] */));
+    |                                                                   ++++++++++++++++
+
+error[E0308]: mismatched types
+  --> src/contracts/governance.rs:55:12
+   |
+54 | ...   self.address = Some(Address::from_contract_id(&contract_id));
+   |                                                      ----------- here the type of `contract_id` is inferred to be `Env`
+55 | ...   Ok(contract_id)
+   |       -- ^^^^^^^^^^^ expected `String`, found `Env`
+   |       |
+   |       arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `Env` due to the type of the argument passed
+  --> src/contracts/governance.rs:55:9
+   |
+55 |         Ok(contract_id)
+   |         ^^^-----------^
+   |            |
+   |            this argument influences the type of `Ok`
+note: tuple variant defined here
+  --> /rustc/4a4ef493e3a1488c6e321570238084b38948f6db/library/core/src/result.rs:561:4
+
+error[E0277]: the trait bound `LiquidityPosition: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/liquidity_pool.rs:244:9
+    |
+244 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `TryFromVal<Env, soroban_sdk::Val>` is not implemented for `LiquidityPosition`
+   --> src/types/pool.rs:25:1
+    |
+ 25 | pub struct LiquidityPosition {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `()` implements `TryFromVal<E, [Val; 0]>`
+              `()` implements `TryFromVal<E, soroban_sdk::Val>`
+              `()` implements `TryFromVal<Env, ()>`
+              `(T0, T1)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1, T2)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2, T3)` implements `TryFromVal<E, [Val; N]>`
+            and 311 others
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:28
+    |
+349 | ...ntoVal<Env, Val> + TryFromVal<Env, Val>,
+    |                       ^^^^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 | ...fn new(env: &Env) -> Vec<T> {
+    |       --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-1792150773329974202.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/liquidity_pool.rs:244:9
+    |
+244 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `TryFromVal<Env, LiquidityPosition>` is not implemented for `soroban_sdk::Val`
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+              `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+            and 105 others
+    = note: required for `soroban_sdk::Val` to implement `FromVal<Env, LiquidityPosition>`
+    = note: required for `LiquidityPosition` to implement `IntoVal<Env, soroban_sdk::Val>`
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:8
+    |
+349 |     T: IntoVal<Env, Val> + TryFromVal<E...
+    |        ^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 |     pub fn new(env: &Env) -> Vec<T> {
+    |            --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-6032924973391142562.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Proposal: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:158:9
+    |
+158 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `TryFromVal<Env, soroban_sdk::Val>` is not implemented for `Proposal`
+   --> src/contracts/governance.rs:243:1
+    |
+243 | pub struct Proposal {
+    | ^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `()` implements `TryFromVal<E, [Val; 0]>`
+              `()` implements `TryFromVal<E, soroban_sdk::Val>`
+              `()` implements `TryFromVal<Env, ()>`
+              `(T0, T1)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1, T2)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2, T3)` implements `TryFromVal<E, [Val; N]>`
+            and 311 others
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:28
+    |
+349 | ...ntoVal<Env, Val> + TryFromVal<Env, Val>,
+    |                       ^^^^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 | ...fn new(env: &Env) -> Vec<T> {
+    |       --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-683161189604054386.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:158:9
+    |
+158 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `TryFromVal<Env, Proposal>` is not implemented for `soroban_sdk::Val`
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+              `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+            and 105 others
+    = note: required for `soroban_sdk::Val` to implement `FromVal<Env, Proposal>`
+    = note: required for `Proposal` to implement `IntoVal<Env, soroban_sdk::Val>`
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:8
+    |
+349 |     T: IntoVal<Env, Val> + TryFromVal<E...
+    |        ^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 |     pub fn new(env: &Env) -> Vec<T> {
+    |            --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-9890939477411905386.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Proposal: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:165:9
+    |
+165 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `TryFromVal<Env, soroban_sdk::Val>` is not implemented for `Proposal`
+   --> src/contracts/governance.rs:243:1
+    |
+243 | pub struct Proposal {
+    | ^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `()` implements `TryFromVal<E, [Val; 0]>`
+              `()` implements `TryFromVal<E, soroban_sdk::Val>`
+              `()` implements `TryFromVal<Env, ()>`
+              `(T0, T1)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1, T2)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2, T3)` implements `TryFromVal<E, [Val; N]>`
+            and 311 others
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:28
+    |
+349 | ...ntoVal<Env, Val> + TryFromVal<Env, Val>,
+    |                       ^^^^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 | ...fn new(env: &Env) -> Vec<T> {
+    |       --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-683161189604054386.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:165:9
+    |
+165 |         Vec::new(&Env::default())
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `TryFromVal<Env, Proposal>` is not implemented for `soroban_sdk::Val`
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+              `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+            and 105 others
+    = note: required for `soroban_sdk::Val` to implement `FromVal<Env, Proposal>`
+    = note: required for `Proposal` to implement `IntoVal<Env, soroban_sdk::Val>`
+note: required by a bound in `soroban_sdk::Vec::<T>::new`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/vec.rs:349:8
+    |
+349 |     T: IntoVal<Env, Val> + TryFromVal<E...
+    |        ^^^^^^^^^^^^^^^^^ required by this bound in `Vec::<T>::new`
+...
+353 |     pub fn new(env: &Env) -> Vec<T> {
+    |            --- required by a bound in this associated function
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-9890939477411905386.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `ProposalAction: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:253:5
+    |
+242 | #[derive(Debug, Clone)]
+    |          ----- in this derive macro expansion
+...
+253 |     pub actions: Vec<ProposalAction>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `TryFromVal<Env, soroban_sdk::Val>` is not implemented for `ProposalAction`
+   --> src/contracts/governance.rs:272:1
+    |
+272 | pub struct ProposalAction {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `()` implements `TryFromVal<E, [Val; 0]>`
+              `()` implements `TryFromVal<E, soroban_sdk::Val>`
+              `()` implements `TryFromVal<Env, ()>`
+              `(T0, T1)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2)` implements `TryFromVal<E, [Val; N]>`
+              `(T0, T1, T2)` implements `TryFromVal<E, soroban_sdk::Val>`
+              `(T0, T1, T2, T3)` implements `TryFromVal<E, [Val; N]>`
+            and 311 others
+    = note: required for `soroban_sdk::Vec<ProposalAction>` to implement `std::fmt::Debug`
+    = note: required for the cast from `&Vec<ProposalAction>` to `&dyn std::fmt::Debug`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-15178851039350214792.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/governance.rs:253:5
+    |
+242 | #[derive(Debug, Clone)]
+    |          ----- in this derive macro expansion
+...
+253 |     pub actions: Vec<ProposalAction>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `TryFromVal<Env, ProposalAction>` is not implemented for `soroban_sdk::Val`
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+              `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+            and 105 others
+    = note: required for `soroban_sdk::Val` to implement `FromVal<Env, ProposalAction>`
+    = note: required for `ProposalAction` to implement `IntoVal<Env, soroban_sdk::Val>`
+    = note: required for `soroban_sdk::Vec<ProposalAction>` to implement `std::fmt::Debug`
+    = note: required for the cast from `&Vec<ProposalAction>` to `&dyn std::fmt::Debug`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-14076916394897816799.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+  --> src/contracts/flash_loan.rs:87:13
+   |
+85 |           env.events().publish(
+   |                        ------- required by a bound introduced by this call
+86 |               (Symbol::new(&env, "flash_...
+87 | /             LoanTakenEvent {
+88 | |                 receiver: receiver.clo...
+89 | |                 token: self.token.clon...
+90 | |                 amount,
+91 | |                 fee,
+92 | |                 timestamp: env.ledger(...
+93 | |             },
+   | |_____________^ unsatisfied trait bound
+   |
+   = help: the trait `TryFromVal<Env, LoanTakenEvent>` is not implemented for `soroban_sdk::Val`
+   = help: the following other types implement trait `TryFromVal<E, V>`:
+             `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+             `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+             `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+             `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+             `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+             `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+             `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+             `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+           and 105 others
+   = note: required for `soroban_sdk::Val` to implement `FromVal<Env, LoanTakenEvent>`
+   = note: required for `LoanTakenEvent` to implement `IntoVal<Env, soroban_sdk::Val>`
+note: required by a bound in `soroban_sdk::events::Events::publish`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/events.rs:91:12
+   |
+88 | ...pub fn publish<T, D>(&self, topics: T...
+   |           ------- required by a bound in this associated function
+...
+91 | ...    D: IntoVal<Env, Val>,
+   |           ^^^^^^^^^^^^^^^^^ required by this bound in `Events::publish`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-2999492495108929863.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `Val: TryFromVal<..., ...>` is not satisfied
+   --> src/contracts/flash_loan.rs:111:13
+    |
+109 |           env.events().publish(
+    |                        ------- required by a bound introduced by this call
+110 |               (Symbol::new(&env, "flash...
+111 | /             LoanRepaidEvent {
+112 | |                 receiver: receiver.cl...
+113 | |                 token: self.token.clo...
+114 | |                 amount: total_to_repay,
+115 | |                 fee,
+116 | |                 timestamp: env.ledger...
+117 | |             },
+    | |_____________^ unsatisfied trait bound
+    |
+    = help: the trait `TryFromVal<Env, LoanRepaidEvent>` is not implemented for `soroban_sdk::Val`
+    = help: the following other types implement trait `TryFromVal<E, V>`:
+              `soroban_sdk::Val` implements `TryFromVal<E, &[u8]>`
+              `soroban_sdk::Val` implements `TryFromVal<E, &str>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ()>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, (T0, T1, T2, T3)>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+              `soroban_sdk::Val` implements `TryFromVal<E, ...>`
+            and 105 others
+    = note: required for `soroban_sdk::Val` to implement `FromVal<Env, LoanRepaidEvent>`
+    = note: required for `LoanRepaidEvent` to implement `IntoVal<Env, soroban_sdk::Val>`
+note: required by a bound in `soroban_sdk::events::Events::publish`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/events.rs:91:12
+    |
+ 88 | ...pub fn publish<T, D>(&self, topics: ...
+    |           ------- required by a bound in this associated function
+...
+ 91 | ...    D: IntoVal<Env, Val>,
+    |           ^^^^^^^^^^^^^^^^^ required by this bound in `Events::publish`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-1308435029364647788.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> src/utils/helpers.rs:9:14
+    |
+  9 |     Address::generate(&Env::default())
+    |              ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+   --> src/utils/helpers.rs:30:17
+    |
+ 30 |     Ok(Address::generate(&Env::default()))
+    |                 ^^^^^^^^ function or associated item not found in `soroban_sdk::Address`
+    |
+note: if you're trying to build a new `soroban_sdk::Address` consider using one of the following associated functions:
+      soroban_sdk::Address::from_string
+      soroban_sdk::Address::from_string_bytes
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-21.7.7/src/address.rs:235:5
+    |
+235 |     pub fn from_string(strkey: &String) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+257 |     pub fn from_string_bytes(strkey: &Bytes) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:20:24
+     |
+  20 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  30 |     /// Token admin address
+     |     ----------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+     = note: required for `Option<Address>` to implement `Serialize`
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:31:16
+     |
+  31 |     pub admin: Option<Address>,
+     |                ^^^^^^^^^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+     = note: required for `Option<Address>` to implement `Deserialize<'_>`
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:31:16
+     |
+  31 |     pub admin: Option<Address>,
+     |                ^^^^^^^^^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+     = note: required for `Option<Address>` to implement `Deserialize<'_>`
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/token.rs:20:35
+   |
+20 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+   = note: required for `Option<Address>` to implement `Deserialize<'_>`
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:41:24
+     |
+  41 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  45 |     /// Account address
+     |     ------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:46:18
+     |
+  46 |     pub account: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:46:18
+     |
+  46 |     pub account: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/token.rs:41:35
+   |
+41 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:54:24
+     |
+  54 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  55 | pub struct TokenTransfer {
+  56 |     /// From address
+     |     ---------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:57:15
+     |
+  57 |     pub from: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:59:13
+     |
+  59 |     pub to: Address,
+     |             ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:57:15
+     |
+  57 |     pub from: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:59:13
+     |
+  59 |     pub to: Address,
+     |             ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/token.rs:54:35
+   |
+54 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:71:24
+     |
+  71 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  72 | pub struct TokenApproval {
+  73 |     /// Owner address
+     |     ----------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:74:16
+     |
+  74 |     pub owner: Address,
+     |                ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:76:18
+     |
+  76 |     pub spender: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:74:16
+     |
+  74 |     pub owner: Address,
+     |                ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:76:18
+     |
+  76 |     pub spender: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/token.rs:71:35
+   |
+71 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:88:24
+     |
+  88 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  89 | pub struct TokenMint {
+  90 |     /// Recipient address
+     |     --------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:91:13
+     |
+  91 |     pub to: Address,
+     |             ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:91:13
+     |
+  91 |     pub to: Address,
+     |             ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/token.rs:88:35
+   |
+88 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/token.rs:103:24
+     |
+ 103 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+ 104 | pub struct TokenBurn {
+ 105 |     /// Burner address
+     |     ------------------ required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:106:15
+     |
+ 106 |     pub from: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/token.rs:106:15
+     |
+ 106 |     pub from: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+   --> src/types/token.rs:103:35
+    |
+103 | ...rialize, Deserialize)]
+    |             ^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+    = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `Deserialize<'de>`:
+              &'a Path
+              &'a [u8]
+              &'a str
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+            and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+    |
+ 24 | pub fn missing_field<'de, V, E>(field: ...
+    |        ------------- required by a bound in this function
+ 25 | where
+ 26 |     V: Deserialize<'de>,
+    |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:24:24
+     |
+  24 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  25 | pub struct LiquidityPosition {
+  26 |     /// User address
+     |     ---------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:27:15
+     |
+  27 |     pub user: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:27:15
+     |
+  27 |     pub user: Address,
+     |               ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/pool.rs:24:35
+   |
+24 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:35:24
+     |
+  35 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  45 |     /// Recipient address
+     |     --------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:46:20
+     |
+  46 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:46:20
+     |
+  46 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/pool.rs:35:35
+   |
+35 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:65:24
+     |
+  65 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  79 |     /// Recipient address
+     |     --------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:80:20
+     |
+  80 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:80:20
+     |
+  80 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/pool.rs:65:35
+   |
+65 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:99:24
+     |
+  99 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+ 111 |     /// Recipient address
+     |     --------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:112:20
+     |
+ 112 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:112:20
+     |
+ 112 |     pub recipient: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/pool.rs:99:35
+   |
+99 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:161:24
+     |
+ 161 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+ 162 | pub struct AddLiquidityEvent {
+ 163 |     /// Provider address
+     |     -------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:164:19
+     |
+ 164 |     pub provider: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:164:19
+     |
+ 164 |     pub provider: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+   --> src/types/pool.rs:161:35
+    |
+161 | ...rialize, Deserialize)]
+    |             ^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+    = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `Deserialize<'de>`:
+              &'a Path
+              &'a [u8]
+              &'a str
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+            and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+    |
+ 24 | pub fn missing_field<'de, V, E>(field: ...
+    |        ------------- required by a bound in this function
+ 25 | where
+ 26 |     V: Deserialize<'de>,
+    |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:180:24
+     |
+ 180 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+ 181 | pub struct RemoveLiquidityEvent {
+ 182 |     /// Provider address
+     |     -------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:183:19
+     |
+ 183 |     pub provider: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:183:19
+     |
+ 183 |     pub provider: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+   --> src/types/pool.rs:180:35
+    |
+180 | ...rialize, Deserialize)]
+    |             ^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+    = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `Deserialize<'de>`:
+              &'a Path
+              &'a [u8]
+              &'a str
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+            and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+    |
+ 24 | pub fn missing_field<'de, V, E>(field: ...
+    |        ------------- required by a bound in this function
+ 25 | where
+ 26 |     V: Deserialize<'de>,
+    |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/pool.rs:199:24
+     |
+ 199 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+ 200 | pub struct SwapEvent {
+ 201 |     /// Swapper address
+     |     ------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:202:18
+     |
+ 202 |     pub swapper: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/pool.rs:202:18
+     |
+ 202 |     pub swapper: Address,
+     |                  ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 756 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+   --> src/types/pool.rs:199:35
+    |
+199 | ...rialize, Deserialize)]
+    |             ^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+    = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `Deserialize<'de>`:
+              &'a Path
+              &'a [u8]
+              &'a str
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+            and 756 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+    |
+ 24 | pub fn missing_field<'de, V, E>(field: ...
+    |        ------------- required by a bound in this function
+ 25 | where
+ 26 |     V: Deserialize<'de>,
+    |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/vault.rs:74:24
+     |
+  74 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  75 | pub struct DepositResult {
+  76 |     pub depositor: Address,
+     |     --- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:76:20
+     |
+  76 |     pub depositor: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:76:20
+     |
+  76 |     pub depositor: Address,
+     |                    ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/vault.rs:74:35
+   |
+74 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 751 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/vault.rs:83:24
+     |
+  83 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  84 | pub struct WithdrawResult {
+  85 |     pub withdrawer: Address,
+     |     --- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:85:21
+     |
+  85 |     pub withdrawer: Address,
+     |                     ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:85:21
+     |
+  85 |     pub withdrawer: Address,
+     |                     ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/vault.rs:83:35
+   |
+83 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 751 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/vault.rs:107:24
+     |
+ 107 | #[derive(Debug, Clone, Serialize, Deserialize)]
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+ 111 |     /// Treasury address that receives fees
+     |     --------------------------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:112:19
+     |
+ 112 |     pub treasury: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/vault.rs:112:19
+     |
+ 112 |     pub treasury: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 751 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+   --> src/types/vault.rs:107:35
+    |
+107 | ...rialize, Deserialize)]
+    |             ^^^^^^^^^^^ unsatisfied trait bound
+    |
+    = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+    = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `Deserialize<'de>`:
+              &'a Path
+              &'a [u8]
+              &'a str
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+            and 751 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+   --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+    |
+ 24 | pub fn missing_field<'de, V, E>(field: ...
+    |        ------------- required by a bound in this function
+ 25 | where
+ 26 |     V: Deserialize<'de>,
+    |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+    = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+    = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/flash_loan.rs:20:24
+     |
+  20 | #[derive(Debug, Clone, Serialize, Deserialize)]
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  26 |     /// Receiver address (must implement on_flash_loan)
+     |     --------------------------------------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Bytes: serde::Serialize` is not satisfied
+    --> src/types/flash_loan.rs:20:24
+     |
+  20 | #[derive(Debug, Clone, Serialize, Deserial...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+...
+  28 |     /// Arbitrary data for the callback
+     |     ----------------------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Bytes`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Bytes` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:27:19
+     |
+  27 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Bytes: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:29:17
+     |
+  29 |     pub params: Bytes,
+     |                 ^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Bytes`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Bytes` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:27:19
+     |
+  27 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Bytes: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:29:17
+     |
+  29 |     pub params: Bytes,
+     |                 ^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Bytes`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Bytes` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/flash_loan.rs:20:35
+   |
+20 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Bytes: serde::Deserialize<'de>` is not satisfied
+  --> src/types/flash_loan.rs:20:35
+   |
+20 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Bytes`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Bytes` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/flash_loan.rs:53:24
+     |
+  53 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  54 | pub struct LoanTakenEvent {
+  55 |     /// Receiver address
+     |     -------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:56:19
+     |
+  56 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:56:19
+     |
+  56 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/flash_loan.rs:53:35
+   |
+53 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/flash_loan.rs:68:24
+     |
+  68 | #[derive(Debug, Clone, Serialize, Dese...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  69 | pub struct LoanRepaidEvent {
+  70 |     /// Receiver address
+     |     -------------------- required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:71:19
+     |
+  71 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:71:19
+     |
+  71 |     pub receiver: Address,
+     |                   ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/flash_loan.rs:68:35
+   |
+68 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Serialize` is not satisfied
+    --> src/types/flash_loan.rs:83:24
+     |
+  83 | #[derive(Debug, Clone, Serialize, Deseriali...
+     |                        ^^^^^^^^^ unsatisfied trait bound
+  84 | pub struct LiquidationParams {
+  85 |     /// Address of the user to liquidate
+     |     ------------------------------------ required by a bound introduced by this call
+     |
+     = help: the trait `Serialize` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Serialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+               (T0, T1, T2, T3, T4)
+             and 732 others
+note: required by a bound in `types::token::_::_serde::ser::SerializeStruct::serialize_field`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/ser/mod.rs:1917:21
+     |
+1915 |     fn serialize_field<T>(&mut self, k...
+     |        --------------- required by a bound in this associated function
+1916 |     where
+1917 |         T: ?Sized + Serialize;
+     |                     ^^^^^^^^^ required by this bound in `SerializeStruct::serialize_field`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4376164239714403549.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+     = note: this error originates in the derive macro `Serialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:86:17
+     |
+  86 |     pub victim: Address,
+     |                 ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_element`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1771:12
+     |
+1769 |     fn next_element<T>(&mut self) -> R...
+     |        ------------ required by a bound in this associated function
+1770 |     where
+1771 |         T: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `SeqAccess::next_element`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+    --> src/types/flash_loan.rs:86:17
+     |
+  86 |     pub victim: Address,
+     |                 ^^^^^^^ unsatisfied trait bound
+     |
+     = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+     = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+     = note: for types from other crates check whether the crate offers a `serde` feature flag
+     = help: the following other types implement trait `Deserialize<'de>`:
+               &'a Path
+               &'a [u8]
+               &'a str
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, T3)
+             and 750 others
+note: required by a bound in `next_value`
+    --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/src/de/mod.rs:1916:12
+     |
+1914 |     fn next_value<V>(&mut self) -> Res...
+     |        ---------- required by a bound in this associated function
+1915 |     where
+1916 |         V: Deserialize<'de>,
+     |            ^^^^^^^^^^^^^^^^ required by this bound in `MapAccess::next_value`
+     = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+     = note: consider using `--verbose` to print the full type name to the console
+
+error[E0277]: the trait bound `soroban_sdk::Address: serde::Deserialize<'de>` is not satisfied
+  --> src/types/flash_loan.rs:83:35
+   |
+83 | ...Serialize, Deserialize)]
+   |               ^^^^^^^^^^^ unsatisfied trait bound
+   |
+   = help: the trait `Deserialize<'_>` is not implemented for `soroban_sdk::Address`
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `soroban_sdk::Address` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and 750 others
+note: required by a bound in `types::token::_::_serde::__private228::de::missing_field`
+  --> /home/phantom-call/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:26:8
+   |
+24 | pub fn missing_field<'de, V, E>(field: &...
+   |        ------------- required by a bound in this function
+25 | where
+26 |     V: Deserialize<'de>,
+   |        ^^^^^^^^^^^^^^^^ required by this bound in `missing_field`
+   = note: the full name for the type has been written to '/home/phantom-call/stellar-defi-toolkit/target/debug/deps/stellar_defi_toolkit-120ca6d23684cc00.long-type-4065011097235908009.txt'
+   = note: consider using `--verbose` to print the full type name to the console
+   = note: this error originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused variable: `to`
+  --> src/contracts/token.rs:56:28
+   |
+56 | ...t(&mut self, to: Address, amount: u64...
+   |                 ^^ help: if this is intentional, prefix it with an underscore: `_to`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `from`
+  --> src/contracts/token.rs:67:28
+   |
+67 | ...n(&mut self, from: Address, amount: u...
+   |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_from`
+
+warning: unused variable: `address`
+   --> src/contracts/token.rs:100:30
+    |
+100 | ..._of(&self, address: Address) -> u64 {
+    |               ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `owner`
+   --> src/contracts/token.rs:107:27
+    |
+107 | ...prove(&self, owner: Address, spender...
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_owner`
+
+warning: unused variable: `spender`
+   --> src/contracts/token.rs:107:43
+    |
+107 | ...: Address, spender: Address, amount:...
+    |               ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_spender`
+
+warning: unused variable: `owner`
+   --> src/contracts/token.rs:120:29
+    |
+120 | ...wance(&self, owner: Address, spender...
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_owner`
+
+warning: unused variable: `spender`
+   --> src/contracts/token.rs:120:45
+    |
+120 | ...: Address, spender: Address) -> u64 {
+    |               ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_spender`
+
+warning: unused variable: `to`
+   --> src/contracts/token.rs:131:9
+    |
+131 |         to: Address,
+    |         ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `provider`
+  --> src/contracts/liquidity_pool.rs:78:9
+   |
+78 |         provider: Address,
+   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `provider`
+   --> src/contracts/liquidity_pool.rs:118:9
+    |
+118 |         provider: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_provider`
+
+warning: unused variable: `user`
+   --> src/contracts/liquidity_pool.rs:151:9
+    |
+151 |         user: Address,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/liquidity_pool.rs:176:9
+    |
+176 |         user: Address,
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+  --> src/contracts/staking.rs:63:29
+   |
+63 | ...e(&mut self, user: Address, amount: u...
+   |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+  --> src/contracts/staking.rs:80:31
+   |
+80 | ...e(&mut self, user: Address, amount: u...
+   |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/staking.rs:116:45
+    |
+116 | ...wards(&self, user: Address) -> u64 {
+    |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `user`
+   --> src/contracts/staking.rs:128:38
+    |
+128 | ...lance(&self, user: Address) -> u64 {
+    |                 ^^^^ help: if this is intentional, prefix it with an underscore: `_user`
+
+warning: unused variable: `proposer`
+  --> src/contracts/governance.rs:61:9
+   |
+61 |         proposer: Address,
+   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposer`
+
+warning: unused variable: `voter`
+  --> src/contracts/governance.rs:93:9
+   |
+93 |         voter: Address,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_voter`
+
+warning: unused variable: `proposal_id`
+  --> src/contracts/governance.rs:94:9
+   |
+94 |         proposal_id: u64,
+   |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `support`
+  --> src/contracts/governance.rs:95:9
+   |
+95 |         support: bool,
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_support`
+
+warning: unused variable: `executor`
+   --> src/contracts/governance.rs:116:9
+    |
+116 |         executor: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_executor`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:117:9
+    |
+117 |         proposal_id: u64,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposer`
+   --> src/contracts/governance.rs:134:9
+    |
+134 |         proposer: Address,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposer`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:135:9
+    |
+135 |         proposal_id: u64,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:148:32
+    |
+148 | ...l(&self, proposal_id: u64) -> Option...
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `proposal_id`
+   --> src/contracts/governance.rs:169:39
+    |
+169 | ...d(&self, proposal_id: u64) -> bool {
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proposal_id`
+
+warning: unused variable: `voter`
+   --> src/contracts/governance.rs:181:36
+    |
+181 | ...power(&self, voter: Address) -> u64 {
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_voter`
+
+warning: unused variable: `delegator`
+   --> src/contracts/governance.rs:212:9
+    |
+212 |         delegator: Address,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegator`
+
+warning: unused variable: `delegatee`
+   --> src/contracts/governance.rs:213:9
+    |
+213 |         delegatee: Address,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegatee`
+
+warning: unused variable: `delegator`
+   --> src/contracts/governance.rs:225:34
+    |
+225 | ...ion(&self, delegator: Address) -> Op...
+    |               ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_delegator`
+
+warning: unused variable: `amount`
+   --> src/contracts/vault.rs:490:51
+    |
+490 | ...ex: usize, amount: u64) -> Result<()...
+    |               ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `env`
+  --> src/contracts/flash_loan.rs:46:28
+   |
+46 | ..._info(&self, env: &Env) -> FlashLoanI...
+   |                 ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:41:47
+   |
+41 | ...act(&self, contract: &TokenContract) ...
+   |               ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+
+warning: unused variable: `contract`
+  --> src/utils/client.rs:54:56
+   |
+54 | ...act(&self, contract: &LiquidityPoolCo...
+   |               ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract`
+
+warning: unused variable: `address`
+  --> src/utils/helpers.rs:20:26
+   |
+20 | ..._to_string(address: &Address) -> Stri...
+   |               ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_address`
+
+warning: unused variable: `initial_price_ratio`
+   --> src/utils/helpers.rs:132:5
+    |
+132 |     initial_price_ratio: f64,
+    |     ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_initial_price_ratio`
+
+Some errors have detailed explanations: E0061, E0277, E0308, E0432, E0599, E0624.
+For more information about an error, try `rustc --explain E0061`.
+warning: `stellar-defi-toolkit` (lib) generated 51 warnings
+error: could not compile `stellar-defi-toolkit` (lib) due to 115 previous errors; 51 warnings emitted

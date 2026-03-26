@@ -1,23 +1,29 @@
 //! Example: Creating and managing a liquidity pool
 
+use soroban_sdk::Env;
 use stellar_defi_toolkit::{LiquidityPoolContract, StellarClient};
 use tokio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize the Soroban environment
+    let env = Env::default();
+    
     // Initialize the Stellar client
     let client = StellarClient::new().await?;
     
     // Create a new liquidity pool
-    let pool = LiquidityPoolContract::new(
+    let pool = LiquidityPoolContract::new_std(
+        &env,
         "TOKEN_A_CONTRACT_ID".to_string(),
         "TOKEN_B_CONTRACT_ID".to_string(),
     );
     
     println!("💧 Creating liquidity pool contract...");
-    println!("Token A: {}", pool.get_info().token_a);
-    println!("Token B: {}", pool.get_info().token_b);
-    println!("Fee Percentage: {} bps ({}%)", pool.get_info().fee_percentage, pool.get_info().fee_percentage as f64 / 100.0);
+    let info = pool.get_info(&env);
+    println!("Token A: {:?}", info.token_a);
+    println!("Token B: {:?}", info.token_b);
+    println!("Fee Percentage: {} bps ({}%)", info.fee_percentage, info.fee_percentage as f64 / 100.0);
     
     // Deploy the liquidity pool contract
     println!("\n🚀 Deploying liquidity pool contract...");
@@ -28,7 +34,6 @@ async fn main() -> anyhow::Result<()> {
     
     // Example of adding liquidity
     println!("\n➕ Example: Adding liquidity to the pool...");
-    let provider_address = "GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
     let amount_a = 1000000; // 100 tokens (with 7 decimals)
     let amount_b = 2000000; // 200 tokens (with 7 decimals)
     let min_amount_a = 950000; // 5% slippage tolerance
@@ -51,8 +56,8 @@ async fn main() -> anyhow::Result<()> {
     
     println!("Swapping {} Token A for Token B...", swap_amount as f64 / 1_000_000.0);
     
-    // Calculate expected output
-    let output_amount = pool.calculate_swap_output(swap_amount, amount_a, amount_b);
+    // Note: calculation logic is simplified for example illustrative purposes
+    let output_amount = (swap_amount * amount_b) / (amount_a + swap_amount);
     println!("Expected output: {} Token B", output_amount as f64 / 1_000_000.0);
     
     if output_amount >= min_output {

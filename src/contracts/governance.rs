@@ -3,28 +3,27 @@
 //! Provides decentralized governance functionality for protocol
 //! management and decision-making on the Stellar blockchain.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contract, Address, Env, Vec};
 use crate::utils::StellarClient;
 
 /// Governance contract for protocol governance
 #[contract]
 pub struct GovernanceContract {
     /// Governance token contract address
-    governance_token: String,
+    governance_token: soroban_sdk::String,
     /// Quorum percentage (in basis points, e.g., 5000 = 50%)
-    quorum_percentage: u32,
+    pub quorum_percentage: u32,
     /// Voting period in seconds
-    voting_period: u64,
+    pub voting_period: u64,
     /// Execution delay in seconds
-    execution_delay: u64,
-    /// Contract address
-    address: Option<Address>,
+    pub execution_delay: u64,
 }
 
 impl GovernanceContract {
     /// Create a new governance contract
     pub fn new(
-        governance_token: String,
+        _env: &Env,
+        governance_token: soroban_sdk::String,
         quorum_percentage: u32,
         voting_period: u64,
         execution_delay: u64,
@@ -34,12 +33,22 @@ impl GovernanceContract {
             quorum_percentage,
             voting_period,
             execution_delay,
-            address: None,
         }
     }
 
+    /// Create from std string
+    pub fn new_std(
+        env: &Env,
+        governance_token: String,
+        quorum_percentage: u32,
+        voting_period: u64,
+        execution_delay: u64,
+    ) -> Self {
+        Self::new(env, soroban_sdk::String::from_str(env, &governance_token), quorum_percentage, voting_period, execution_delay)
+    }
+
     /// Get governance contract information
-    pub fn get_info(&self) -> GovernanceInfo {
+    pub fn get_info(&self, _env: &Env) -> GovernanceInfo {
         GovernanceInfo {
             governance_token: self.governance_token.clone(),
             quorum_percentage: self.quorum_percentage,
@@ -49,18 +58,19 @@ impl GovernanceContract {
     }
 
     /// Deploy the governance contract to Stellar
-    pub async fn deploy(mut self, client: &StellarClient) -> anyhow::Result<String> {
+    pub async fn deploy(self, client: &StellarClient) -> anyhow::Result<String> {
         let contract_id = client.deploy_governance_contract(&self).await?;
-        self.address = Some(Address::from_contract_id(&contract_id));
+        // self.address = Some(Address::from_string(&contract_id)); // Address requires Env
         Ok(contract_id)
     }
 
     /// Create a new proposal
     pub fn create_proposal(
         &mut self,
-        proposer: Address,
-        title: String,
-        description: String,
+        _env: Env,
+        _proposer: Address,
+        title: soroban_sdk::String,
+        description: soroban_sdk::String,
         actions: Vec<ProposalAction>,
     ) -> Result<u64, String> {
         if title.is_empty() || title.len() > 200 {
@@ -90,9 +100,9 @@ impl GovernanceContract {
     /// Vote on a proposal
     pub fn vote(
         &mut self,
-        voter: Address,
-        proposal_id: u64,
-        support: bool,
+        _voter: Address,
+        _proposal_id: u64,
+        _support: bool,
         voting_power: u64,
     ) -> Result<(), String> {
         if voting_power == 0 {
@@ -113,8 +123,8 @@ impl GovernanceContract {
     /// Execute a proposal
     pub fn execute_proposal(
         &mut self,
-        executor: Address,
-        proposal_id: u64,
+        _executor: Address,
+        _proposal_id: u64,
     ) -> Result<(), String> {
         // In a real implementation, this would:
         // 1. Check if proposal exists
@@ -131,8 +141,8 @@ impl GovernanceContract {
     /// Cancel a proposal (only by proposer)
     pub fn cancel_proposal(
         &mut self,
-        proposer: Address,
-        proposal_id: u64,
+        _proposer: Address,
+        _proposal_id: u64,
     ) -> Result<(), String> {
         // In a real implementation, this would:
         // 1. Check if proposal exists
@@ -145,7 +155,7 @@ impl GovernanceContract {
     }
 
     /// Get proposal details
-    pub fn get_proposal(&self, proposal_id: u64) -> Option<Proposal> {
+    pub fn get_proposal(&self, _proposal_id: u64) -> Option<Proposal> {
         // In a real implementation, this would query the contract state
         // For now, return None
         None
@@ -166,7 +176,7 @@ impl GovernanceContract {
     }
 
     /// Check if a proposal has passed
-    pub fn has_proposal_passed(&self, proposal_id: u64) -> bool {
+    pub fn has_proposal_passed(&self, _proposal_id: u64) -> bool {
         // In a real implementation, this would:
         // 1. Get proposal vote counts
         // 2. Check if quorum is met
@@ -178,7 +188,7 @@ impl GovernanceContract {
     }
 
     /// Get voting power for an address
-    pub fn get_voting_power(&self, voter: Address) -> u64 {
+    pub fn get_voting_power(&self, _voter: Address) -> u64 {
         // In a real implementation, this would:
         // 1. Query governance token balance
         // 2. Apply any voting power multipliers
@@ -209,8 +219,8 @@ impl GovernanceContract {
     /// Delegate voting power
     pub fn delegate(
         &mut self,
-        delegator: Address,
-        delegatee: Address,
+        _delegator: Address,
+        _delegatee: Address,
     ) -> Result<(), String> {
         // In a real implementation, this would:
         // 1. Check if delegator has voting power
@@ -222,7 +232,7 @@ impl GovernanceContract {
     }
 
     /// Get delegation information
-    pub fn get_delegation(&self, delegator: Address) -> Option<Address> {
+    pub fn get_delegation(&self, _delegator: Address) -> Option<Address> {
         // In a real implementation, this would query the contract state
         // For now, return None
         None
@@ -230,15 +240,17 @@ impl GovernanceContract {
 }
 
 /// Governance contract information
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub struct GovernanceInfo {
-    pub governance_token: String,
+    pub governance_token: soroban_sdk::String,
     pub quorum_percentage: u32,
     pub voting_period: u64,
     pub execution_delay: u64,
 }
 
 /// Proposal structure
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub struct Proposal {
     /// Proposal ID
@@ -246,9 +258,9 @@ pub struct Proposal {
     /// Proposer address
     pub proposer: Address,
     /// Proposal title
-    pub title: String,
+    pub title: soroban_sdk::String,
     /// Proposal description
-    pub description: String,
+    pub description: soroban_sdk::String,
     /// List of actions to execute
     pub actions: Vec<ProposalAction>,
     /// Number of votes for
@@ -268,21 +280,23 @@ pub struct Proposal {
 }
 
 /// Proposal action
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub struct ProposalAction {
     /// Action type
     pub action_type: ActionType,
     /// Target contract address
-    pub target: String,
+    pub target: soroban_sdk::String,
     /// Function to call
-    pub function: String,
+    pub function: soroban_sdk::String,
     /// Function parameters
-    pub parameters: Vec<String>,
+    pub parameters: Vec<soroban_sdk::String>,
     /// Value to send (if applicable)
     pub value: Option<u64>,
 }
 
 /// Action types for proposals
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub enum ActionType {
     /// Transfer tokens
@@ -296,10 +310,11 @@ pub enum ActionType {
     /// Unpause contract
     UnpauseContract,
     /// Custom action
-    Custom(String),
+    Custom(soroban_sdk::String),
 }
 
 /// Proposal status
+#[soroban_sdk::contracttype]
 #[derive(Debug, Clone)]
 pub enum ProposalStatus {
     /// Proposal is active for voting
@@ -319,17 +334,21 @@ pub enum ProposalStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{Env, Address, Vec};
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_governance_contract_creation() {
-        let contract = GovernanceContract::new(
+        let env = Env::default();
+        let contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000, // 50% quorum
             604800, // 7 days voting period
             86400, // 1 day execution delay
         );
 
-        assert_eq!(contract.governance_token, "GOV_TOKEN");
+        assert_eq!(contract.governance_token, soroban_sdk::String::from_str(&env, "GOV_TOKEN"));
         assert_eq!(contract.quorum_percentage, 5000);
         assert_eq!(contract.voting_period, 604800);
         assert_eq!(contract.execution_delay, 86400);
@@ -337,27 +356,30 @@ mod tests {
 
     #[test]
     fn test_create_proposal() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,
             86400,
         );
-        let proposer = Address::generate(&Env::default());
+        let proposer = Address::generate(&env);
 
-        let actions = vec![ProposalAction {
+        let actions = Vec::from_array(&env, [ProposalAction {
             action_type: ActionType::Transfer,
-            target: "TOKEN_CONTRACT".to_string(),
-            function: "transfer".to_string(),
-            parameters: vec!["RECIPIENT".to_string(), "1000".to_string()],
+            target: soroban_sdk::String::from_str(&env, "TOKEN_CONTRACT"),
+            function: soroban_sdk::String::from_str(&env, "transfer"),
+            parameters: Vec::from_array(&env, [soroban_sdk::String::from_str(&env, "RECIPIENT"), soroban_sdk::String::from_str(&env, "1000")]),
             value: None,
-        }];
+        }]);
 
         let proposal_id = contract
             .create_proposal(
+                env.clone(),
                 proposer,
-                "Test Proposal".to_string(),
-                "This is a test proposal".to_string(),
+                soroban_sdk::String::from_str(&env, "Test Proposal"),
+                soroban_sdk::String::from_str(&env, "This is a test proposal"),
                 actions,
             )
             .unwrap();
@@ -367,19 +389,22 @@ mod tests {
 
     #[test]
     fn test_invalid_proposal_title() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,
             86400,
         );
-        let proposer = Address::generate(&Env::default());
-        let actions = vec![];
+        let proposer = Address::generate(&env);
+        let actions = Vec::new(&env);
 
         let result = contract.create_proposal(
+            env.clone(),
             proposer,
-            "".to_string(), // Empty title
-            "This is a test proposal".to_string(),
+            soroban_sdk::String::from_str(&env, ""), // Empty title
+            soroban_sdk::String::from_str(&env, "This is a test proposal"),
             actions,
         );
 
@@ -389,13 +414,15 @@ mod tests {
 
     #[test]
     fn test_vote() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,
             86400,
         );
-        let voter = Address::generate(&Env::default());
+        let voter = Address::generate(&env);
 
         let result = contract.vote(voter, 1, true, 1000);
         assert!(result.is_ok());
@@ -403,13 +430,15 @@ mod tests {
 
     #[test]
     fn test_invalid_vote_power() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,
             86400,
         );
-        let voter = Address::generate(&Env::default());
+        let voter = Address::generate(&env);
 
         let result = contract.vote(voter, 1, true, 0);
         assert!(result.is_err());
@@ -418,7 +447,9 @@ mod tests {
 
     #[test]
     fn test_update_parameters() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,
@@ -436,7 +467,9 @@ mod tests {
 
     #[test]
     fn test_invalid_quorum() {
-        let mut contract = GovernanceContract::new(
+        let env = Env::default();
+        let mut contract = GovernanceContract::new_std(
+            &env,
             "GOV_TOKEN".to_string(),
             5000,
             604800,

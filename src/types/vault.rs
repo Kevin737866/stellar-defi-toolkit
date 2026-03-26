@@ -1,55 +1,25 @@
 //! Vault-related type definitions for the yield farming vault
 
-use serde::{Deserialize, Serialize};
-use soroban_sdk::Address;
-
-/// Strategy type classification
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum StrategyType {
-    /// AMM liquidity provision
-    LiquidityPool,
-    /// Token staking
-    Staking,
-    /// Lending protocol
-    Lending,
-    /// Custom / external protocol
-    Custom(String),
-}
-
-/// A yield strategy the vault can allocate funds to
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VaultStrategy {
-    /// Human-readable strategy name
-    pub name: String,
-    /// On-chain contract address of the strategy
-    pub contract_address: String,
-    /// Strategy classification
-    pub strategy_type: StrategyType,
-    /// Estimated annual percentage yield (%)
-    pub estimated_apy: f64,
-    /// Amount currently allocated to this strategy
-    pub allocated_amount: u64,
-    /// Whether this strategy is currently active
-    pub active: bool,
-}
+use soroban_sdk::{contracttype, Address};
 
 /// Snapshot of vault state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[contracttype]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VaultInfo {
     /// Underlying asset token address
-    pub asset_token: String,
+    pub asset_token: Address,
     /// Vault share token address (SEP-41)
-    pub share_token: String,
+    pub share_token: Address,
     /// Total shares outstanding
     pub total_shares: u64,
     /// Total assets under management
     pub total_assets: u64,
     /// Current share price (assets / shares)
-    pub share_price: f64,
-    /// Currently active strategy
-    pub active_strategy: Option<VaultStrategy>,
+    pub share_price: u32, // Basis points
+    /// Currently active strategy index (-1 for None)
+    pub active_strategy_index: i32,
     /// Total number of registered strategies
-    pub strategy_count: usize,
+    pub strategy_count: u32,
     /// Performance fee in basis points
     pub performance_fee_bps: u32,
     /// Whether the vault is paused
@@ -59,7 +29,7 @@ pub struct VaultInfo {
 }
 
 /// Vault runtime statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct VaultStats {
     pub total_assets: u64,
     pub total_shares: u64,
@@ -71,7 +41,7 @@ pub struct VaultStats {
 }
 
 /// Result of a deposit operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DepositResult {
     pub depositor: Address,
     pub amount_deposited: u64,
@@ -80,7 +50,7 @@ pub struct DepositResult {
 }
 
 /// Result of a withdrawal operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct WithdrawResult {
     pub withdrawer: Address,
     pub shares_burned: u64,
@@ -89,7 +59,7 @@ pub struct WithdrawResult {
 }
 
 /// Result of a harvest operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HarvestResult {
     /// Total rewards collected from the strategy
     pub raw_rewards: u64,
@@ -104,7 +74,7 @@ pub struct HarvestResult {
 }
 
 /// Performance fee configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PerformanceFeeConfig {
     /// Fee in basis points (e.g., 1000 = 10%)
     pub fee_bps: u32,

@@ -1,15 +1,16 @@
 //! Liquidity pool related type definitions
 
 use serde::{Deserialize, Serialize};
-use soroban_sdk::Address;
+use soroban_sdk::{Address, Env};
 
 /// Liquidity pool information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone)]
 pub struct PoolInfo {
     /// Token A contract address
-    pub token_a: String,
+    pub token_a: soroban_sdk::String,
     /// Token B contract address
-    pub token_b: String,
+    pub token_b: soroban_sdk::String,
     /// Reserve of token A
     pub reserve_a: u64,
     /// Reserve of token B
@@ -21,23 +22,25 @@ pub struct PoolInfo {
 }
 
 /// Liquidity position for a user
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone)]
 pub struct LiquidityPosition {
     /// User address
     pub user: Address,
     /// Amount of liquidity tokens
     pub liquidity_tokens: u64,
-    /// Share percentage of the pool
-    pub share_percentage: f64,
+    /// Share percentage of the pool (in basis points)
+    pub share_percentage: u32,
 }
 
 /// Swap parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone)]
 pub struct SwapParams {
     /// Input token contract address
-    pub token_in: String,
+    pub token_in: soroban_sdk::String,
     /// Output token contract address
-    pub token_out: String,
+    pub token_out: soroban_sdk::String,
     /// Amount to swap in
     pub amount_in: u64,
     /// Minimum amount out (slippage protection)
@@ -49,7 +52,7 @@ pub struct SwapParams {
 }
 
 /// Swap result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SwapResult {
     /// Amount received
     pub amount_out: u64,
@@ -62,7 +65,7 @@ pub struct SwapResult {
 }
 
 /// Add liquidity parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AddLiquidityParams {
     /// Token A contract address
     pub token_a: String,
@@ -83,7 +86,7 @@ pub struct AddLiquidityParams {
 }
 
 /// Add liquidity result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AddLiquidityResult {
     /// Amount of liquidity tokens received
     pub liquidity_tokens: u64,
@@ -96,7 +99,7 @@ pub struct AddLiquidityResult {
 }
 
 /// Remove liquidity parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RemoveLiquidityParams {
     /// Token A contract address
     pub token_a: String,
@@ -115,7 +118,7 @@ pub struct RemoveLiquidityParams {
 }
 
 /// Remove liquidity result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RemoveLiquidityResult {
     /// Amount of token A received
     pub amount_a: u64,
@@ -147,7 +150,7 @@ pub struct PoolStats {
 }
 
 /// Pool event types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum PoolEvent {
     /// Liquidity added event
     LiquidityAdded(AddLiquidityEvent),
@@ -158,7 +161,7 @@ pub enum PoolEvent {
 }
 
 /// Liquidity added event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AddLiquidityEvent {
     /// Provider address
     pub provider: Address,
@@ -177,7 +180,7 @@ pub struct AddLiquidityEvent {
 }
 
 /// Liquidity removed event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RemoveLiquidityEvent {
     /// Provider address
     pub provider: Address,
@@ -196,7 +199,7 @@ pub struct RemoveLiquidityEvent {
 }
 
 /// Swap executed event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SwapEvent {
     /// Swapper address
     pub swapper: Address,
@@ -218,25 +221,12 @@ pub struct SwapEvent {
     pub timestamp: u64,
 }
 
-impl Default for PoolInfo {
-    fn default() -> Self {
-        Self {
-            token_a: String::new(),
-            token_b: String::new(),
-            reserve_a: 0,
-            reserve_b: 0,
-            total_liquidity: 0,
-            fee_percentage: 30, // 0.3% standard fee
-        }
-    }
-}
-
 impl PoolInfo {
     /// Create new pool info
-    pub fn new(token_a: String, token_b: String, fee_percentage: u32) -> Self {
+    pub fn new(env: &Env, token_a: String, token_b: String, fee_percentage: u32) -> Self {
         Self {
-            token_a,
-            token_b,
+            token_a: soroban_sdk::String::from_str(env, &token_a),
+            token_b: soroban_sdk::String::from_str(env, &token_b),
             reserve_a: 0,
             reserve_b: 0,
             total_liquidity: 0,
