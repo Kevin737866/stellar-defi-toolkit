@@ -24,6 +24,7 @@
 pub mod contracts;
 pub mod utils;
 pub mod types;
+pub mod api;
 
 // Re-export commonly used types
 pub use contracts::{TokenContract, LiquidityPoolContract, StakingContract, YieldVaultContract};
@@ -32,7 +33,7 @@ pub use types::*;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
 
     #[test]
     fn test_library_imports() {

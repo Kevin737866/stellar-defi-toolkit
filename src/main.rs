@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use log::info;
+use soroban_sdk::Env;
 use stellar_defi_toolkit::contracts::{TokenContract, LiquidityPoolContract};
 use stellar_defi_toolkit::utils::StellarClient;
 
@@ -41,6 +42,12 @@ enum Commands {
         #[arg(short, long)]
         contract_id: String,
     },
+    /// Start the GraphQL API server
+    ServeApi {
+        /// Port to listen on
+        #[arg(short, long, default_value = "4000")]
+        port: u16,
+    },
 }
 
 #[tokio::main]
@@ -53,13 +60,15 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::DeployToken { name, symbol, supply } => {
             info!("Deploying token contract: {} ({})", name, symbol);
-            let token_contract = TokenContract::new(name, symbol, supply);
+            let env = Env::default();
+            let token_contract = TokenContract::new_std(&env, name, symbol, supply);
             let contract_id = token_contract.deploy(&client).await?;
             println!("Token deployed successfully! Contract ID: {}", contract_id);
         }
         Commands::CreatePool { token_a, token_b } => {
             info!("Creating liquidity pool between {} and {}", token_a, token_b);
-            let pool = LiquidityPoolContract::new(token_a, token_b);
+            let env = Env::default();
+            let pool = LiquidityPoolContract::new_std(&env, token_a, token_b);
             let contract_id = pool.deploy(&client).await?;
             println!("Liquidity pool created! Contract ID: {}", contract_id);
         }
@@ -67,6 +76,10 @@ async fn main() -> anyhow::Result<()> {
             info!("Getting information for contract: {}", contract_id);
             let info = client.get_contract_info(&contract_id).await?;
             println!("Contract Info: {:#?}", info);
+        }
+        Commands::ServeApi { port } => {
+            info!("Starting Stellar Analytics GraphQL API on port {}", port);
+            stellar_defi_toolkit::api::start_api_server(port, client).await?;
         }
     }
 
