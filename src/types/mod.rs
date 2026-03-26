@@ -1,10 +1,5 @@
-//! Type definitions for Stellar DeFi Toolkit
+//! Shared types used by the lending protocol.
 
-pub mod token;
-pub mod pool;
-pub mod vault;
+pub mod lending;
 
-// Re-export commonly used types
-pub use token::{TokenInfo, TokenMetadata};
-pub use pool::{PoolInfo, LiquidityPosition, SwapParams};
-pub use vault::{VaultInfo, VaultStrategy, VaultStats, StrategyType, HarvestResult, DepositResult, WithdrawResult, PerformanceFeeConfig};
+pub use lending::*;

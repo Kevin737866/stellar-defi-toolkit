@@ -1,12 +1,9 @@
 use clap::{Parser, Subcommand};
-use log::info;
-use stellar_defi_toolkit::contracts::{TokenContract, LiquidityPoolContract};
-use stellar_defi_toolkit::utils::StellarClient;
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracle};
 
 #[derive(Parser)]
-#[command(name = "stellar-defi-toolkit")]
-#[command(about = "A comprehensive DeFi toolkit for Stellar blockchain")]
-#[command(version = "0.1.0")]
+#[command(name = "stellar-defi-cli")]
+#[command(about = "Lending and borrowing protocol playground for Soroban")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -14,61 +11,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Deploy a new token contract
-    DeployToken {
-        /// Token name
-        #[arg(short, long)]
-        name: String,
-        /// Token symbol
-        #[arg(short, long)]
-        symbol: String,
-        /// Initial supply
-        #[arg(short, long, default_value = "1000000")]
-        supply: u64,
-    },
-    /// Create a liquidity pool
-    CreatePool {
-        /// Token A contract ID
-        #[arg(short, long)]
-        token_a: String,
-        /// Token B contract ID
-        #[arg(short, long)]
-        token_b: String,
-    },
-    /// Get contract information
-    GetInfo {
-        /// Contract ID
-        #[arg(short, long)]
-        contract_id: String,
+    /// Print the annualized borrow rate for a given utilization.
+    QuoteRate {
+        #[arg(long, help = "Utilization in basis points, e.g. 8000 for 80%")]
+        utilization_bps: u32,
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() {
     env_logger::init();
-    
-    let cli = Cli::parse();
-    let client = StellarClient::new().await?;
 
+    let cli = Cli::parse();
     match cli.command {
-        Commands::DeployToken { name, symbol, supply } => {
-            info!("Deploying token contract: {} ({})", name, symbol);
-            let token_contract = TokenContract::new(name, symbol, supply);
-            let contract_id = token_contract.deploy(&client).await?;
-            println!("Token deployed successfully! Contract ID: {}", contract_id);
-        }
-        Commands::CreatePool { token_a, token_b } => {
-            info!("Creating liquidity pool between {} and {}", token_a, token_b);
-            let pool = LiquidityPoolContract::new(token_a, token_b);
-            let contract_id = pool.deploy(&client).await?;
-            println!("Liquidity pool created! Contract ID: {}", contract_id);
-        }
-        Commands::GetInfo { contract_id } => {
-            info!("Getting information for contract: {}", contract_id);
-            let info = client.get_contract_info(&contract_id).await?;
-            println!("Contract Info: {:#?}", info);
+        Commands::QuoteRate { utilization_bps } => {
+            let model = InterestRateModel::default();
+            let utilization = i128::from(utilization_bps) * 100_000;
+            let yearly_rate = model.borrow_rate(utilization);
+            let rate_percent = yearly_rate as f64 / 10_000_000.0 * 100.0;
+
+            let protocol = LendingProtocol::new("admin", "treasury", model);
+            let oracle = PriceOracle::new("oracle-admin");
+
+            println!(
+                "borrow_rate={rate_percent:.4}% protocol_admin={} oracle_admin={}",
+                protocol.admin(),
+                oracle.admin()
+            );
         }
     }
-
-    Ok(())
 }
