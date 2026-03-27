@@ -12,10 +12,11 @@ categories = ["cryptography::cryptocurrencies", "web-programming"]
 
 [dependencies]
 # Soroban SDK for smart contract development
-soroban-sdk = "21.0.0"
+soroban-sdk = { version = "21.0.0", features = [] }
+soroban-token-sdk = "21.0.0"
 
 # Stellar SDK for blockchain interactions
-stellar-sdk = "0.24.0"
+stellar_sdk = "0.1.4"
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -41,6 +42,13 @@ clap = { version = "4.0", features = ["derive"] }
 # Logging
 log = "0.4"
 env_logger = "0.10"
+
+# Unique identifiers
+uuid = { version = "1.0", features = ["v4"] }
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
