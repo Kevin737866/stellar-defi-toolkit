@@ -19,6 +19,12 @@ pub mod staking;
 pub mod token;
 pub mod vault;
 
+// Temporarily disabled contracts due to Soroban type serialization issues
+// These need to be refactored to work with current Soroban SDK
+// pub mod price_oracle;
+// pub mod stability_pool;
+// pub mod governance_v2;
+// pub mod arbitrage;
 // Synthetic asset protocol contracts
 pub mod oracle_manager;
 pub mod position_manager;
@@ -28,6 +34,8 @@ pub mod synthetic_protocol;
 // Re-export main contract types
 pub use governance::GovernanceContract;
 pub use liquidity_pool::LiquidityPoolContract;
+pub use stablecoin::StablecoinContract;
+pub use staking::StakingContract;
 pub use oracle_manager::OracleManagerContract;
 pub use position_manager::PositionManagerContract;
 pub use stablecoin::StablecoinContract;
