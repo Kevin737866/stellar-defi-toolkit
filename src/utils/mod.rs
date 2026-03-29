@@ -1,8 +1,5 @@
-//! Utility functions and helpers for Stellar DeFi Toolkit
+//! Utility helpers.
 
-pub mod client;
-pub mod helpers;
+pub mod fixed_point;
 
-// Re-export commonly used utilities
-pub use client::StellarClient;
-pub use helpers::*;
+pub use fixed_point::*;

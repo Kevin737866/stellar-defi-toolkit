@@ -1,245 +1,172 @@
-//! Integration tests for Stellar DeFi Toolkit
-
 use stellar_defi_toolkit::{
-    TokenContract, LiquidityPoolContract, StakingContract, StellarClient,
+    InterestRateModel, LendingProtocol, PriceOracle, ProtocolError, ReserveConfig, WAD,
 };
-use tokio_test;
 
-#[tokio::test]
-async fn test_token_deployment() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let token = TokenContract::new(
-        "Test Token".to_string(),
-        "TEST".to_string(),
-        1000000,
-    );
-    
-    // Test token creation
-    let info = token.get_info();
-    assert_eq!(info.name, "Test Token");
-    assert_eq!(info.symbol, "TEST");
-    assert_eq!(info.total_supply, 1000000);
-    assert_eq!(info.decimals, 7);
-    
-    // Test deployment (mock)
-    let contract_id = token.deploy(&client).await.unwrap();
-    assert!(!contract_id.is_empty());
-    assert!(contract_id.starts_with("TOKEN_CONTRACT_"));
+fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
+    ReserveConfig {
+        asset: asset.to_string(),
+        decimals: 7,
+        collateral_factor_bps,
+        liquidation_threshold_bps: collateral_factor_bps + 500,
+        liquidation_bonus_bps: 1_000,
+        reserve_factor_bps: 1_000,
+        flash_loan_fee_bps: 9,
+        borrow_enabled: true,
+        deposit_enabled: true,
+        flash_loan_enabled: true,
+    }
 }
 
-#[tokio::test]
-async fn test_liquidity_pool_deployment() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let pool = LiquidityPoolContract::new(
-        "TOKEN_A_CONTRACT".to_string(),
-        "TOKEN_B_CONTRACT".to_string(),
-    );
-    
-    // Test pool creation
-    let info = pool.get_info();
-    assert_eq!(info.token_a, "TOKEN_A_CONTRACT");
-    assert_eq!(info.token_b, "TOKEN_B_CONTRACT");
-    assert_eq!(info.reserve_a, 0);
-    assert_eq!(info.reserve_b, 0);
-    assert_eq!(info.total_liquidity, 0);
-    assert_eq!(info.fee_percentage, 30);
-    
-    // Test deployment (mock)
-    let contract_id = pool.deploy(&client).await.unwrap();
-    assert!(!contract_id.is_empty());
-    assert!(contract_id.starts_with("POOL_CONTRACT_"));
-}
-
-#[tokio::test]
-async fn test_staking_contract_deployment() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let staking = StakingContract::new(
-        "STAKING_TOKEN".to_string(),
-        "REWARD_TOKEN".to_string(),
-        1000,
-    );
-    
-    // Test staking contract creation
-    let info = staking.get_info();
-    assert_eq!(info.staking_token, "STAKING_TOKEN");
-    assert_eq!(info.reward_token, "REWARD_TOKEN");
-    assert_eq!(info.reward_rate, 1000);
-    assert_eq!(info.total_staked, 0);
-    
-    // Test deployment (mock)
-    let contract_id = staking.deploy(&client).await.unwrap();
-    assert!(!contract_id.is_empty());
-    assert!(contract_id.starts_with("STAKING_CONTRACT_"));
-}
-
-#[tokio::test]
-async fn test_contract_info_retrieval() {
-    let client = StellarClient::new().await.unwrap();
-    
-    // Test getting contract info
-    let contract_id = "TEST_CONTRACT_ID";
-    let info = client.get_contract_info(contract_id).await.unwrap();
-    
-    assert_eq!(info["contract_id"], contract_id);
-    assert!(info.contains_key("network"));
-    assert!(info.contains_key("horizon_url"));
-    assert!(info.contains_key("status"));
-}
-
-#[tokio::test]
-async fn test_account_operations() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let public_key = "GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
-    let account_info = client.get_account(public_key).await.unwrap();
-    
-    assert_eq!(account_info["account_id"], public_key);
-    assert!(account_info.contains_key("balance"));
-    assert!(account_info.contains_key("sequence"));
-    assert!(account_info.contains_key("network"));
-}
-
-#[tokio::test]
-async fn test_network_fee() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let fee = client.get_network_fee().await.unwrap();
-    assert!(fee > 0);
-}
-
-#[tokio::test]
-async fn test_testnet_funding() {
-    let client = StellarClient::new().await.unwrap();
-    
-    let public_key = "GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
-    let result = client.fund_testnet_account(public_key).await;
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_token_operations() {
-    let mut token = TokenContract::new(
-        "Test Token".to_string(),
-        "TEST".to_string(),
-        1000000,
-    );
-    
-    // Test minting
-    let address = soroban_sdk::Address::generate(&soroban_sdk::Env::default());
-    let initial_supply = token.total_supply;
-    token.mint(address.clone(), 500000).unwrap();
-    assert_eq!(token.total_supply, initial_supply + 500000);
-    
-    // Test burning
-    token.burn(address, 100000).unwrap();
-    assert_eq!(token.total_supply, initial_supply + 400000);
-}
-
-#[test]
-fn test_liquidity_pool_operations() {
-    let mut pool = LiquidityPoolContract::new(
-        "TOKEN_A_CONTRACT".to_string(),
-        "TOKEN_B_CONTRACT".to_string(),
-    );
-    
-    let provider = soroban_sdk::Address::generate(&soroban_sdk::Env::default());
-    
-    // Test adding initial liquidity
-    let liquidity = pool
-        .add_liquidity(provider, 1000, 2000, 1000, 2000)
+fn setup_protocol() -> (LendingProtocol, PriceOracle) {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
-    assert_eq!(pool.reserve_a, 1000);
-    assert_eq!(pool.reserve_b, 2000);
-    assert_eq!(pool.total_liquidity, liquidity);
-    
-    // Test price calculation
-    let price_a_to_b = pool.get_price_a_to_b();
-    let price_b_to_a = pool.get_price_b_to_a();
-    assert_eq!(price_a_to_b, 2.0);
-    assert_eq!(price_b_to_a, 0.5);
-    
-    // Test swap calculation
-    let output = pool.calculate_swap_output(100, pool.reserve_a, pool.reserve_b);
-    assert!(output > 180 && output < 182);
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let mut oracle = PriceOracle::new("oracle");
+    oracle.set_price("oracle", "XLM", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
+
+    (protocol, oracle)
 }
 
 #[test]
-fn test_staking_operations() {
-    let mut staking = StakingContract::new(
-        "STAKING_TOKEN".to_string(),
-        "REWARD_TOKEN".to_string(),
-        1000,
+fn deposits_mint_supply_shares_and_track_liquidity() {
+    let (mut protocol, _oracle) = setup_protocol();
+    let shares = protocol.deposit("alice", "USDC", 1_000_000, 0).unwrap();
+    let reserve = protocol.reserve_state("USDC").unwrap();
+
+    assert_eq!(shares, 1_000_000);
+    assert_eq!(reserve.total_cash, 1_000_000);
+    assert_eq!(reserve.total_supply_shares, 1_000_000);
+}
+
+#[test]
+fn overcollateralized_borrow_and_repay_flow_works() {
+    let (mut protocol, oracle) = setup_protocol();
+
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 700_000, &oracle, 0)
+        .unwrap();
+
+    let position = protocol.position("alice", &oracle).unwrap();
+    assert_eq!(position.debt_amounts["USDC"], 700_000);
+    assert!(position.collateral_value >= position.debt_value);
+
+    let repaid = protocol
+        .repay("alice", "alice", "USDC", 200_000, 1)
+        .unwrap();
+    assert_eq!(repaid, 200_000);
+    let updated = protocol.position("alice", &oracle).unwrap();
+    assert!(updated.debt_amounts["USDC"] < 700_000);
+}
+
+#[test]
+fn borrow_rejected_when_it_exceeds_collateral_limit() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 1_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 100_000, 0).unwrap();
+
+    let err = protocol
+        .borrow("alice", "USDC", 200_000, &oracle, 0)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::InsufficientCollateral);
+}
+
+#[test]
+fn interest_accrues_and_reserve_factor_splits_protocol_fees() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+
+    let before = protocol.reserve_state("USDC").unwrap().clone();
+    protocol.accrue_interest("USDC", 31_536_000).unwrap();
+    let after = protocol.reserve_state("USDC").unwrap();
+
+    assert!(after.total_debt > before.total_debt);
+    assert!(after.protocol_fees > before.protocol_fees);
+}
+
+#[test]
+fn liquidation_seizes_collateral_when_health_factor_falls_below_one() {
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 700_000, &oracle, 0)
+        .unwrap();
+
+    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    let position = protocol.position("alice", &oracle).unwrap();
+    assert!(position.health_factor < WAD);
+
+    let result = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 300_000, &oracle, 1)
+        .unwrap();
+
+    assert!(result.repaid_amount > 0);
+    assert!(result.seized_collateral > 0);
+
+    let updated = protocol.position("alice", &oracle).unwrap();
+    assert!(updated.debt_value < position.debt_value);
+}
+
+#[test]
+fn flash_loans_charge_fee_and_credit_protocol_cut() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 10_000_000, 0).unwrap();
+
+    let receipt = protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap();
+    let reserve = protocol.reserve_state("USDC").unwrap();
+
+    assert!(receipt.fee_paid > 0);
+    assert_eq!(
+        receipt.fee_paid,
+        receipt.protocol_fee + receipt.supplier_fee
     );
-    
-    let user = soroban_sdk::Address::generate(&soroban_sdk::Env::default());
-    
-    // Test staking
-    staking.stake(user, 5000).unwrap();
-    assert_eq!(staking.get_total_staked(), 5000);
-    
-    // Test unstaking
-    staking.unstake(user, 2000).unwrap();
-    assert_eq!(staking.get_total_staked(), 3000);
-    
-    // Test APY calculation
-    let apy = staking.get_apy();
-    assert!(apy > 0.0);
+    assert!(reserve.protocol_fees >= receipt.protocol_fee);
 }
 
 #[test]
-fn test_utility_functions() {
-    use stellar_defi_toolkit::utils::*;
-    
-    // Test address generation
-    let address = generate_address();
-    // Address should be valid (basic check)
-    
-    // Test public key validation
-    assert!(validate_public_key("GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789").unwrap());
-    assert!(!validate_public_key("invalid").unwrap());
-    
-    // Test balance formatting
-    assert_eq!(format_balance(1000000000, 7), "100.0000000");
-    assert_eq!(format_balance(123456789, 7), "12.3456789");
-    
-    // Test balance parsing
-    assert_eq!(parse_balance("100.0000000", 7).unwrap(), 1000000000);
-    assert_eq!(parse_balance("12.3456789", 7).unwrap(), 123456789);
-    
-    // Test minimum calculations
-    let (min_a, min_b) = calculate_minimum_liquidity(1000, 2000, 500);
-    assert_eq!(min_a, 950);
-    assert_eq!(min_b, 1900);
-    
-    let min_out = calculate_minimum_output(1000, 300);
-    assert_eq!(min_out, 700);
+fn admin_controls_guard_configuration_and_fee_collection() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap();
+
+    let err = protocol
+        .collect_protocol_fees("alice", "USDC", 100)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+
+    let collected = protocol
+        .collect_protocol_fees("admin", "USDC", 100)
+        .unwrap();
+    assert!(collected > 0);
 }
 
 #[test]
-fn test_type_validations() {
-    use stellar_defi_toolkit::types::*;
-    
-    // Test token metadata validation
-    let mut metadata = token::TokenMetadata::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-    assert!(metadata.validate().is_ok());
-    
-    // Test invalid metadata
-    metadata.name = "".to_string();
-    assert!(metadata.validate().is_err());
-    
-    // Test pool info
-    let pool_info = pool::PoolInfo::new("TOKEN_A".to_string(), "TOKEN_B".to_string(), 30);
-    assert_eq!(pool_info.token_a, "TOKEN_A");
-    assert_eq!(pool_info.token_b, "TOKEN_B");
-    assert_eq!(pool_info.fee_percentage, 30);
-    
-    // Test price calculation
-    let mut pool_info = pool::PoolInfo::default();
-    pool_info.reserve_a = 1000;
-    pool_info.reserve_b = 2000;
-    assert_eq!(pool_info.get_price_a_to_b(), 2.0);
-    assert_eq!(pool_info.get_price_b_to_a(), 0.5);
+fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 700_000, &oracle, 0)
+        .unwrap();
+
+    let err = protocol
+        .set_collateral_enabled("alice", "XLM", false, &oracle)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::HealthFactorTooLow);
 }
