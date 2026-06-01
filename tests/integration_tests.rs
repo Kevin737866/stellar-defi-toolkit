@@ -206,7 +206,7 @@ fn per_asset_interest_rate_model_overrides_protocol_default() {
         .set_asset_interest_rate_model("admin", "USDC", Some(steep_model))
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 
@@ -335,7 +335,7 @@ fn borrow_is_rejected_when_borrow_cap_is_reached() {
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 
@@ -369,7 +369,7 @@ fn borrow_succeeds_when_borrow_cap_is_zero_uncapped() {
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 
@@ -424,7 +424,7 @@ fn reserve_factor_update_changes_protocol_fee_accrual() {
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
 
-    let mut oracle2 = PriceOracle::new("oracle");
+    let mut oracle2 = PriceOracleSim::new("oracle");
     oracle2.set_price("oracle", "XLM", WAD).unwrap();
     oracle2.set_price("oracle", "USDC", WAD).unwrap();
 

@@ -16,6 +16,9 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             },
             0,
         )
@@ -34,6 +37,9 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             },
             0,
         )
