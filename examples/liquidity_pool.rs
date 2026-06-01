@@ -13,6 +13,9 @@ fn main() {
         borrow_enabled: true,
         deposit_enabled: true,
         flash_loan_enabled: true,
+        supply_cap: 0,
+        borrow_cap: 0,
+        interest_rate_model: None,
     };
     protocol.register_asset("admin", reserve, 0).unwrap();
 

@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim};
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig};
 
 #[derive(Parser)]
 #[command(name = "stellar-defi-cli")]
@@ -97,7 +97,7 @@ fn main() {
         } => {
             let model = InterestRateModel::default();
             let mut protocol = LendingProtocol::new("admin", "treasury", model);
-            let mut oracle = PriceOracle::new("oracle-admin");
+            let mut oracle = PriceOracleSim::new("oracle-admin");
 
             // Mocking a state so the repay actually succeeds
             let config = ReserveConfig {
@@ -111,6 +111,9 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             };
 
             if let Err(e) = protocol.register_asset("admin", config, 0) {
@@ -191,6 +194,9 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             };
 
             if let Err(e) = protocol.register_asset("admin", config, 0) {

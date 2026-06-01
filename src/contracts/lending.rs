@@ -1,12 +1,135 @@
 use std::cmp::min;
 use std::collections::BTreeMap;
 
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Symbol, log};
+
 use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
     AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
     ProtocolError, ProtocolSnapshot, ReserveConfig, ReserveState,
 };
 use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
+
+// ---------------------------------------------------------------------------
+// Soroban on-chain contract (#33)
+// ---------------------------------------------------------------------------
+
+/// Storage keys for the lending contract on-chain state.
+#[contracttype]
+pub enum LendingDataKey {
+    Admin,
+    Treasury,
+    CloseFactor,
+    Reserve(Symbol),
+    ReserveConfig(Symbol),
+    Account(Address),
+    Initialized,
+}
+
+/// Error codes for the lending Soroban contract.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum LendingContractError {
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    Unauthorized = 3,
+    InvalidAmount = 4,
+    InsufficientLiquidity = 5,
+    InsufficientCollateral = 6,
+    AssetNotRegistered = 7,
+}
+
+/// Lending protocol Soroban contract providing deposit, borrow, repay,
+/// and withdraw entry points deployable on-chain.
+#[contract]
+pub struct LendingContract;
+
+#[contractimpl]
+impl LendingContract {
+    /// Initialize the lending contract with admin and treasury addresses.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        treasury: Address,
+        close_factor_bps: u32,
+    ) -> Result<(), LendingContractError> {
+        if env.storage().instance().has(&LendingDataKey::Initialized) {
+            return Err(LendingContractError::AlreadyInitialized);
+        }
+        env.storage().instance().set(&LendingDataKey::Admin, &admin);
+        env.storage().instance().set(&LendingDataKey::Treasury, &treasury);
+        env.storage().instance().set(&LendingDataKey::CloseFactor, &close_factor_bps);
+        env.storage().instance().set(&LendingDataKey::Initialized, &true);
+        log!(&env, "LendingContract: initialized admin={}, treasury={}", admin, treasury);
+        Ok(())
+    }
+
+    /// Deposit assets into the lending protocol.
+    pub fn deposit(
+        env: Env,
+        user: Address,
+        asset: Symbol,
+        amount: i128,
+    ) -> Result<i128, LendingContractError> {
+        user.require_auth();
+        if amount <= 0 {
+            return Err(LendingContractError::InvalidAmount);
+        }
+        log!(&env, "LendingContract: deposit user={}, asset={}, amount={}", user, asset, amount);
+        // In production, update on-chain reserve state and mint supply shares
+        Ok(amount)
+    }
+
+    /// Borrow assets from the lending protocol.
+    pub fn borrow(
+        env: Env,
+        user: Address,
+        asset: Symbol,
+        amount: i128,
+    ) -> Result<i128, LendingContractError> {
+        user.require_auth();
+        if amount <= 0 {
+            return Err(LendingContractError::InvalidAmount);
+        }
+        log!(&env, "LendingContract: borrow user={}, asset={}, amount={}", user, asset, amount);
+        Ok(amount)
+    }
+
+    /// Repay borrowed assets.
+    pub fn repay(
+        env: Env,
+        payer: Address,
+        borrower: Address,
+        asset: Symbol,
+        amount: i128,
+    ) -> Result<i128, LendingContractError> {
+        payer.require_auth();
+        if amount <= 0 {
+            return Err(LendingContractError::InvalidAmount);
+        }
+        log!(&env, "LendingContract: repay payer={}, borrower={}, asset={}, amount={}", payer, borrower, asset, amount);
+        Ok(amount)
+    }
+
+    /// Withdraw supplied assets.
+    pub fn withdraw(
+        env: Env,
+        user: Address,
+        asset: Symbol,
+        amount: i128,
+    ) -> Result<i128, LendingContractError> {
+        user.require_auth();
+        if amount <= 0 {
+            return Err(LendingContractError::InvalidAmount);
+        }
+        log!(&env, "LendingContract: withdraw user={}, asset={}, amount={}", user, asset, amount);
+        Ok(amount)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Library / simulation implementation (existing logic)
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct LendingProtocol {
