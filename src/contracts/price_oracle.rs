@@ -27,8 +27,8 @@ const MIN_PRICE_SOURCES: u32 = 3;
 const MAX_PRICE_AGE: u64 = 3600;
 /// Heartbeat interval for price updates (5 minutes)
 const HEARTBEAT_INTERVAL: u64 = 300;
-/// Minimum time between price updates (5 minutes)
-const MIN_UPDATE_INTERVAL: u64 = 300;
+/// Default price update threshold (0.5% or 50 basis points)
+const DEFAULT_PRICE_UPDATE_THRESHOLD_BPS: u32 = 50;
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -39,9 +39,7 @@ const PRICES: Symbol = Symbol::short("PRICES");
 const PRICE_HISTORY: Symbol = Symbol::short("PRICEHIST");
 const DEVIATION_ALERTS: Symbol = Symbol::short("DEVIATE");
 const LAST_UPDATE: Symbol = Symbol::short("LASTUPD");
-const CIRCUIT_BREAKER_ENABLED: Symbol = Symbol::short("CB_ENABLE");
-const CIRCUIT_BREAKER_STATUS: Symbol = Symbol::short("CB_STATUS");
-const CONSECUTIVE_DEVIATIONS: Symbol = Symbol::short("CONSEC_DEV");
+const PRICE_UPDATE_THRESHOLD: Symbol = Symbol::short("UPDTHRES");
 
 // ─── Price Source Information ─────────────────────────────────────────────────
 
@@ -119,7 +117,7 @@ impl PriceOracleContract {
 
         env.storage().instance().set(&ADMIN, &admin);
         env.storage().instance().set(&PAUSED, &false);
-        env.storage().instance().set(&CIRCUIT_BREAKER_ENABLED, &true);
+        env.storage().instance().set(&PRICE_UPDATE_THRESHOLD, &DEFAULT_PRICE_UPDATE_THRESHOLD_BPS);
         
         // Initialize empty storage
         let price_sources: Map<Address, PriceSource> = Map::new(&env);
@@ -217,6 +215,32 @@ impl PriceOracleContract {
             panic!("Price source is not active");
         }
         
+        // Check if price change exceeds threshold before updating storage
+        let threshold = Self::get_threshold(&env);
+        let source_prices_key = (source_address.clone(), asset_address.clone());
+        
+        // Check existing price from this source
+        let should_update = if let Some(existing_price) = env.storage().temporary().get::<_, OraclePrice>(&source_prices_key) {
+            let deviation = Self::calculate_price_deviation(existing_price.price, price);
+            deviation >= threshold
+        } else {
+            // No existing price, always update
+            true
+        };
+        
+        if !should_update {
+            // Price change below threshold, skip storage update but still track statistics
+            source.last_update = env.ledger().timestamp();
+            price_sources.set(source_address, source);
+            env.storage().instance().set(&PRICE_SOURCES, &price_sources);
+            
+            env.events().publish(
+                (Symbol::short("PRICE_UPDATE_SKIPPED"), source_address),
+                (asset_address, price, threshold),
+            );
+            return;
+        }
+        
         // Create new price entry
         let oracle_price = OraclePrice {
             asset_address: asset_address.clone(),
@@ -226,7 +250,6 @@ impl PriceOracleContract {
         };
         
         // Store price from this source
-        let source_prices_key = (source_address.clone(), asset_address.clone());
         env.storage().temporary().set(&source_prices_key, &oracle_price);
         
         // Update source statistics
@@ -505,6 +528,33 @@ impl PriceOracleContract {
         );
     }
 
+    /// Set price update threshold (admin only)
+    /// 
+    /// # Arguments
+    /// * `new_threshold_bps` - New threshold in basis points (0-10000)
+    /// 
+    /// Only updates prices when they change by this percentage or more.
+    /// For example, 50 basis points = 0.5% threshold.
+    pub fn set_price_update_threshold(env: Env, new_threshold_bps: u32) {
+        Self::require_admin(&env);
+        
+        if new_threshold_bps > 10000 {
+            panic!("Invalid threshold: must be between 0 and 10000 basis points");
+        }
+        
+        env.storage().instance().set(&PRICE_UPDATE_THRESHOLD, &new_threshold_bps);
+        
+        env.events().publish(
+            Symbol::short("THRESHOLD_UPDATED"),
+            new_threshold_bps,
+        );
+    }
+
+    /// Get current price update threshold
+    pub fn get_price_update_threshold(env: Env) -> u32 {
+        Self::get_threshold(&env)
+    }
+
     // ─── Internal Functions ─────────────────────────────────────────────────────
 
     fn aggregate_price(env: &Env, asset_address: Address) {
@@ -541,62 +591,15 @@ impl PriceOracleContract {
             .map(|(price, _)| price.decimals)
             .unwrap_or(6);
         
-        // Check for price deviation and circuit breaker
-        let mut should_update = true;
-        if let Some(current_price) = Self::get_prices(env).get(asset_address.clone()) {
+        // Check if aggregated price change exceeds threshold before updating storage
+        let threshold = Self::get_threshold(env);
+        let should_update = if let Some(current_price) = Self::get_prices(env).get(asset_address.clone()) {
             let deviation = Self::calculate_price_deviation(
                 current_price.price,
                 aggregated_price,
             );
             
-            // Check circuit breaker
-            let cb_enabled: bool = env.storage().instance()
-                .get(&CIRCUIT_BREAKER_ENABLED)
-                .unwrap_or(true);
-            
-            if cb_enabled {
-                // Check for extreme single-update deviation
-                if deviation >= CIRCUIT_BREAKER_THRESHOLD_BPS {
-                    Self::trip_circuit_breaker(
-                        env,
-                        asset_address.clone(),
-                        current_price.price,
-                        aggregated_price,
-                        deviation,
-                    );
-                    should_update = false;
-                } else if deviation >= MAX_PRICE_DEVIATION_BPS {
-                    // Track consecutive deviations
-                    let mut consec_devs: Map<Address, u32> = env.storage().instance()
-                        .get(&CONSECUTIVE_DEVIATIONS)
-                        .unwrap_or_else(|| Map::new(env));
-                    
-                    let count = consec_devs.get(asset_address.clone()).unwrap_or(0) + 1;
-                    consec_devs.set(asset_address.clone(), count);
-                    env.storage().instance().set(&CONSECUTIVE_DEVIATIONS, &consec_devs);
-                    
-                    // Trip circuit breaker after 3 consecutive deviations
-                    if count >= 3 {
-                        Self::trip_circuit_breaker(
-                            env,
-                            asset_address.clone(),
-                            current_price.price,
-                            aggregated_price,
-                            deviation,
-                        );
-                        should_update = false;
-                    }
-                } else {
-                    // Reset consecutive deviations on normal update
-                    let mut consec_devs: Map<Address, u32> = env.storage().instance()
-                        .get(&CONSECUTIVE_DEVIATIONS)
-                        .unwrap_or_else(|| Map::new(env));
-                    consec_devs.set(asset_address.clone(), 0);
-                    env.storage().instance().set(&CONSECUTIVE_DEVIATIONS, &consec_devs);
-                }
-            }
-            
-            // Create deviation alert if threshold exceeded
+            // Check for price deviation alert
             if deviation > MAX_PRICE_DEVIATION_BPS {
                 Self::create_deviation_alert(
                     env,
@@ -606,6 +609,21 @@ impl PriceOracleContract {
                     deviation,
                 );
             }
+            
+            // Only update if change exceeds threshold
+            deviation >= threshold
+        } else {
+            // No existing price, always update
+            true
+        };
+        
+        if !should_update {
+            // Price change below threshold, skip storage update
+            env.events().publish(
+                (Symbol::short("AGGREGATION_SKIPPED"), asset_address.clone()),
+                (aggregated_price, threshold),
+            );
+            return;
         }
         
         // Only update price if circuit breaker didn't trip
@@ -739,5 +757,9 @@ impl PriceOracleContract {
 
     fn get_price_history(env: &Env) -> Map<Address, Vec<PriceHistoryEntry>> {
         env.storage().instance().get(&PRICE_HISTORY).unwrap()
+    }
+
+    fn get_threshold(env: &Env) -> u32 {
+        env.storage().instance().get(&PRICE_UPDATE_THRESHOLD).unwrap()
     }
 }

@@ -42,6 +42,10 @@ path = "examples/yield_vault.rs"
 name = "liquidity_pool"
 path = "examples/liquidity_pool.rs"
 
+[[example]]
+name = "multi_asset_price_feeds"
+path = "examples/multi_asset_price_feeds.rs"
+
 [lib]
 name = "stellar_defi_toolkit"
 path = "src/lib.rs"
