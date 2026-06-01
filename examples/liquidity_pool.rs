@@ -17,7 +17,7 @@ fn main() {
     protocol.register_asset("admin", reserve, 0).unwrap();
 
     let mut oracle = PriceOracle::new("oracle");
-    oracle.set_price("oracle", "USDC", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD, 0).unwrap();
 
     protocol
         .deposit("liquidity-provider", "USDC", 1_000_000, 0)

@@ -14,7 +14,7 @@ pub mod contracts;
 pub mod types;
 pub mod utils;
 
-pub use contracts::{LendingProtocol, PriceOracle};
+pub use contracts::{LendingProtocol, PriceBounds, PriceOracle};
 pub use types::lending::*;
 pub use utils::fixed_point::{
     bps_mul, mul_div, wad_div, wad_mul, BPS_DENOMINATOR, WAD, YEAR_IN_SECONDS,

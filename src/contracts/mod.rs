@@ -4,4 +4,4 @@ pub mod lending;
 pub mod oracle;
 
 pub use lending::LendingProtocol;
-pub use oracle::PriceOracle;
+pub use oracle::{PriceBounds, PriceOracle};

@@ -90,6 +90,9 @@ pub struct LiquidationResult {
     pub repaid_amount: i128,
     pub seized_collateral: i128,
     pub liquidator_discount_value: i128,
+    /// Health factor of the borrower's position after the liquidation.
+    /// `i128::MAX` means the position is fully repaid (debt_value == 0).
+    pub health_factor_after: i128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +100,7 @@ pub struct ProtocolSnapshot {
     pub reserves: std::collections::BTreeMap<String, ReserveState>,
     pub reserve_configs: std::collections::BTreeMap<String, ReserveConfig>,
     pub treasury: String,
+    pub paused: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -107,6 +111,8 @@ pub enum ProtocolError {
     UnknownAsset,
     #[error("only admin can perform this action")]
     Unauthorized,
+    #[error("protocol is paused")]
+    ProtocolPaused,
     #[error("deposits are disabled for asset {0}")]
     DepositsDisabled(String),
     #[error("borrows are disabled for asset {0}")]
@@ -135,6 +141,12 @@ pub enum ProtocolError {
     MathFailure,
     #[error("price unavailable for asset {0}")]
     MissingPrice(String),
+    #[error("oracle price is stale")]
+    OraclePriceStale,
+    #[error("oracle price deviation exceeds the allowed threshold")]
+    OraclePriceDeviationTooHigh,
+    #[error("oracle price is outside the configured bounds for this asset")]
+    OraclePriceOutOfBounds,
 }
 
 impl InterestRateModel {

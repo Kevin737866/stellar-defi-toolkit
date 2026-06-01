@@ -2,6 +2,8 @@ use stellar_defi_toolkit::{
     InterestRateModel, LendingProtocol, PriceOracle, ProtocolError, ReserveConfig, WAD,
 };
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
 fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
     ReserveConfig {
         asset: asset.to_string(),
@@ -27,8 +29,8 @@ fn setup_protocol() -> (LendingProtocol, PriceOracle) {
         .unwrap();
 
     let mut oracle = PriceOracle::new("oracle");
-    oracle.set_price("oracle", "XLM", WAD).unwrap();
-    oracle.set_price("oracle", "USDC", WAD).unwrap();
+    oracle.set_price("oracle", "XLM", WAD, 0).unwrap();
+    oracle.set_price("oracle", "USDC", WAD, 0).unwrap();
 
     (protocol, oracle)
 }
@@ -104,7 +106,7 @@ fn liquidation_seizes_collateral_when_health_factor_falls_below_one() {
         .borrow("alice", "USDC", 700_000, &oracle, 0)
         .unwrap();
 
-    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    oracle.set_price("oracle", "XLM", 700_000_000, 1).unwrap();
     let position = protocol.position("alice", &oracle).unwrap();
     assert!(position.health_factor < WAD);
 
@@ -169,4 +171,158 @@ fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
         .set_collateral_enabled("alice", "XLM", false, &oracle)
         .unwrap_err();
     assert_eq!(err, ProtocolError::HealthFactorTooLow);
+}
+
+// ── Emergency pause tests ─────────────────────────────────────────────────────
+
+#[test]
+fn pause_blocks_all_user_operations() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+
+    // Pause the protocol
+    protocol.pause("admin").unwrap();
+    assert!(protocol.is_paused());
+
+    // Every user-facing operation must return ProtocolPaused
+    assert_eq!(
+        protocol.deposit("alice", "USDC", 100, 1).unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol.withdraw("alice", "XLM", 100, &oracle, 1).unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol.borrow("alice", "USDC", 100, &oracle, 1).unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol.repay("alice", "alice", "USDC", 100, 1).unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol
+            .liquidate("bob", "alice", "USDC", "XLM", 100, &oracle, 1)
+            .unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol.flash_loan("arb", "USDC", 100, 200, 1).unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+    assert_eq!(
+        protocol
+            .set_collateral_enabled("alice", "XLM", false, &oracle)
+            .unwrap_err(),
+        ProtocolError::ProtocolPaused
+    );
+}
+
+#[test]
+fn pause_does_not_block_admin_operations() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap();
+
+    protocol.pause("admin").unwrap();
+
+    // Admin can still collect fees while paused
+    let collected = protocol
+        .collect_protocol_fees("admin", "USDC", 1_000)
+        .unwrap();
+    assert!(collected > 0);
+}
+
+#[test]
+fn unpause_restores_normal_operations() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.pause("admin").unwrap();
+    assert!(protocol.is_paused());
+
+    protocol.unpause("admin").unwrap();
+    assert!(!protocol.is_paused());
+
+    // Deposit should work again
+    let shares = protocol.deposit("alice", "USDC", 500_000, 0).unwrap();
+    assert!(shares > 0);
+}
+
+#[test]
+fn only_admin_can_pause_and_unpause() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    assert_eq!(
+        protocol.pause("alice").unwrap_err(),
+        ProtocolError::Unauthorized
+    );
+    assert_eq!(
+        protocol.unpause("alice").unwrap_err(),
+        ProtocolError::Unauthorized
+    );
+}
+
+#[test]
+fn pause_and_unpause_are_idempotent() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    // Double-pause should not error
+    protocol.pause("admin").unwrap();
+    protocol.pause("admin").unwrap();
+    assert!(protocol.is_paused());
+
+    // Double-unpause should not error
+    protocol.unpause("admin").unwrap();
+    protocol.unpause("admin").unwrap();
+    assert!(!protocol.is_paused());
+}
+
+// ── Liquidation optimisation tests ───────────────────────────────────────────
+
+#[test]
+fn liquidation_result_includes_health_factor_after() {
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 700_000, &oracle, 0)
+        .unwrap();
+
+    oracle.set_price("oracle", "XLM", 700_000_000, 1).unwrap();
+
+    let result = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 300_000, &oracle, 1)
+        .unwrap();
+
+    // health_factor_after must be present and non-negative
+    assert!(result.health_factor_after >= 0);
+    // After partial liquidation the position should be healthier
+    assert!(result.repaid_amount > 0);
+    assert!(result.seized_collateral > 0);
+}
+
+#[test]
+fn liquidation_caps_seize_to_available_collateral() {
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    // Alice deposits a small amount of XLM and borrows close to the limit
+    protocol.deposit("alice", "XLM", 100_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 70_000, &oracle, 0)
+        .unwrap();
+
+    // Crash XLM price so the position is deeply underwater
+    oracle.set_price("oracle", "XLM", 500_000_000, 1).unwrap();
+
+    // Request a very large repay — should succeed by capping seize
+    let result = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 60_000, &oracle, 1)
+        .unwrap();
+
+    assert!(result.seized_collateral > 0);
+    // Seized amount must not exceed what alice had
+    assert!(result.seized_collateral <= 100_000);
 }

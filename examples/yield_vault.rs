@@ -40,8 +40,8 @@ fn main() {
         .unwrap();
 
     let mut oracle = PriceOracle::new("oracle");
-    oracle.set_price("oracle", "XLM", WAD).unwrap();
-    oracle.set_price("oracle", "USDC", WAD).unwrap();
+    oracle.set_price("oracle", "XLM", WAD, 0).unwrap();
+    oracle.set_price("oracle", "USDC", WAD, 0).unwrap();
 
     protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
     protocol.deposit("borrower", "XLM", 1_000_000, 0).unwrap();
