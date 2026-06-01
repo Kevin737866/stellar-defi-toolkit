@@ -3,7 +3,8 @@
 pub mod lending;
 pub mod liquidity_pool;
 pub mod oracle;
+pub mod liquidity_pool;
 
-pub use lending::{LendingContract, LendingProtocol};
-pub use liquidity_pool::{LiquidityPool, LiquidityPoolContract};
-pub use oracle::{PriceOracle, PriceOracleSim};
+pub use lending::LendingProtocol;
+pub use oracle::PriceOracle;
+pub use liquidity_pool::LiquidityPoolContract;

@@ -1,7 +1,12 @@
 use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig, WAD};
 
 fn main() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
     let reserve = ReserveConfig {
         asset: "USDC".to_string(),
         decimals: 7,
