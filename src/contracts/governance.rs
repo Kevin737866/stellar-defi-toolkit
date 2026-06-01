@@ -3,7 +3,8 @@
 //! Provides decentralized governance functionality for protocol
 //! management and decision-making on the Stellar blockchain.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
+use std::collections::HashMap;
 use crate::utils::StellarClient;
 
 /// Governance contract for protocol governance
@@ -25,6 +26,12 @@ pub struct GovernanceContract {
     proposals: std::collections::BTreeMap<u64, Proposal>,
     /// Contract address
     address: Option<Address>,
+    /// Internal proposal map
+    proposals: HashMap<u64, Proposal>,
+    /// Internal vote map (proposal_id, voter_string) -> voting_power
+    votes: HashMap<(u64, String), u64>,
+    /// Next proposal ID
+    next_proposal_id: u64,
 }
 
 impl GovernanceContract {
@@ -45,6 +52,9 @@ impl GovernanceContract {
             next_proposal_id: 1,
             proposals: std::collections::BTreeMap::new(),
             address: None,
+            proposals: HashMap::new(),
+            votes: HashMap::new(),
+            next_proposal_id: 1,
         }
     }
 
@@ -92,26 +102,29 @@ impl GovernanceContract {
         }
 
         let proposal_id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
         let proposal = Proposal {
             id: proposal_id,
-            proposer: proposer.clone(),
+            proposer,
             title,
             description,
             actions,
             votes_for: 0,
             votes_against: 0,
             total_voting_power: 0,
-            created_at: now,
-            voting_deadline: now + self.voting_period,
-            execution_time: 0,
+            created_at: current_time,
+            voting_deadline: current_time + self.voting_period,
+            execution_time: current_time + self.voting_period + self.execution_delay,
             status: ProposalStatus::Active,
         };
 
         self.proposals.insert(proposal_id, proposal);
-        self.next_proposal_id += 1;
-
-        log::info!("ProposalCreated: id={} proposer={:?}", proposal_id, proposer);
-
         Ok(proposal_id)
     }
 
@@ -127,13 +140,25 @@ impl GovernanceContract {
             return Err("Voting power must be greater than 0".to_string());
         }
 
-        // In a real implementation, this would:
-        // 1. Check if proposal exists and is active
-        // 2. Check if voter hasn't already voted
-        // 3. Verify voter's voting power
-        // 4. Record the vote
-        // 5. Update vote counts
-        // 6. Emit vote event
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("Proposal not found")?;
+
+        if !matches!(proposal.status, ProposalStatus::Active) {
+            return Err("Proposal is not active".to_string());
+        }
+
+        let vote_key = (proposal_id, voter.to_string());
+        if self.votes.contains_key(&vote_key) {
+            return Err("Already voted".to_string());
+        }
+
+        self.votes.insert(vote_key, voting_power);
+
+        if support {
+            proposal.votes_for += voting_power;
+        } else {
+            proposal.votes_against += voting_power;
+        }
+        proposal.total_voting_power += voting_power;
 
         Ok(())
     }
@@ -144,14 +169,35 @@ impl GovernanceContract {
         executor: Address,
         proposal_id: u64,
     ) -> Result<(), String> {
-        // In a real implementation, this would:
-        // 1. Check if proposal exists
-        // 2. Check if voting period has ended
-        // 3. Check if proposal has passed
-        // 4. Check if execution delay has passed
-        // 5. Execute all proposal actions
-        // 6. Mark proposal as executed
-        // 7. Emit execution event
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("Proposal not found")?;
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        if current_time < proposal.voting_deadline {
+            return Err("Voting period has not ended".to_string());
+        }
+
+        if !matches!(proposal.status, ProposalStatus::Active | ProposalStatus::Succeeded) {
+            return Err("Proposal cannot be executed".to_string());
+        }
+
+        let total_possible_votes = 10000; // Mock total supply
+        let quorum_votes = (total_possible_votes * self.quorum_percentage as u64) / 10000;
+
+        if proposal.total_voting_power < quorum_votes || proposal.votes_for <= proposal.votes_against {
+            proposal.status = ProposalStatus::Defeated;
+            return Err("Proposal did not pass".to_string());
+        }
+
+        if current_time < proposal.execution_time {
+            proposal.status = ProposalStatus::Succeeded;
+            return Err("Execution delay has not passed".to_string());
+        }
+
+        proposal.status = ProposalStatus::Executed;
 
         Ok(())
     }
@@ -162,12 +208,17 @@ impl GovernanceContract {
         proposer: Address,
         proposal_id: u64,
     ) -> Result<(), String> {
-        // In a real implementation, this would:
-        // 1. Check if proposal exists
-        // 2. Check if caller is the proposer
-        // 3. Check if proposal hasn't been executed
-        // 4. Cancel the proposal
-        // 5. Emit cancellation event
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("Proposal not found")?;
+
+        if proposal.proposer != proposer {
+            return Err("Only proposer can cancel".to_string());
+        }
+
+        if matches!(proposal.status, ProposalStatus::Executed) {
+            return Err("Cannot cancel executed proposal".to_string());
+        }
+
+        proposal.status = ProposalStatus::Cancelled;
 
         Ok(())
     }
@@ -179,34 +230,26 @@ impl GovernanceContract {
 
     /// Get all proposals
     pub fn get_all_proposals(&self) -> Vec<Proposal> {
-        let mut vec = Vec::new(&Env::default());
-        for proposal in self.proposals.values() {
-            vec.push_back(proposal.clone());
-        }
-        vec
+        self.proposals.values().cloned().collect()
     }
 
     /// Get active proposals
     pub fn get_active_proposals(&self) -> Vec<Proposal> {
-        let mut vec = Vec::new(&Env::default());
-        for proposal in self.proposals.values() {
-            if matches!(proposal.status, ProposalStatus::Active) {
-                vec.push_back(proposal.clone());
-            }
-        }
-        vec
+        self.proposals.values()
+            .filter(|p| matches!(p.status, ProposalStatus::Active))
+            .cloned()
+            .collect()
     }
 
     /// Check if a proposal has passed
     pub fn has_proposal_passed(&self, proposal_id: u64) -> bool {
-        // In a real implementation, this would:
-        // 1. Get proposal vote counts
-        // 2. Check if quorum is met
-        // 3. Check if majority support
-        // 4. Return result
-
-        // For now, return false
-        false
+        if let Some(proposal) = self.get_proposal(proposal_id) {
+            let total_possible_votes = 10000;
+            let quorum_votes = (total_possible_votes * self.quorum_percentage as u64) / 10000;
+            proposal.total_voting_power >= quorum_votes && proposal.votes_for > proposal.votes_against
+        } else {
+            false
+        }
     }
 
     /// Get voting power for an address
@@ -469,6 +512,22 @@ mod tests {
             0,
         );
         let voter = Address::generate(&Env::default());
+
+        let proposer = Address::generate(&Env::default());
+        let actions = vec![ProposalAction {
+            action_type: ActionType::Transfer,
+            target: "TOKEN_CONTRACT".to_string(),
+            function: "transfer".to_string(),
+            parameters: vec!["RECIPIENT".to_string(), "1000".to_string()],
+            value: None,
+        }];
+        
+        contract.create_proposal(
+            proposer,
+            "Test Proposal".to_string(),
+            "This is a test proposal".to_string(),
+            actions,
+        ).unwrap();
 
         let result = contract.vote(voter, 1, true, 1000);
         assert!(result.is_ok());
