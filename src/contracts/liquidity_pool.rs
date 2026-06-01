@@ -136,6 +136,69 @@ impl LiquidityPool {
         Ok((amount_a, amount_b))
     }
 
+    pub fn swap(
+    e: Env,
+    to: Address,
+    buy_a: bool,
+    out: i128,
+    in_max: i128,
+    min_out: i128,       // ADD: minimum output for slippage protection
+) -> i128 {
+    to.require_auth();
+
+    if out <= 0 {
+        panic!("swap: out amount must be positive");
+    }
+    if in_max <= 0 {
+        panic!("swap: in_max must be positive");
+    }
+    if min_out < 0 {
+        panic!("swap: min_out cannot be negative");
+    }
+
+    let (reserve_a, reserve_b) = (get_reserve_a(&e), get_reserve_b(&e));
+    let (reserve_sell, reserve_buy) = if buy_a {
+        (reserve_b, reserve_a)
+    } else {
+        (reserve_a, reserve_b)
+    };
+
+    // Constant-product formula with 0.3% fee
+    let fee_numerator: i128 = 997;
+    let fee_denominator: i128 = 1000;
+    let in_amount = (out * reserve_sell * fee_denominator)
+        / ((reserve_buy - out) * fee_numerator)
+        + 1;
+
+    if in_amount > in_max {
+        panic!(
+            "swap: slippage exceeded — required input {} exceeds max allowed {}",
+            in_amount, in_max
+        );
+    }
+    if out < min_out {
+        panic!(
+            "swap: output {} is below minimum required output {}",
+            out, min_out
+        );
+    }
+
+    // perform the swap transfers...
+    if buy_a {
+        transfer_b(&e, to.clone(), in_amount);
+        transfer_a(&e, to, out);
+        put_reserve_a(&e, reserve_a - out);
+        put_reserve_b(&e, reserve_b + in_amount);
+    } else {
+        transfer_a(&e, to.clone(), in_amount);
+        transfer_b(&e, to, out);
+        put_reserve_b(&e, reserve_b - out);
+        put_reserve_a(&e, reserve_a + in_amount);
+    }
+
+    in_amount
+}
+
     /// Swap token A for token B with fee collection (#26).
     pub fn swap_a_for_b(
         env: Env,
@@ -963,4 +1026,59 @@ mod tests {
         let within_limits = pool.check_price_divergence(100).unwrap(); // 1% limit
         assert!(within_limits);
     }
+
+    /// Update cumulative prices for TWAP — call at the start of any swap/liquidity change
+fn update_twap(e: &Env) {
+    let last_ts: u64 = e.storage().instance().get(&DataKey::LastTimestamp).unwrap_or(0);
+    let current_ts: u64 = e.ledger().timestamp();
+    let elapsed = current_ts.saturating_sub(last_ts);
+
+    if elapsed > 0 {
+        let (reserve_a, reserve_b) = (get_reserve_a(e), get_reserve_b(e));
+        if reserve_a > 0 && reserve_b > 0 {
+            // Price as fixed-point (scaled by 1_000_000)
+            let price_a: u128 = (reserve_b as u128 * 1_000_000) / reserve_a as u128;
+            let price_b: u128 = (reserve_a as u128 * 1_000_000) / reserve_b as u128;
+
+            let cum_a: u128 = e.storage().instance()
+                .get(&DataKey::PriceCumulativeA).unwrap_or(0u128);
+            let cum_b: u128 = e.storage().instance()
+                .get(&DataKey::PriceCumulativeB).unwrap_or(0u128);
+
+            e.storage().instance().set(
+                &DataKey::PriceCumulativeA,
+                &cum_a.saturating_add(price_a * elapsed as u128),
+            );
+            e.storage().instance().set(
+                &DataKey::PriceCumulativeB,
+                &cum_b.saturating_add(price_b * elapsed as u128),
+            );
+        }
+        e.storage().instance().set(&DataKey::LastTimestamp, &current_ts);
+    }
+}
+
+/// Get TWAP price of token_a in terms of token_b over the observation window.
+/// Returns price scaled by 1_000_000. Returns 0 if no data yet.
+pub fn get_twap_price(e: Env, window_seconds: u64) -> (u128, u128) {
+    let cum_a: u128 = e.storage().instance()
+        .get(&DataKey::PriceCumulativeA).unwrap_or(0u128);
+    let cum_b: u128 = e.storage().instance()
+        .get(&DataKey::PriceCumulativeB).unwrap_or(0u128);
+    let last_ts: u64 = e.storage().instance()
+        .get(&DataKey::LastTimestamp).unwrap_or(0);
+    let current_ts: u64 = e.ledger().timestamp();
+    let elapsed = current_ts.saturating_sub(last_ts);
+
+    let effective_window = if elapsed < window_seconds { elapsed } else { window_seconds };
+
+    if effective_window == 0 {
+        return (0, 0);
+    }
+
+    (
+        cum_a / effective_window as u128,
+        cum_b / effective_window as u128,
+    )
+}
 }
