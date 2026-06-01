@@ -9,12 +9,21 @@
 //! - flash loans
 //! - protocol fee accounting
 //! - oracle-driven pricing
+//! - multi-asset price feeds for a wide range of Stellar assets
 
 pub mod contracts;
 pub mod types;
 pub mod utils;
 
-pub use contracts::{LendingProtocol, PriceOracle, PriceOracleSim};
+pub use contracts::{
+    AssetRegistryContract,
+    LendingProtocol,
+    MultiAssetOracleContract,
+    PriceFeedAdaptersContract,
+    PriceOracle,
+    PriceOracleSim,
+};
+pub use types::asset::*;
 pub use types::lending::*;
 pub use utils::fixed_point::{
     bps_mul, mul_div, wad_div, wad_mul, BPS_DENOMINATOR, WAD, YEAR_IN_SECONDS,
