@@ -6,6 +6,7 @@ A comprehensive DeFi toolkit for building decentralized finance applications on 
 
 - **🪙 Token Contracts**: Complete ERC-20-like token implementation on Stellar
 - **💧 Liquidity Pools**: Automated market maker (AMM) liquidity pools
+- **💰 Lending & Borrowing**: Collateralized lending protocol with liquidations
 - **🌾 Yield Farming**: Staking and reward distribution mechanisms
 - **🌉 Cross-chain Bridges**: Asset transfer between different blockchains
 - **🏛️ Governance**: Decentralized governance and voting systems
@@ -39,6 +40,39 @@ cargo build --release
 ## 📖 Usage
 
 ### CLI Usage
+
+#### Quote Interest Rate
+
+```bash
+stellar-defi-cli quote-rate --utilization-bps 8000
+```
+
+#### Check if a Position is Liquidatable
+
+```bash
+stellar-defi-cli check-liquidation \
+  --borrower "GCBORROWER456" \
+  --debt-asset "USDC" \
+  --collateral-asset "XLM" \
+  --debt-price 1000000000000000000 \
+  --collateral-price 500000000000000000
+```
+
+#### Liquidate an Undercollateralized Position
+
+```bash
+stellar-defi-cli liquidate \
+  --liquidator "GCLIQUIDATOR123" \
+  --borrower "GCBORROWER456" \
+  --debt-asset "USDC" \
+  --collateral-asset "XLM" \
+  --repay-amount 1000000000000000000000 \
+  --debt-price 1000000000000000000 \
+  --collateral-price 500000000000000000 \
+  --dry-run
+```
+
+For detailed documentation on liquidation commands, see [CLI_LIQUIDATION.md](CLI_LIQUIDATION.md).
 
 #### Deploy a New Token
 
