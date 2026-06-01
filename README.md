@@ -7,11 +7,12 @@ A comprehensive DeFi toolkit for building decentralized finance applications on 
 - **🪙 Token Contracts**: Complete ERC-20-like token implementation on Stellar
 - **💧 Liquidity Pools**: Automated market maker (AMM) liquidity pools
 - **💰 Lending & Borrowing**: Collateralized lending protocol with liquidations
-- **🔒 Staking & Rewards**: Time-based staking with proportional reward distribution
 - **🌾 Yield Farming**: Staking and reward distribution mechanisms
 - **🌉 Cross-chain Bridges**: Asset transfer between different blockchains
 - **🏛️ Governance**: Decentralized governance and voting systems
 - **📊 Analytics**: Real-time DeFi protocol analytics and monitoring
+- **🛡️ Circuit Breakers**: Automatic protection against extreme price volatility
+- **🔮 Oracle System**: Multi-source price aggregation with deviation detection
 - **🛠️ Developer Tools**: CLI tools and SDK for easy development
 
 ## 🚀 Quick Start
@@ -205,7 +206,10 @@ stellar-defi-toolkit/
 │   │   ├── token.rs         # Token contract
 │   │   ├── liquidity_pool.rs # Liquidity pool contract
 │   │   ├── staking.rs       # Staking contract
-│   │   └── governance.rs    # Governance contract
+│   │   ├── governance.rs    # Governance contract
+│   │   ├── circuit_breaker.rs # Circuit breaker for volatility protection
+│   │   ├── price_oracle.rs  # Multi-source price oracle
+│   │   └── oracle_manager.rs # Oracle aggregation manager
 │   ├── utils/               # Utility functions
 │   │   ├── mod.rs
 │   │   ├── client.rs        # Stellar client
@@ -216,9 +220,58 @@ stellar-defi-toolkit/
 │       └── pool.rs
 ├── tests/                   # Integration tests
 ├── examples/               # Example usage
+│   ├── circuit_breaker_demo.rs # Circuit breaker demonstration
+│   └── ...
+├── docs/                   # Documentation
+│   ├── circuit_breaker_guide.md # Circuit breaker guide
+│   └── ...
 ├── Cargo.toml
 └── README.md
 ```
+
+## 🛡️ Circuit Breaker System
+
+The toolkit includes a comprehensive circuit breaker system to protect against extreme price volatility:
+
+### Key Features
+
+- **Automatic Protection**: Halts operations when price changes exceed 10% in a single update
+- **Consecutive Deviation Detection**: Trips after 3 consecutive 5%+ price movements
+- **Rate Limiting**: Enforces 5-minute minimum intervals between price updates
+- **Per-Asset Control**: Independent circuit breaker status for each asset
+- **Admin Controls**: Manual trip, reset, and configuration management
+
+### How It Works
+
+```rust
+// Circuit breaker automatically checks price volatility
+if !price_oracle.is_operational(env.clone(), asset_address.clone()) {
+    panic!("Circuit breaker tripped - operations halted");
+}
+
+// Get price (includes automatic circuit breaker check)
+let price = price_oracle.get_price(env, asset_address);
+```
+
+### Protection Thresholds
+
+| Threshold | Value | Action |
+|-----------|-------|--------|
+| Single Deviation | 10% | Immediate trip |
+| Consecutive Deviation | 5% | Count towards trip |
+| Consecutive Count | 3 updates | Trip circuit breaker |
+| Rate Limit | 5 minutes | Minimum update interval |
+| Cooldown | 30 minutes | Time before recovery |
+
+### Benefits
+
+✓ Prevents liquidations during flash crashes  
+✓ Protects against oracle manipulation  
+✓ Provides time for admin review during extreme volatility  
+✓ Reduces systemic risk from cascading failures  
+✓ Enables safe recovery after market disruptions  
+
+See the [Circuit Breaker Guide](docs/circuit_breaker_guide.md) for detailed documentation.
 
 ## 🔧 Development
 
@@ -243,6 +296,8 @@ cargo run --example liquidity_pool
 
 ## 📚 Documentation
 
+- [Circuit Breaker Guide](docs/circuit_breaker_guide.md) - Price volatility protection
+- [Risk Management Framework](docs/synthetic_protocol_risk_management.md) - Comprehensive risk controls
 - [Soroban Documentation](https://soroban.stellar.org/)
 - [Stellar Documentation](https://developers.stellar.org/)
 - [API Reference](https://docs.rs/stellar-defi-toolkit/)
