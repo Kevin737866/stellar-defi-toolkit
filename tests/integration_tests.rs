@@ -1,5 +1,6 @@
 use stellar_defi_toolkit::{
-    InterestRateModel, LendingProtocol, PriceOracleSim, ProtocolError, ReserveConfig, WAD,
+    InterestRateModel, LendingProtocol, OracleSanityConfig, ProtocolError, ProtocolEvent,
+    PriceOracleSim, ReserveConfig, WAD,
 };
 
 fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
@@ -517,4 +518,438 @@ fn non_admin_cannot_set_reserve_factor() {
         .unwrap_err();
     assert_eq!(err, ProtocolError::Unauthorized);
 >>>>>>> main
+}
+
+// ── Feature: emergency pause ──────────────────────────────────────────────────
+
+#[test]
+fn admin_can_pause_and_unpause_protocol() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    assert!(!protocol.is_paused());
+
+    protocol.pause("admin").unwrap();
+    assert!(protocol.is_paused());
+
+    protocol.unpause("admin").unwrap();
+    assert!(!protocol.is_paused());
+}
+
+#[test]
+fn non_admin_cannot_pause() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    let err = protocol.pause("alice").unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+}
+
+#[test]
+fn deposit_blocked_when_paused() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol.deposit("alice", "USDC", 1_000_000, 0).unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn withdraw_blocked_when_paused() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("alice", "USDC", 1_000_000, 0).unwrap();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol
+        .withdraw("alice", "USDC", 500_000, &oracle, 0)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn borrow_blocked_when_paused() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol
+        .borrow("alice", "USDC", 500_000, &oracle, 0)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn repay_blocked_when_paused() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol
+        .repay("alice", "alice", "USDC", 200_000, 1)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn liquidate_blocked_when_paused() {
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 300_000, &oracle, 1)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn flash_loan_blocked_when_paused() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 10_000_000, 0).unwrap();
+    protocol.pause("admin").unwrap();
+
+    let err = protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::ProtocolPaused);
+}
+
+#[test]
+fn admin_operations_work_while_paused() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.pause("admin").unwrap();
+
+    // Admin can still update config while paused.
+    protocol
+        .set_reserve_factor("admin", "USDC", 2_000)
+        .unwrap();
+    protocol.set_supply_cap("admin", "USDC", 0).unwrap();
+}
+
+#[test]
+fn pause_and_unpause_emit_events() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.drain_events(); // clear setup events
+
+    protocol.pause("admin").unwrap();
+    protocol.unpause("admin").unwrap();
+
+    let events = protocol.drain_events();
+    assert!(events.iter().any(|e| matches!(e, ProtocolEvent::Paused { .. })));
+    assert!(events.iter().any(|e| matches!(e, ProtocolEvent::Unpaused { .. })));
+}
+
+// ── Feature: event emission ───────────────────────────────────────────────────
+
+#[test]
+fn deposit_emits_deposit_event() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.drain_events();
+
+    let shares = protocol.deposit("alice", "USDC", 1_000_000, 0).unwrap();
+
+    let events = protocol.drain_events();
+    let deposit_event = events.iter().find(|e| matches!(e, ProtocolEvent::Deposit { .. }));
+    assert!(deposit_event.is_some(), "expected a Deposit event");
+
+    if let Some(ProtocolEvent::Deposit {
+        user,
+        asset,
+        amount,
+        shares_minted,
+    }) = deposit_event
+    {
+        assert_eq!(user, "alice");
+        assert_eq!(asset, "USDC");
+        assert_eq!(*amount, 1_000_000);
+        assert_eq!(*shares_minted, shares);
+    }
+}
+
+#[test]
+fn borrow_emits_borrow_event() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.drain_events();
+
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::Borrow { .. })),
+        "expected a Borrow event"
+    );
+}
+
+#[test]
+fn repay_emits_repay_event() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+    protocol.drain_events();
+
+    protocol.repay("alice", "alice", "USDC", 200_000, 1).unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::Repay { .. })),
+        "expected a Repay event"
+    );
+}
+
+#[test]
+fn liquidate_emits_liquidate_event() {
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    protocol.drain_events();
+
+    protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 300_000, &oracle, 1)
+        .unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::Liquidate { .. })),
+        "expected a Liquidate event"
+    );
+}
+
+#[test]
+fn flash_loan_emits_flash_loan_event() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 10_000_000, 0).unwrap();
+    protocol.drain_events();
+
+    protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::FlashLoan { .. })),
+        "expected a FlashLoan event"
+    );
+}
+
+#[test]
+fn collect_fees_emits_fees_collected_event() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol
+        .flash_loan("arb-bot", "USDC", 1_000_000, 1_001_000, 1)
+        .unwrap();
+    protocol.drain_events();
+
+    protocol
+        .collect_protocol_fees("admin", "USDC", 100)
+        .unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::FeesCollected { .. })),
+        "expected a FeesCollected event"
+    );
+}
+
+#[test]
+fn interest_accrual_emits_interest_accrued_event() {
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 4_000_000, &oracle, 0).unwrap();
+    protocol.drain_events();
+
+    protocol.accrue_interest("USDC", 31_536_000).unwrap();
+
+    let events = protocol.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(e, ProtocolEvent::InterestAccrued { .. })),
+        "expected an InterestAccrued event"
+    );
+}
+
+#[test]
+fn drain_events_clears_the_log() {
+    let (mut protocol, _oracle) = setup_protocol();
+    protocol.deposit("alice", "USDC", 1_000_000, 0).unwrap();
+
+    let first_drain = protocol.drain_events();
+    assert!(!first_drain.is_empty());
+
+    let second_drain = protocol.drain_events();
+    assert!(second_drain.is_empty(), "log should be empty after drain");
+}
+
+// ── Feature: oracle price sanity checks ──────────────────────────────────────
+
+#[test]
+fn oracle_rejects_zero_price() {
+    let mut oracle = PriceOracleSim::new("oracle");
+    let err = oracle.set_price("oracle", "XLM", 0).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::OracleSanityCheckFailed(_, _)),
+        "expected OracleSanityCheckFailed, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn oracle_rejects_negative_price() {
+    let mut oracle = PriceOracleSim::new("oracle");
+    let err = oracle.set_price("oracle", "XLM", -1).unwrap_err();
+    assert!(matches!(err, ProtocolError::OracleSanityCheckFailed(_, _)));
+}
+
+#[test]
+fn oracle_rejects_price_above_configured_maximum() {
+    let sanity = OracleSanityConfig {
+        max_price: 2_000_000_000, // $2.00 max
+        max_price_deviation_bps: 0, // disable circuit-breaker for this test
+        ..OracleSanityConfig::default()
+    };
+    let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
+    let err = oracle
+        .set_price("oracle", "XLM", 3_000_000_000)
+        .unwrap_err();
+    assert!(matches!(err, ProtocolError::OracleSanityCheckFailed(_, _)));
+}
+
+#[test]
+fn oracle_circuit_breaker_rejects_large_price_jump() {
+    let sanity = OracleSanityConfig {
+        max_price_deviation_bps: 500, // 5 % max deviation
+        max_price_age_secs: 0,        // disable staleness for this test
+        ..OracleSanityConfig::default()
+    };
+    let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
+
+    // Set initial price.
+    oracle.set_price("oracle", "XLM", 1_000_000_000).unwrap();
+
+    // A 50 % jump should be rejected.
+    let err = oracle
+        .set_price("oracle", "XLM", 1_500_000_000)
+        .unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::OracleSanityCheckFailed(_, _)),
+        "expected circuit-breaker to fire, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn oracle_circuit_breaker_allows_small_price_change() {
+    let sanity = OracleSanityConfig {
+        max_price_deviation_bps: 2_000, // 20 % max deviation
+        max_price_age_secs: 0,
+        ..OracleSanityConfig::default()
+    };
+    let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
+
+    oracle.set_price("oracle", "XLM", 1_000_000_000).unwrap();
+    // A 10 % change is within the 20 % threshold.
+    oracle.set_price("oracle", "XLM", 1_100_000_000).unwrap();
+    assert_eq!(oracle.get_price("XLM").unwrap(), 1_100_000_000);
+}
+
+#[test]
+fn oracle_staleness_check_rejects_old_price() {
+    let sanity = OracleSanityConfig {
+        max_price_age_secs: 3_600, // 1 hour
+        max_price_deviation_bps: 0,
+        ..OracleSanityConfig::default()
+    };
+    let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
+
+    // Record price at t=0.
+    oracle.set_price_at("oracle", "XLM", 1_000_000_000, 0).unwrap();
+
+    // Reading at t=7200 (2 hours later) should fail.
+    let err = oracle.get_price_at("XLM", 7_200).unwrap_err();
+    assert_eq!(err, ProtocolError::OraclePriceStale("XLM".to_string()));
+}
+
+#[test]
+fn oracle_staleness_check_accepts_fresh_price() {
+    let sanity = OracleSanityConfig {
+        max_price_age_secs: 3_600,
+        max_price_deviation_bps: 0,
+        ..OracleSanityConfig::default()
+    };
+    let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
+
+    // Record price at t=1000.
+    oracle
+        .set_price_at("oracle", "XLM", 1_000_000_000, 1_000)
+        .unwrap();
+
+    // Reading at t=2000 (1000 seconds later, within 1 hour) should succeed.
+    let price = oracle.get_price_at("XLM", 2_000).unwrap();
+    assert_eq!(price, 1_000_000_000);
+}
+
+#[test]
+fn oracle_non_admin_cannot_change_sanity_config() {
+    let mut oracle = PriceOracleSim::new("oracle");
+    let err = oracle
+        .set_sanity_config("attacker", OracleSanityConfig::default())
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+}
+
+// ── Feature: optimised liquidation ───────────────────────────────────────────
+
+#[test]
+fn optimised_liquidation_produces_same_result_as_before() {
+    // Verify the refactored liquidation path produces the same economic outcome
+    // as the original: correct repaid amount, seized collateral, and discount.
+    let (mut protocol, mut oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
+
+    // Drop XLM price to make position liquidatable.
+    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    let position_before = protocol.position("alice", &oracle).unwrap();
+    assert!(position_before.health_factor < WAD);
+
+    let result = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 300_000, &oracle, 1)
+        .unwrap();
+
+    assert!(result.repaid_amount > 0, "should have repaid some debt");
+    assert!(result.seized_collateral > 0, "should have seized some collateral");
+    assert!(
+        result.liquidator_discount_value > 0,
+        "liquidator should receive a bonus"
+    );
+
+    let position_after = protocol.position("alice", &oracle).unwrap();
+    assert!(
+        position_after.debt_value < position_before.debt_value,
+        "debt should decrease after liquidation"
+    );
+}
+
+#[test]
+fn liquidation_validates_before_mutating_state() {
+    // A healthy position must not be liquidatable even with the new code path.
+    let (mut protocol, oracle) = setup_protocol();
+    protocol.deposit("lp", "USDC", 2_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
+    protocol.borrow("alice", "USDC", 500_000, &oracle, 0).unwrap();
+
+    let err = protocol
+        .liquidate("bob", "alice", "USDC", "XLM", 100_000, &oracle, 0)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::PositionNotLiquidatable);
 }

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Map, String as SorobanString, Symbol};
-use crate::types::ProtocolError;
+use crate::types::{ProtocolError, OracleSanityConfig};
 
 // ─── Soroban Price Oracle Contract ───────────────────────────────────────────
 
@@ -106,19 +106,45 @@ impl PriceOracle {
 
 // ─── Price Oracle Simulation ──────────────────────────────────────────────────
 
+/// A timestamped price entry stored inside `PriceOracleSim`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceEntry {
+    /// The price value (WAD-scaled, i.e. 1e9 = $1.00).
+    pub price: i128,
+    /// Unix timestamp (seconds) when this price was recorded.
+    pub timestamp: u64,
+}
+
 /// Simulated Price Oracle struct for backward compatibility with standard Rust simulations.
+///
+/// Extends the basic price map with:
+/// - **Staleness detection** — prices older than `sanity.max_price_age_secs` are rejected.
+/// - **Circuit-breaker** — price updates that deviate more than
+///   `sanity.max_price_deviation_bps` from the last accepted price are rejected.
+/// - **Range checks** — prices outside `[min_price, max_price]` are rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriceOracleSim {
     admin: String,
-    prices: BTreeMap<String, i128>,
+    prices: BTreeMap<String, PriceEntry>,
+    sanity: OracleSanityConfig,
 }
 
 impl PriceOracleSim {
-    /// Create a new price oracle simulator.
+    /// Create a new price oracle simulator with default sanity configuration.
     pub fn new(admin: impl Into<String>) -> Self {
         Self {
             admin: admin.into(),
             prices: BTreeMap::new(),
+            sanity: OracleSanityConfig::default(),
+        }
+    }
+
+    /// Create a new price oracle simulator with a custom sanity configuration.
+    pub fn with_sanity(admin: impl Into<String>, sanity: OracleSanityConfig) -> Self {
+        Self {
+            admin: admin.into(),
+            prices: BTreeMap::new(),
+            sanity,
         }
     }
 
@@ -127,29 +153,143 @@ impl PriceOracleSim {
         &self.admin
     }
 
+    /// Replace the sanity configuration (admin only).
+    pub fn set_sanity_config(
+        &mut self,
+        caller: &str,
+        sanity: OracleSanityConfig,
+    ) -> Result<(), ProtocolError> {
+        if caller != self.admin {
+            return Err(ProtocolError::Unauthorized);
+        }
+        self.sanity = sanity;
+        Ok(())
+    }
+
     /// Set a price feed for an asset (admin only).
+    ///
+    /// `timestamp` is the Unix time (seconds) at which the price was observed.
+    /// Pass the current time so that staleness checks work correctly.
+    ///
+    /// # Sanity checks performed
+    /// 1. Caller must be the admin.
+    /// 2. Price must be ≥ `sanity.min_price` (default: 1).
+    /// 3. Price must be ≤ `sanity.max_price` when a maximum is configured.
+    /// 4. If a previous price exists and `max_price_deviation_bps > 0`, the new
+    ///    price must not deviate more than that threshold from the last accepted
+    ///    price (circuit-breaker).
     pub fn set_price(
         &mut self,
         caller: &str,
         asset: impl Into<String>,
         price: i128,
     ) -> Result<(), ProtocolError> {
+        // Delegate to the timestamped variant with timestamp = 0 (no staleness
+        // check on the *incoming* price — only on reads).
+        self.set_price_at(caller, asset, price, 0)
+    }
+
+    /// Set a price feed with an explicit observation timestamp.
+    ///
+    /// Prefer this over `set_price` when you want staleness checks on reads to
+    /// work correctly.
+    pub fn set_price_at(
+        &mut self,
+        caller: &str,
+        asset: impl Into<String>,
+        price: i128,
+        timestamp: u64,
+    ) -> Result<(), ProtocolError> {
         if caller != self.admin {
             return Err(ProtocolError::Unauthorized);
         }
-        if price <= 0 {
-            return Err(ProtocolError::InvalidAmount);
+
+        let asset: String = asset.into();
+
+        // ── Sanity check 1: price must be within the configured range ──────
+        if price < self.sanity.min_price {
+            return Err(ProtocolError::OracleSanityCheckFailed(
+                asset.clone(),
+                format!(
+                    "price {} is below minimum {}",
+                    price, self.sanity.min_price
+                ),
+            ));
         }
-        self.prices.insert(asset.into(), price);
+        if self.sanity.max_price > 0 && price > self.sanity.max_price {
+            return Err(ProtocolError::OracleSanityCheckFailed(
+                asset.clone(),
+                format!(
+                    "price {} exceeds maximum {}",
+                    price, self.sanity.max_price
+                ),
+            ));
+        }
+
+        // ── Sanity check 2: circuit-breaker — max deviation from last price ─
+        if self.sanity.max_price_deviation_bps > 0 {
+            if let Some(prev) = self.prices.get(&asset) {
+                let deviation_bps = Self::price_deviation_bps(prev.price, price);
+                if deviation_bps > u64::from(self.sanity.max_price_deviation_bps) {
+                    return Err(ProtocolError::OracleSanityCheckFailed(
+                        asset.clone(),
+                        format!(
+                            "price deviation {}bps exceeds circuit-breaker threshold {}bps",
+                            deviation_bps, self.sanity.max_price_deviation_bps
+                        ),
+                    ));
+                }
+            }
+        }
+
+        self.prices.insert(asset, PriceEntry { price, timestamp });
         Ok(())
     }
 
     /// Retrieve the current price of an asset.
-    pub fn get_price(&self, asset: &str) -> Result<i128, ProtocolError> {
-        self.prices
+    ///
+    /// Returns `ProtocolError::OraclePriceStale` when the stored price is older
+    /// than `sanity.max_price_age_secs` and a non-zero `now` is provided.
+    ///
+    /// Pass `now = 0` to skip the staleness check (useful in unit tests that
+    /// don't track time).
+    pub fn get_price_at(&self, asset: &str, now: u64) -> Result<i128, ProtocolError> {
+        let entry = self
+            .prices
             .get(asset)
-            .copied()
-            .ok_or_else(|| ProtocolError::MissingPrice(asset.to_string()))
+            .ok_or_else(|| ProtocolError::MissingPrice(asset.to_string()))?;
+
+        // ── Staleness check ────────────────────────────────────────────────
+        if now > 0 && self.sanity.max_price_age_secs > 0 && entry.timestamp > 0 {
+            let age = now.saturating_sub(entry.timestamp);
+            if age > self.sanity.max_price_age_secs {
+                return Err(ProtocolError::OraclePriceStale(asset.to_string()));
+            }
+        }
+
+        Ok(entry.price)
+    }
+
+    /// Retrieve the current price of an asset (no staleness check).
+    ///
+    /// This is the backward-compatible variant used by `LendingProtocol` internally.
+    pub fn get_price(&self, asset: &str) -> Result<i128, ProtocolError> {
+        self.get_price_at(asset, 0)
+    }
+
+    // ── Internal helpers ───────────────────────────────────────────────────
+
+    /// Compute the absolute deviation between two prices in basis points.
+    fn price_deviation_bps(old_price: i128, new_price: i128) -> u64 {
+        if old_price == 0 {
+            return 0;
+        }
+        let diff = (new_price - old_price).unsigned_abs();
+        // deviation_bps = |new - old| * 10_000 / old
+        (diff as u128)
+            .saturating_mul(10_000)
+            .checked_div(old_price.unsigned_abs() as u128)
+            .unwrap_or(u64::MAX as u128) as u64
     }
 }
 

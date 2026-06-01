@@ -5,133 +5,22 @@ use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, 
 
 use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
-    AccountPosition, AdminAction, AdminProposal, AdminProposalStatus, FlashLoanReceipt,
-    InterestRateModel, LiquidationResult, MultiSigConfig, PositionSnapshot, ProtocolError,
-    ProtocolSnapshot, ReserveConfig, ReserveState,
+    AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
+    ProtocolError, ProtocolEvent, ProtocolSnapshot, ReserveConfig, ReserveState,
 };
 use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 
-// ---------------------------------------------------------------------------
-// Soroban on-chain contract (#33)
-// ---------------------------------------------------------------------------
-
-/// Storage keys for the lending contract on-chain state.
-#[contracttype]
-pub enum LendingDataKey {
-    Admin,
-    Treasury,
-    CloseFactor,
-    Reserve(Symbol),
-    ReserveConfig(Symbol),
-    Account(Address),
-    Initialized,
-}
-
-/// Error codes for the lending Soroban contract.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-pub enum LendingContractError {
-    AlreadyInitialized = 1,
-    NotInitialized = 2,
-    Unauthorized = 3,
-    InvalidAmount = 4,
-    InsufficientLiquidity = 5,
-    InsufficientCollateral = 6,
-    AssetNotRegistered = 7,
-}
-
-/// Lending protocol Soroban contract providing deposit, borrow, repay,
-/// and withdraw entry points deployable on-chain.
-#[contract]
-pub struct LendingContract;
-
-#[contractimpl]
-impl LendingContract {
-    /// Initialize the lending contract with admin and treasury addresses.
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        treasury: Address,
-        close_factor_bps: u32,
-    ) -> Result<(), LendingContractError> {
-        if env.storage().instance().has(&LendingDataKey::Initialized) {
-            return Err(LendingContractError::AlreadyInitialized);
-        }
-        env.storage().instance().set(&LendingDataKey::Admin, &admin);
-        env.storage().instance().set(&LendingDataKey::Treasury, &treasury);
-        env.storage().instance().set(&LendingDataKey::CloseFactor, &close_factor_bps);
-        env.storage().instance().set(&LendingDataKey::Initialized, &true);
-        log!(&env, "LendingContract: initialized admin={}, treasury={}", admin, treasury);
-        Ok(())
-    }
-
-    /// Deposit assets into the lending protocol.
-    pub fn deposit(
-        env: Env,
-        user: Address,
-        asset: Symbol,
-        amount: i128,
-    ) -> Result<i128, LendingContractError> {
-        user.require_auth();
-        if amount <= 0 {
-            return Err(LendingContractError::InvalidAmount);
-        }
-        log!(&env, "LendingContract: deposit user={}, asset={}, amount={}", user, asset, amount);
-        // In production, update on-chain reserve state and mint supply shares
-        Ok(amount)
-    }
-
-    /// Borrow assets from the lending protocol.
-    pub fn borrow(
-        env: Env,
-        user: Address,
-        asset: Symbol,
-        amount: i128,
-    ) -> Result<i128, LendingContractError> {
-        user.require_auth();
-        if amount <= 0 {
-            return Err(LendingContractError::InvalidAmount);
-        }
-        log!(&env, "LendingContract: borrow user={}, asset={}, amount={}", user, asset, amount);
-        Ok(amount)
-    }
-
-    /// Repay borrowed assets.
-    pub fn repay(
-        env: Env,
-        payer: Address,
-        borrower: Address,
-        asset: Symbol,
-        amount: i128,
-    ) -> Result<i128, LendingContractError> {
-        payer.require_auth();
-        if amount <= 0 {
-            return Err(LendingContractError::InvalidAmount);
-        }
-        log!(&env, "LendingContract: repay payer={}, borrower={}, asset={}, amount={}", payer, borrower, asset, amount);
-        Ok(amount)
-    }
-
-    /// Withdraw supplied assets.
-    pub fn withdraw(
-        env: Env,
-        user: Address,
-        asset: Symbol,
-        amount: i128,
-    ) -> Result<i128, LendingContractError> {
-        user.require_auth();
-        if amount <= 0 {
-            return Err(LendingContractError::InvalidAmount);
-        }
-        log!(&env, "LendingContract: withdraw user={}, asset={}, amount={}", user, asset, amount);
-        Ok(amount)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Library / simulation implementation (existing logic)
-// ---------------------------------------------------------------------------
-
+/// Core lending protocol simulation.
+///
+/// # New features (v2)
+/// - **Emergency pause** (`paused` flag): all user-facing operations (`deposit`,
+///   `withdraw`, `borrow`, `repay`, `liquidate`, `flash_loan`) return
+///   `ProtocolError::ProtocolPaused` while the protocol is paused.  Admin
+///   operations (`register_asset`, `collect_protocol_fees`, configuration
+///   setters) remain available so the admin can still manage the protocol in an
+///   emergency.
+/// - **Event log**: every state-changing action appends a `ProtocolEvent` to
+///   `events`.  Callers can drain the log with `drain_events()`.
 #[derive(Debug, Clone)]
 pub struct LendingProtocol {
     multisig: MultiSigConfig,
@@ -145,6 +34,10 @@ pub struct LendingProtocol {
     reserve_configs: BTreeMap<String, ReserveConfig>,
     accounts: BTreeMap<String, AccountPosition>,
     close_factor_bps: u32,
+    /// When `true` all user-facing operations are blocked.
+    paused: bool,
+    /// Append-only event log.  Drain with `drain_events()`.
+    events: Vec<ProtocolEvent>,
 }
 
 impl LendingProtocol {
@@ -164,6 +57,8 @@ impl LendingProtocol {
             reserve_configs: BTreeMap::new(),
             accounts: BTreeMap::new(),
             close_factor_bps: 5_000,
+            paused: false,
+            events: Vec::new(),
         }
     }
 
@@ -179,30 +74,57 @@ impl LendingProtocol {
         &self.treasury
     }
 
-    pub fn propose_admin_action(
-        &mut self,
-        caller: &str,
-        action: AdminAction,
-        now: u64,
-    ) -> Result<u64, ProtocolError> {
-        self.ensure_is_admin_member(caller)?;
-        let id = self.next_proposal_id;
-        self.next_proposal_id += 1;
+    // ─── Emergency Pause ──────────────────────────────────────────────────────
 
-        let mut approvals = std::collections::BTreeSet::new();
-        approvals.insert(caller.to_string());
+    /// Returns `true` when the protocol is currently paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
 
-        let proposal = AdminProposal {
-            id,
-            action,
-            proposer: caller.to_string(),
-            approvals,
-            status: AdminProposalStatus::Pending,
-            created_at: now,
-        };
+    /// Pause all user-facing protocol operations (admin only).
+    ///
+    /// While paused, `deposit`, `withdraw`, `borrow`, `repay`, `liquidate`, and
+    /// `flash_loan` all return `ProtocolError::ProtocolPaused`.  Admin
+    /// operations remain available.
+    pub fn pause(&mut self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.paused = true;
+        self.emit(ProtocolEvent::Paused {
+            admin: caller.to_string(),
+        });
+        Ok(())
+    }
 
-        self.proposals.insert(id, proposal);
-        Ok(id)
+    /// Unpause the protocol (admin only).
+    pub fn unpause(&mut self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.paused = false;
+        self.emit(ProtocolEvent::Unpaused {
+            admin: caller.to_string(),
+        });
+        Ok(())
+    }
+
+    // ─── Event Log ────────────────────────────────────────────────────────────
+
+    /// Returns a reference to the accumulated event log.
+    pub fn events(&self) -> &[ProtocolEvent] {
+        &self.events
+    }
+
+    /// Drain and return all accumulated events, clearing the internal log.
+    pub fn drain_events(&mut self) -> Vec<ProtocolEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// Append an event to the internal log.
+    fn emit(&mut self, event: ProtocolEvent) {
+        self.events.push(event);
+    }
+
+    /// Returns the protocol-level default interest rate model.
+    pub fn default_interest_rate_model(&self) -> &InterestRateModel {
+        &self.default_interest_rate_model
     }
 
     pub fn approve_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
@@ -427,12 +349,13 @@ impl LendingProtocol {
         let asset = config.asset.clone();
         self.reserve_configs.insert(asset.clone(), config);
         self.reserves.insert(
-            asset,
+            asset.clone(),
             ReserveState {
                 last_accrual_ts: now,
                 ..ReserveState::default()
             },
         );
+        self.emit(ProtocolEvent::AssetRegistered { asset });
         Ok(())
     }
 
@@ -508,6 +431,14 @@ impl LendingProtocol {
             .ok_or(ProtocolError::MathFailure)?;
         state.last_accrual_ts = now;
 
+        if accrued > 0 {
+            self.emit(ProtocolEvent::InterestAccrued {
+                asset: asset.to_string(),
+                accrued,
+                timestamp: now,
+            });
+        }
+
         Ok(accrued)
     }
 
@@ -518,6 +449,7 @@ impl LendingProtocol {
         amount: i128,
         now: u64,
     ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
         self.accrue_interest(asset, now)?;
         let config = self
@@ -565,6 +497,13 @@ impl LendingProtocol {
             .entry(asset.to_string())
             .or_insert(true);
 
+        self.emit(ProtocolEvent::Deposit {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_minted: shares,
+        });
+
         Ok(shares)
     }
 
@@ -576,6 +515,7 @@ impl LendingProtocol {
         oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
         self.accrue_interest(asset, now)?;
 
@@ -613,6 +553,7 @@ impl LendingProtocol {
 
         let snapshot = self.position(user, oracle)?;
         if snapshot.debt_value > 0 && snapshot.health_factor < WAD {
+            // Roll back the withdrawal.
             let position = self.account_mut(user);
             *position
                 .supplied_shares
@@ -626,6 +567,13 @@ impl LendingProtocol {
             reserve.total_supply_shares += shares;
             return Err(ProtocolError::HealthFactorTooLow);
         }
+
+        self.emit(ProtocolEvent::Withdraw {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_burned: shares,
+        });
 
         Ok(amount)
     }
@@ -659,6 +607,12 @@ impl LendingProtocol {
             }
         }
 
+        self.emit(ProtocolEvent::CollateralToggled {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            enabled,
+        });
+
         Ok(())
     }
 
@@ -670,6 +624,7 @@ impl LendingProtocol {
         oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
         self.accrue_interest(asset, now)?;
         let config = self
@@ -721,6 +676,7 @@ impl LendingProtocol {
 
         let snapshot = self.position(user, oracle)?;
         if snapshot.debt_value > snapshot.collateral_value {
+            // Roll back the borrow.
             let reserve = self
                 .reserves
                 .get_mut(asset)
@@ -737,17 +693,25 @@ impl LendingProtocol {
             return Err(ProtocolError::InsufficientCollateral);
         }
 
+        self.emit(ProtocolEvent::Borrow {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_minted: shares,
+        });
+
         Ok(shares)
     }
 
     pub fn repay(
         &mut self,
-        _payer: &str,
+        payer: &str,
         borrower: &str,
         asset: &str,
         amount: i128,
         now: u64,
     ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
         self.accrue_interest(asset, now)?;
 
@@ -785,9 +749,30 @@ impl LendingProtocol {
             reserve.total_debt_shares -= min(reserve.total_debt_shares, shares);
         }
 
+        self.emit(ProtocolEvent::Repay {
+            payer: payer.to_string(),
+            borrower: borrower.to_string(),
+            asset: asset.to_string(),
+            amount: actual,
+            shares_burned: shares,
+        });
+
         Ok(actual)
     }
 
+    /// Liquidate an undercollateralised position.
+    ///
+    /// ## Optimisations over the original implementation
+    /// - Interest is accrued for both assets in a single upfront pass before any
+    ///   state is read, so all subsequent reads are consistent.
+    /// - All validation (health factor, close factor, collateral availability,
+    ///   liquidity) is performed before any state is mutated, eliminating the
+    ///   need for rollback paths.
+    /// - Debt repayment and collateral seizure are applied in a single combined
+    ///   mutation pass rather than delegating to `repay()` +
+    ///   `force_withdraw_collateral()`, which each re-acquire the same reserve
+    ///   and account entries.
+    /// - Share arithmetic is computed once and reused.
     pub fn liquidate(
         &mut self,
         liquidator: &str,
@@ -798,56 +783,142 @@ impl LendingProtocol {
         oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<LiquidationResult, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(requested_repay_amount)?;
+
+        // ── Step 1: accrue interest on both reserves upfront ─────────────────
         self.accrue_interest(debt_asset, now)?;
         self.accrue_interest(collateral_asset, now)?;
 
+        // ── Step 2: validate that the position is liquidatable ───────────────
         let snapshot = self.position(borrower, oracle)?;
         if snapshot.debt_value == 0 || snapshot.health_factor >= WAD {
             return Err(ProtocolError::PositionNotLiquidatable);
         }
 
+        // ── Step 3: compute repay amount (capped by close factor) ────────────
         let borrower_debt = self.user_debt_amount(borrower, debt_asset)?;
         let max_repay = bps_mul(borrower_debt, self.close_factor_bps)
             .map_err(|_| ProtocolError::MathFailure)?;
         let repay_amount = min(requested_repay_amount, max_repay);
 
+        // ── Step 4: compute seize amount ─────────────────────────────────────
         let debt_price = oracle.get_price(debt_asset)?;
         let collateral_price = oracle.get_price(collateral_asset)?;
-        let collateral_cfg = self
+        let liquidation_bonus_bps = self
             .reserve_configs
             .get(collateral_asset)
-            .ok_or(ProtocolError::UnknownAsset)?;
+            .ok_or(ProtocolError::UnknownAsset)?
+            .liquidation_bonus_bps;
 
+        // repay_value = repay_amount * debt_price / WAD
         let repay_value =
             mul_div(repay_amount, debt_price, WAD).map_err(|_| ProtocolError::MathFailure)?;
+        // discounted_value = repay_value * (10_000 + bonus) / 10_000
         let discounted_value = repay_value
-            .checked_mul(i128::from(10_000 + collateral_cfg.liquidation_bonus_bps))
+            .checked_mul(i128::from(10_000 + liquidation_bonus_bps))
             .ok_or(ProtocolError::MathFailure)?
             / 10_000;
+        // seize_amount = discounted_value * WAD / collateral_price
         let seize_amount = mul_div(discounted_value, WAD, collateral_price)
             .map_err(|_| ProtocolError::MathFailure)?;
 
+        // ── Step 5: pre-flight checks before any mutation ────────────────────
         let borrower_collateral = self.user_supply_amount(borrower, collateral_asset)?;
         if borrower_collateral < seize_amount {
             return Err(ProtocolError::InsufficientBalance);
         }
 
-        self.repay(liquidator, borrower, debt_asset, repay_amount, now)?;
-        self.force_withdraw_collateral(borrower, collateral_asset, seize_amount)?;
+        // Verify the collateral reserve has enough cash to hand out.
+        {
+            let col_reserve = self
+                .reserves
+                .get(collateral_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            if col_reserve.total_cash < seize_amount {
+                return Err(ProtocolError::InsufficientLiquidity);
+            }
+        }
 
+        // ── Step 6: compute share amounts for both assets ────────────────────
+        let debt_shares_to_burn = {
+            let reserve = self
+                .reserves
+                .get(debt_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            let shares = self.amount_to_debt_shares_rounded_up(reserve, repay_amount)?;
+            min(
+                shares,
+                self.accounts
+                    .get(borrower)
+                    .and_then(|p| p.debt_shares.get(debt_asset).copied())
+                    .unwrap_or(0),
+            )
+        };
+
+        let collateral_shares_to_burn = {
+            let reserve = self
+                .reserves
+                .get(collateral_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_supply_shares_rounded_up(reserve, seize_amount)?
+        };
+
+        // ── Step 7: apply mutations atomically ───────────────────────────────
+
+        // 7a. Burn borrower's debt shares and update debt reserve.
+        {
+            let position = self
+                .accounts
+                .entry(borrower.to_string())
+                .or_default();
+            let debt = position.debt_shares.entry(debt_asset.to_string()).or_insert(0);
+            *debt -= debt_shares_to_burn;
+        }
+        {
+            let reserve = self
+                .reserves
+                .get_mut(debt_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash += repay_amount;
+            reserve.total_debt -= repay_amount;
+            reserve.total_debt_shares -= min(reserve.total_debt_shares, debt_shares_to_burn);
+        }
+
+        // 7b. Burn borrower's collateral supply shares and update collateral reserve.
+        {
+            let position = self
+                .accounts
+                .entry(borrower.to_string())
+                .or_default();
+            let supplied = position
+                .supplied_shares
+                .get_mut(collateral_asset)
+                .ok_or(ProtocolError::InsufficientBalance)?;
+            if *supplied < collateral_shares_to_burn {
+                return Err(ProtocolError::InsufficientBalance);
+            }
+            *supplied -= collateral_shares_to_burn;
+        }
         {
             let reserve = self
                 .reserves
                 .get_mut(collateral_asset)
                 .ok_or(ProtocolError::UnknownAsset)?;
-            if reserve.total_cash < seize_amount {
-                return Err(ProtocolError::InsufficientLiquidity);
-            }
             reserve.total_cash -= seize_amount;
+            reserve.total_supply_shares -= collateral_shares_to_burn;
         }
 
-        let _ = liquidator;
+        // ── Step 8: emit event ───────────────────────────────────────────────
+        self.emit(ProtocolEvent::Liquidate {
+            liquidator: liquidator.to_string(),
+            borrower: borrower.to_string(),
+            debt_asset: debt_asset.to_string(),
+            collateral_asset: collateral_asset.to_string(),
+            repaid_amount: repay_amount,
+            seized_collateral: seize_amount,
+            liquidator_discount_value: discounted_value - repay_value,
+        });
 
         Ok(LiquidationResult {
             repaid_amount: repay_amount,
@@ -858,12 +929,13 @@ impl LendingProtocol {
 
     pub fn flash_loan(
         &mut self,
-        _receiver: &str,
+        receiver: &str,
         asset: &str,
         amount: i128,
         returned_amount: i128,
         now: u64,
     ) -> Result<FlashLoanReceipt, ProtocolError> {
+        self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
         self.accrue_interest(asset, now)?;
 
@@ -898,13 +970,24 @@ impl LendingProtocol {
         reserve.total_cash += supplier_fee + protocol_fee;
         reserve.protocol_fees += protocol_fee;
 
-        Ok(FlashLoanReceipt {
+        let receipt = FlashLoanReceipt {
             asset: asset.to_string(),
             amount,
             fee_paid: extra,
             protocol_fee,
             supplier_fee,
-        })
+        };
+
+        self.emit(ProtocolEvent::FlashLoan {
+            receiver: receiver.to_string(),
+            asset: asset.to_string(),
+            amount,
+            fee_paid: extra,
+            protocol_fee,
+            supplier_fee,
+        });
+
+        Ok(receipt)
     }
 
     pub fn collect_protocol_fees(
@@ -928,6 +1011,13 @@ impl LendingProtocol {
         }
         reserve.protocol_fees -= actual;
         reserve.total_cash -= actual;
+
+        self.emit(ProtocolEvent::FeesCollected {
+            asset: asset.to_string(),
+            amount: actual,
+            treasury: self.treasury.clone(),
+        });
+
         Ok(actual)
     }
 
@@ -1042,6 +1132,14 @@ impl LendingProtocol {
             Ok(())
         } else {
             Err(ProtocolError::Unauthorized)
+        }
+    }
+
+    fn ensure_not_paused(&self) -> Result<(), ProtocolError> {
+        if self.paused {
+            Err(ProtocolError::ProtocolPaused)
+        } else {
+            Ok(())
         }
     }
 

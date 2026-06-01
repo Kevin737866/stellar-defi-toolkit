@@ -3,6 +3,136 @@ use thiserror::Error;
 
 use crate::utils::WAD;
 
+// ─── Oracle Sanity Configuration ─────────────────────────────────────────────
+
+/// Configuration for oracle price sanity checks.
+///
+/// These guards protect the protocol against stale, zero, or wildly-deviated
+/// prices that could be used to manipulate liquidations or collateral values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OracleSanityConfig {
+    /// Maximum age of a price in seconds before it is considered stale.
+    /// A value of `0` disables the staleness check.
+    pub max_price_age_secs: u64,
+    /// Maximum allowed price deviation from the last accepted price, in basis
+    /// points (e.g. `2000` = 20 %).  A value of `0` disables the circuit-breaker.
+    pub max_price_deviation_bps: u32,
+    /// Minimum acceptable price (inclusive).  Must be > 0.
+    pub min_price: i128,
+    /// Maximum acceptable price (inclusive).  `0` means no upper bound.
+    pub max_price: i128,
+}
+
+impl Default for OracleSanityConfig {
+    fn default() -> Self {
+        Self {
+            // Prices older than 1 hour are considered stale.
+            max_price_age_secs: 3_600,
+            // Reject price updates that deviate more than 20 % from the last
+            // accepted price (circuit-breaker).
+            max_price_deviation_bps: 2_000,
+            // Prices must be strictly positive.
+            min_price: 1,
+            // No upper bound by default.
+            max_price: 0,
+        }
+    }
+}
+
+// ─── Protocol Events ──────────────────────────────────────────────────────────
+
+/// All observable state-changing actions emitted by the lending protocol.
+///
+/// Consumers (indexers, front-ends, tests) can subscribe to these events to
+/// reconstruct protocol state or trigger off-chain workflows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ProtocolEvent {
+    /// A new asset reserve was registered.
+    AssetRegistered {
+        asset: String,
+    },
+    /// A user deposited funds into a reserve.
+    Deposit {
+        user: String,
+        asset: String,
+        amount: i128,
+        shares_minted: i128,
+    },
+    /// A user withdrew funds from a reserve.
+    Withdraw {
+        user: String,
+        asset: String,
+        amount: i128,
+        shares_burned: i128,
+    },
+    /// A user borrowed funds from a reserve.
+    Borrow {
+        user: String,
+        asset: String,
+        amount: i128,
+        shares_minted: i128,
+    },
+    /// A payer repaid debt on behalf of a borrower.
+    Repay {
+        payer: String,
+        borrower: String,
+        asset: String,
+        amount: i128,
+        shares_burned: i128,
+    },
+    /// A liquidator partially or fully liquidated an undercollateralised position.
+    Liquidate {
+        liquidator: String,
+        borrower: String,
+        debt_asset: String,
+        collateral_asset: String,
+        repaid_amount: i128,
+        seized_collateral: i128,
+        liquidator_discount_value: i128,
+    },
+    /// A flash loan was executed.
+    FlashLoan {
+        receiver: String,
+        asset: String,
+        amount: i128,
+        fee_paid: i128,
+        protocol_fee: i128,
+        supplier_fee: i128,
+    },
+    /// Protocol fees were collected to the treasury.
+    FeesCollected {
+        asset: String,
+        amount: i128,
+        treasury: String,
+    },
+    /// Interest was accrued on a reserve.
+    InterestAccrued {
+        asset: String,
+        accrued: i128,
+        timestamp: u64,
+    },
+    /// Collateral was enabled or disabled for a user.
+    CollateralToggled {
+        user: String,
+        asset: String,
+        enabled: bool,
+    },
+    /// The protocol was paused by an admin.
+    Paused {
+        admin: String,
+    },
+    /// The protocol was unpaused by an admin.
+    Unpaused {
+        admin: String,
+    },
+    /// An oracle price was rejected by a sanity check.
+    OraclePriceRejected {
+        asset: String,
+        price: i128,
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InterestRateModel {
     pub base_rate: i128,
@@ -174,14 +304,21 @@ pub enum ProtocolError {
     MathFailure,
     #[error("price unavailable for asset {0}")]
     MissingPrice(String),
-    #[error("proposal not found")]
-    ProposalNotFound,
-    #[error("proposal already executed")]
-    ProposalAlreadyExecuted,
-    #[error("insufficient approvals")]
-    InsufficientApprovals,
-    #[error("already approved")]
-    AlreadyApproved,
+    #[error("supply cap exceeded for asset {0}")]
+    SupplyCapExceeded(String),
+    #[error("borrow cap exceeded for asset {0}")]
+    BorrowCapExceeded(String),
+    #[error("reserve factor must be <= 10000 bps")]
+    InvalidReserveFactor,
+    /// Emitted when the protocol is paused and a user-facing operation is attempted.
+    #[error("protocol is paused")]
+    ProtocolPaused,
+    /// Emitted when an oracle price fails a sanity check.
+    #[error("oracle price for {0} failed sanity check: {1}")]
+    OracleSanityCheckFailed(String, String),
+    /// Emitted when an oracle price is stale.
+    #[error("oracle price for {0} is stale")]
+    OraclePriceStale(String),
 }
 
 impl InterestRateModel {

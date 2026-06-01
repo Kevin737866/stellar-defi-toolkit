@@ -143,36 +143,26 @@ fn main() {
             timestamp,
             dry_run,
         } => {
-            handle_liquidation(
-                &liquidator,
-                &borrower,
-                &debt_asset,
-                &collateral_asset,
-                repay_amount,
-                debt_price,
-                collateral_price,
-                timestamp,
-                dry_run,
-            );
-        }
-        
-        Commands::CheckLiquidation {
-            borrower,
-            debt_asset,
-            collateral_asset,
-            debt_price,
-            collateral_price,
-        } => {
-            check_liquidation_status(
-                &borrower,
-                &debt_asset,
-                &collateral_asset,
-                debt_price,
-                collateral_price,
-            );
-        }
-    }
-}
+            let model = InterestRateModel::default();
+            let mut protocol = LendingProtocol::new("admin", "treasury", model);
+            let mut oracle = PriceOracleSim::new("oracle-admin");
+
+            // Mocking a state so the repay actually succeeds
+            let config = ReserveConfig {
+                asset: asset.clone(),
+                decimals: 7,
+                collateral_factor_bps: 8000,
+                liquidation_threshold_bps: 8500,
+                liquidation_bonus_bps: 500,
+                reserve_factor_bps: 1000,
+                flash_loan_fee_bps: 9,
+                borrow_enabled: true,
+                deposit_enabled: true,
+                flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
+            };
 
 fn handle_liquidation(
     liquidator: &str,
@@ -646,8 +636,25 @@ fn handle_liquidation(
                 }
             }
         }
-    }
-}
+        Commands::Deposit { user, asset, amount, now } | Commands::Lend { user, asset, amount, now } => {
+            let model = InterestRateModel::default();
+            let mut protocol = LendingProtocol::new("admin", "treasury", model);
+
+            let config = ReserveConfig {
+                asset: asset.clone(),
+                decimals: 7,
+                collateral_factor_bps: 8000,
+                liquidation_threshold_bps: 8500,
+                liquidation_bonus_bps: 500,
+                reserve_factor_bps: 1000,
+                flash_loan_fee_bps: 9,
+                borrow_enabled: true,
+                deposit_enabled: true,
+                flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
+            };
 
 fn check_liquidation_status(
     borrower: &str,
