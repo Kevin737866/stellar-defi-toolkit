@@ -1,7 +1,7 @@
 use std::cmp::min;
 use std::collections::BTreeMap;
 
-use crate::contracts::oracle::PriceOracle;
+use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
     AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
     ProtocolError, ProtocolSnapshot, ReserveConfig, ReserveState,
@@ -191,7 +191,7 @@ impl LendingProtocol {
         user: &str,
         asset: &str,
         amount: i128,
-        oracle: &PriceOracle,
+        oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<i128, ProtocolError> {
         self.ensure_positive(amount)?;
@@ -253,7 +253,7 @@ impl LendingProtocol {
         user: &str,
         asset: &str,
         enabled: bool,
-        oracle: &PriceOracle,
+        oracle: &PriceOracleSim,
     ) -> Result<(), ProtocolError> {
         let previous = {
             let position = self.account_mut(user);
@@ -285,7 +285,7 @@ impl LendingProtocol {
         user: &str,
         asset: &str,
         amount: i128,
-        oracle: &PriceOracle,
+        oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<i128, ProtocolError> {
         self.ensure_positive(amount)?;
@@ -408,7 +408,7 @@ impl LendingProtocol {
         debt_asset: &str,
         collateral_asset: &str,
         requested_repay_amount: i128,
-        oracle: &PriceOracle,
+        oracle: &PriceOracleSim,
         now: u64,
     ) -> Result<LiquidationResult, ProtocolError> {
         self.ensure_positive(requested_repay_amount)?;
@@ -548,7 +548,7 @@ impl LendingProtocol {
     pub fn position(
         &self,
         user: &str,
-        oracle: &PriceOracle,
+        oracle: &PriceOracleSim,
     ) -> Result<PositionSnapshot, ProtocolError> {
         let mut supplied_amounts = BTreeMap::new();
         let mut debt_amounts = BTreeMap::new();

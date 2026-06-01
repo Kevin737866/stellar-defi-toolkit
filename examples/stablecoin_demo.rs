@@ -5,6 +5,7 @@
 //! and managing the stability mechanisms.
 
 use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::testutils::Address as _;
 use stellar_defi_toolkit::contracts::{
     StablecoinContract, PriceOracleContract, StabilityPoolContract,
     GovernanceContractV2, ArbitrageContract

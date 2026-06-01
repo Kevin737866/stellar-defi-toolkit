@@ -1,5 +1,5 @@
 use stellar_defi_toolkit::{
-    InterestRateModel, LendingProtocol, PriceOracle, ProtocolError, ReserveConfig, WAD,
+    InterestRateModel, LendingProtocol, PriceOracleSim, ProtocolError, ReserveConfig, WAD,
 };
 
 fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
@@ -17,7 +17,7 @@ fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
     }
 }
 
-fn setup_protocol() -> (LendingProtocol, PriceOracle) {
+fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
     let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
@@ -26,7 +26,7 @@ fn setup_protocol() -> (LendingProtocol, PriceOracle) {
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 

@@ -1,4 +1,4 @@
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracle, ReserveConfig, WAD};
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig, WAD};
 
 fn main() {
     let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
@@ -39,7 +39,7 @@ fn main() {
         )
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 
