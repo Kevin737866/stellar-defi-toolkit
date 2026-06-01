@@ -1,5 +1,5 @@
 use stellar_defi_toolkit::{
-    InterestRateModel, LendingProtocol, PriceOracle, ProtocolError, ReserveConfig, WAD,
+    InterestRateModel, LendingProtocol, PriceOracleSim, ProtocolError, ReserveConfig, WAD,
 };
 
 fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
@@ -14,11 +14,24 @@ fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
         borrow_enabled: true,
         deposit_enabled: true,
         flash_loan_enabled: true,
+        supply_cap: 0,
+        borrow_cap: 0,
+        interest_rate_model: None,
     }
 }
 
+<<<<<<< lakes1
 fn setup_protocol() -> (LendingProtocol, PriceOracle) {
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
+=======
+fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
     let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+>>>>>>> main
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -26,7 +39,7 @@ fn setup_protocol() -> (LendingProtocol, PriceOracle) {
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 
@@ -169,4 +182,339 @@ fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
         .set_collateral_enabled("alice", "XLM", false, &oracle)
         .unwrap_err();
     assert_eq!(err, ProtocolError::HealthFactorTooLow);
+}
+
+<<<<<<< lakes1
+#[test]
+fn multisig_proposal_flow_works() {
+    use stellar_defi_toolkit::AdminAction;
+    let mut protocol = LendingProtocol::new(
+        vec!["admin1".to_string(), "admin2".to_string()],
+        2,
+        "treasury",
+        InterestRateModel::default(),
+    );
+
+    let action = AdminAction::SetCloseFactor(6_000);
+    let proposal_id = protocol
+        .propose_admin_action("admin1", action, 0)
+        .unwrap();
+
+    // admin2 approves
+    protocol.approve_admin_proposal("admin2", proposal_id).unwrap();
+
+    // Anyone in admin can execute
+    protocol.execute_admin_proposal("admin1", proposal_id, 0).unwrap();
+
+    // Check if executed
+    let snapshot = protocol.snapshot();
+    assert_eq!(snapshot.multisig.threshold, 2);
+    assert_eq!(snapshot.multisig.admins.len(), 2);
+=======
+// ── Feature: per-asset interest rate models ──────────────────────────────────
+
+#[test]
+fn per_asset_interest_rate_model_overrides_protocol_default() {
+    // Set up a protocol with a very low default rate, then give USDC a much
+    // steeper model and verify that USDC accrues more interest than XLM.
+    let default_model = InterestRateModel {
+        base_rate: 10_000_000,   // 1 %
+        slope_1: 40_000_000,     // 4 %
+        slope_2: 400_000_000,    // 40 %
+        optimal_utilization: 800_000_000,
+    };
+    let steep_model = InterestRateModel {
+        base_rate: 100_000_000,  // 10 %
+        slope_1: 400_000_000,    // 40 %
+        slope_2: 2_000_000_000,  // 200 %
+        optimal_utilization: 800_000_000,
+    };
+
+    let mut protocol = LendingProtocol::new("admin", "treasury", default_model);
+    protocol
+        .register_asset("admin", reserve("XLM", 8_000), 0)
+        .unwrap();
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    // Assign the steep model only to USDC.
+    protocol
+        .set_asset_interest_rate_model("admin", "USDC", Some(steep_model))
+        .unwrap();
+
+    let mut oracle = PriceOracleSim::new("oracle");
+    oracle.set_price("oracle", "XLM", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
+
+    // Provide liquidity and create borrows at ~80 % utilization for both assets.
+    protocol.deposit("lp", "XLM", 5_000_000, 0).unwrap();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 10_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "XLM", 4_000_000, &oracle, 0)
+        .unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+
+    let one_year = 31_536_000_u64;
+    protocol.accrue_interest("XLM", one_year).unwrap();
+    protocol.accrue_interest("USDC", one_year).unwrap();
+
+    let xlm_debt = protocol.reserve_state("XLM").unwrap().total_debt;
+    let usdc_debt = protocol.reserve_state("USDC").unwrap().total_debt;
+
+    // USDC has a steeper model so it must accrue more interest.
+    assert!(
+        usdc_debt > xlm_debt,
+        "USDC debt ({usdc_debt}) should exceed XLM debt ({xlm_debt}) due to steeper model"
+    );
+}
+
+#[test]
+fn clearing_per_asset_model_reverts_to_protocol_default() {
+    let default_model = InterestRateModel::default();
+    let steep_model = InterestRateModel {
+        base_rate: 200_000_000,
+        slope_1: 800_000_000,
+        slope_2: 3_000_000_000,
+        optimal_utilization: 800_000_000,
+    };
+
+    let mut protocol = LendingProtocol::new("admin", "treasury", default_model.clone());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    protocol
+        .set_asset_interest_rate_model("admin", "USDC", Some(steep_model))
+        .unwrap();
+    // Clear the override — should fall back to default.
+    protocol
+        .set_asset_interest_rate_model("admin", "USDC", None)
+        .unwrap();
+
+    // The effective model should now equal the default.
+    let effective = protocol.interest_rate_model_for("USDC").unwrap();
+    assert_eq!(*effective, default_model);
+}
+
+#[test]
+fn non_admin_cannot_set_asset_interest_rate_model() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let err = protocol
+        .set_asset_interest_rate_model("alice", "USDC", Some(InterestRateModel::default()))
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+}
+
+// ── Feature: supply caps ──────────────────────────────────────────────────────
+
+#[test]
+fn deposit_is_rejected_when_supply_cap_is_reached() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    // Set a tight supply cap of 1 000 000.
+    protocol.set_supply_cap("admin", "USDC", 1_000_000).unwrap();
+
+    // First deposit fits within the cap.
+    protocol.deposit("alice", "USDC", 800_000, 0).unwrap();
+
+    // Second deposit would push total supplied past the cap.
+    let err = protocol.deposit("bob", "USDC", 300_000, 0).unwrap_err();
+    assert_eq!(err, ProtocolError::SupplyCapExceeded("USDC".to_string()));
+}
+
+#[test]
+fn deposit_succeeds_when_supply_cap_is_zero_uncapped() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    // supply_cap = 0 means no cap.
+    protocol.set_supply_cap("admin", "USDC", 0).unwrap();
+    protocol.deposit("alice", "USDC", 100_000_000, 0).unwrap();
+    let state = protocol.reserve_state("USDC").unwrap();
+    assert_eq!(state.total_cash, 100_000_000);
+}
+
+#[test]
+fn non_admin_cannot_set_supply_cap() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let err = protocol
+        .set_supply_cap("alice", "USDC", 1_000_000)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+}
+
+// ── Feature: borrow caps ──────────────────────────────────────────────────────
+
+#[test]
+fn borrow_is_rejected_when_borrow_cap_is_reached() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("XLM", 8_000), 0)
+        .unwrap();
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let mut oracle = PriceOracleSim::new("oracle");
+    oracle.set_price("oracle", "XLM", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
+
+    // Provide ample liquidity.
+    protocol.deposit("lp", "USDC", 10_000_000, 0).unwrap();
+    // Alice deposits XLM as collateral.
+    protocol.deposit("alice", "XLM", 10_000_000, 0).unwrap();
+
+    // Cap USDC borrows at 500 000.
+    protocol.set_borrow_cap("admin", "USDC", 500_000).unwrap();
+
+    // First borrow fits.
+    protocol
+        .borrow("alice", "USDC", 400_000, &oracle, 0)
+        .unwrap();
+
+    // Second borrow would exceed the cap.
+    let err = protocol
+        .borrow("alice", "USDC", 200_000, &oracle, 0)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::BorrowCapExceeded("USDC".to_string()));
+}
+
+#[test]
+fn borrow_succeeds_when_borrow_cap_is_zero_uncapped() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("XLM", 8_000), 0)
+        .unwrap();
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let mut oracle = PriceOracleSim::new("oracle");
+    oracle.set_price("oracle", "XLM", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
+
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+
+    // borrow_cap = 0 means no cap.
+    protocol.set_borrow_cap("admin", "USDC", 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+    let state = protocol.reserve_state("USDC").unwrap();
+    assert_eq!(state.total_debt, 4_000_000);
+}
+
+#[test]
+fn non_admin_cannot_set_borrow_cap() {
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    protocol
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+
+    let err = protocol
+        .set_borrow_cap("alice", "USDC", 500_000)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+}
+
+// ── Feature: dynamic reserve factors ─────────────────────────────────────────
+
+#[test]
+fn reserve_factor_update_changes_protocol_fee_accrual() {
+    let (mut protocol, oracle) = setup_protocol();
+
+    // Provide liquidity and create a borrow.
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+
+    // Accrue one year with the original 10 % reserve factor.
+    protocol.accrue_interest("USDC", 31_536_000).unwrap();
+    let fees_low_rf = protocol.reserve_state("USDC").unwrap().protocol_fees;
+
+    // Reset state by creating a fresh protocol with a 50 % reserve factor.
+    let mut protocol2 = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut cfg = reserve("USDC", 9_000);
+    cfg.reserve_factor_bps = 5_000; // 50 %
+    protocol2.register_asset("admin", cfg, 0).unwrap();
+    protocol2
+        .register_asset("admin", reserve("XLM", 8_000), 0)
+        .unwrap();
+
+    let mut oracle2 = PriceOracleSim::new("oracle");
+    oracle2.set_price("oracle", "XLM", WAD).unwrap();
+    oracle2.set_price("oracle", "USDC", WAD).unwrap();
+
+    protocol2.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol2.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+    protocol2
+        .borrow("alice", "USDC", 4_000_000, &oracle2, 0)
+        .unwrap();
+    protocol2.accrue_interest("USDC", 31_536_000).unwrap();
+    let fees_high_rf = protocol2.reserve_state("USDC").unwrap().protocol_fees;
+
+    assert!(
+        fees_high_rf > fees_low_rf,
+        "50 % reserve factor ({fees_high_rf}) should collect more fees than 10 % ({fees_low_rf})"
+    );
+}
+
+#[test]
+fn set_reserve_factor_updates_config_and_affects_future_accrual() {
+    let (mut protocol, oracle) = setup_protocol();
+
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "XLM", 5_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+
+    // Raise the reserve factor to 50 % mid-flight.
+    protocol.set_reserve_factor("admin", "USDC", 5_000).unwrap();
+
+    // Accrue interest — the new factor should apply.
+    protocol.accrue_interest("USDC", 31_536_000).unwrap();
+    let fees = protocol.reserve_state("USDC").unwrap().protocol_fees;
+    assert!(fees > 0, "protocol fees should be positive after accrual");
+}
+
+#[test]
+fn set_reserve_factor_rejects_value_above_10000_bps() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    let err = protocol
+        .set_reserve_factor("admin", "USDC", 10_001)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::InvalidReserveFactor);
+}
+
+#[test]
+fn non_admin_cannot_set_reserve_factor() {
+    let (mut protocol, _oracle) = setup_protocol();
+
+    let err = protocol
+        .set_reserve_factor("alice", "USDC", 2_000)
+        .unwrap_err();
+    assert_eq!(err, ProtocolError::Unauthorized);
+>>>>>>> main
 }

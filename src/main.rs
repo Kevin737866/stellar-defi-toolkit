@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracle};
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig};
 
 #[derive(Parser)]
 #[command(name = "stellar-defi-cli")]
@@ -77,12 +77,12 @@ fn main() {
             let yearly_rate = model.borrow_rate(utilization);
             let rate_percent = yearly_rate as f64 / 10_000_000.0 * 100.0;
 
-            let protocol = LendingProtocol::new("admin", "treasury", model);
+            let protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", model);
             let oracle = PriceOracle::new("oracle-admin");
 
             println!(
-                "borrow_rate={rate_percent:.4}% protocol_admin={} oracle_admin={}",
-                protocol.admin(),
+                "borrow_rate={rate_percent:.4}% protocol_admins={:?} oracle_admin={}",
+                protocol.admins(),
                 oracle.admin()
             );
         }

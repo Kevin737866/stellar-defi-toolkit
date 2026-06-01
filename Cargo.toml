@@ -2,6 +2,7 @@
 name = "stellar-defi-toolkit"
 version = "0.1.0"
 edition = "2021"
+autoexamples = false
 authors = ["OpenAI <support@openai.com>"]
 description = "Soroban-oriented lending and borrowing protocol primitives for Stellar"
 license = "MIT OR Apache-2.0"
@@ -32,6 +33,14 @@ soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 [[bin]]
 name = "stellar-defi-cli"
 path = "src/main.rs"
+
+[[example]]
+name = "yield_vault"
+path = "examples/yield_vault.rs"
+
+[[example]]
+name = "liquidity_pool"
+path = "examples/liquidity_pool.rs"
 
 [lib]
 name = "stellar_defi_toolkit"

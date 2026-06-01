@@ -34,6 +34,12 @@ pub struct ReserveConfig {
     pub borrow_enabled: bool,
     pub deposit_enabled: bool,
     pub flash_loan_enabled: bool,
+    /// Maximum total amount that can be supplied for this asset (0 = no cap).
+    pub supply_cap: i128,
+    /// Maximum total amount that can be borrowed for this asset (0 = no cap).
+    pub borrow_cap: i128,
+    /// Per-asset interest rate model. When `None` the protocol-level default is used.
+    pub interest_rate_model: Option<InterestRateModel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +103,39 @@ pub struct ProtocolSnapshot {
     pub reserves: std::collections::BTreeMap<String, ReserveState>,
     pub reserve_configs: std::collections::BTreeMap<String, ReserveConfig>,
     pub treasury: String,
+    pub multisig: MultiSigConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MultiSigConfig {
+    pub admins: Vec<String>,
+    pub threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AdminAction {
+    SetCloseFactor(u32),
+    RegisterAsset(ReserveConfig),
+    UpdateReserveConfig(ReserveConfig),
+    UpdateMultiSig(MultiSigConfig),
+    CollectProtocolFees(String, i128),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AdminProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub action: AdminAction,
+    pub proposer: String,
+    pub approvals: std::collections::BTreeSet<String>,
+    pub status: AdminProposalStatus,
+    pub created_at: u64,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -135,6 +174,14 @@ pub enum ProtocolError {
     MathFailure,
     #[error("price unavailable for asset {0}")]
     MissingPrice(String),
+    #[error("proposal not found")]
+    ProposalNotFound,
+    #[error("proposal already executed")]
+    ProposalAlreadyExecuted,
+    #[error("insufficient approvals")]
+    InsufficientApprovals,
+    #[error("already approved")]
+    AlreadyApproved,
 }
 
 impl InterestRateModel {

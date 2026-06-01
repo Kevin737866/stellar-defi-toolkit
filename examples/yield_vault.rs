@@ -1,7 +1,12 @@
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracle, ReserveConfig, WAD};
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig, WAD};
 
 fn main() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
     protocol
         .register_asset(
             "admin",
@@ -16,6 +21,9 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             },
             0,
         )
@@ -34,12 +42,15 @@ fn main() {
                 borrow_enabled: true,
                 deposit_enabled: true,
                 flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
             },
             0,
         )
         .unwrap();
 
-    let mut oracle = PriceOracle::new("oracle");
+    let mut oracle = PriceOracleSim::new("oracle");
     oracle.set_price("oracle", "XLM", WAD).unwrap();
     oracle.set_price("oracle", "USDC", WAD).unwrap();
 

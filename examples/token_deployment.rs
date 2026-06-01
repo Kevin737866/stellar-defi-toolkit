@@ -1,7 +1,12 @@
 use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, ReserveConfig};
 
 fn main() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
     protocol
         .register_asset(
             "admin",
