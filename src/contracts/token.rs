@@ -1,208 +1,123 @@
-//! Token contract implementation for Stellar DeFi Toolkit
-//! 
-//! Provides ERC-20-like token functionality on the Stellar blockchain
-//! using Soroban smart contracts.
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, symbol_short};
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use soroban_token_sdk::{Token, TokenInterface};
-use crate::types::token::{TokenInfo, TokenMetadata};
-use crate::utils::StellarClient;
+const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 
-/// Token contract implementing standard token functionality
+fn balance_key(env: &Env, owner: &Address) -> soroban_sdk::Bytes {
+    let mut key = soroban_sdk::Bytes::new(env);
+    key.append(&soroban_sdk::Bytes::from_slice(env, b"bal:"));
+    key.append(&owner.clone().to_string().into_bytes(env));
+    key
+}
+
+fn allowance_key(env: &Env, owner: &Address, spender: &Address) -> soroban_sdk::Bytes {
+    let mut key = soroban_sdk::Bytes::new(env);
+    key.append(&soroban_sdk::Bytes::from_slice(env, b"allow:"));
+    key.append(&owner.clone().to_string().into_bytes(env));
+    key.append(&soroban_sdk::Bytes::from_slice(env, b":"));
+    key.append(&spender.clone().to_string().into_bytes(env));
+    key
+}
+
 #[contract]
-pub struct TokenContract {
-    /// Token name
-    name: String,
-    /// Token symbol
-    symbol: String,
-    /// Total supply
-    total_supply: u64,
-    /// Token decimals
-    decimals: u8,
-    /// Contract address
-    address: Option<Address>,
-}
+pub struct TokenContract;
 
+#[contractimpl]
 impl TokenContract {
-    /// Create a new token contract
-    pub fn new(name: String, symbol: String, initial_supply: u64) -> Self {
-        Self {
-            name,
-            symbol,
-            total_supply: initial_supply,
-            decimals: 7, // Stellar standard
-            address: None,
+    /// Initialize the contract and set the admin
+    pub fn initialize(env: Env, admin: Address) {
+        env.storage().instance().set(&ADMIN_KEY, &admin);
+    }
+
+    /// Returns the balance of the given address using persistent storage
+    pub fn balance_of(env: Env, owner: Address) -> i128 {
+        let key = balance_key(&env, &owner);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Returns the allowance that `spender` is allowed to spend on behalf of `owner`
+    pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
+        let key = allowance_key(&env, &owner, &spender);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Approve `spender` to spend up to `amount` tokens on behalf of the caller
+    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128) {
+        owner.require_auth();
+        let key = allowance_key(&env, &owner, &spender);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    /// Transfer tokens from the caller to `to`
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        let from_balance = Self::balance_of(env.clone(), from.clone());
+        assert!(from_balance >= amount, "Insufficient balance");
+
+        let from_key = balance_key(&env, &from);
+        let to_key = balance_key(&env, &to);
+
+        let to_balance = Self::balance_of(env.clone(), to.clone());
+        env.storage().persistent().set(&from_key, &(from_balance - amount));
+        env.storage().persistent().set(&to_key, &(to_balance + amount));
+    }
+
+    /// Transfer tokens on behalf of `from` using an allowance
+    pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
+        let current_allowance = Self::allowance(env.clone(), from.clone(), spender.clone());
+        assert!(current_allowance >= amount, "Insufficient allowance");
+
+        // Reduce allowance
+        let allow_key = allowance_key(&env, &from, &spender);
+        env.storage().persistent().set(&allow_key, &(current_allowance - amount));
+
+        // Execute transfer
+        let from_balance = Self::balance_of(env.clone(), from.clone());
+        assert!(from_balance >= amount, "Insufficient balance");
+
+        let from_key = balance_key(&env, &from);
+        let to_key = balance_key(&env, &to);
+        let to_balance = Self::balance_of(env.clone(), to.clone());
+
+        env.storage().persistent().set(&from_key, &(from_balance - amount));
+        env.storage().persistent().set(&to_key, &(to_balance + amount));
+    }
+
+    /// Mint new tokens to `to` — admin only
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        // Enforce admin-only access
+        let admin: Address = env.storage().instance().get(&ADMIN_KEY)
+            .expect("Contract not initialized");
+        admin.require_auth();
+
+        let key = balance_key(&env, &to);
+        let current = Self::balance_of(env.clone(), to.clone());
+        env.storage().persistent().set(&key, &(current + amount));
+    }
+
+    /// Burn tokens from `from` — caller must be the token holder or admin
+    pub fn burn(env: Env, from: Address, amount: i128) {
+        // Enforce that either the holder or the admin is authorizing the burn
+        let admin: Address = env.storage().instance().get(&ADMIN_KEY)
+            .expect("Contract not initialized");
+
+        // Require auth from either the holder (self-burn) or the admin
+        if from != admin {
+            from.require_auth();
+        } else {
+            admin.require_auth();
         }
+
+        let current = Self::balance_of(env.clone(), from.clone());
+        assert!(current >= amount, "Insufficient balance to burn");
+
+        let key = balance_key(&env, &from);
+        env.storage().persistent().set(&key, &(current - amount));
     }
 
-    /// Get token information
-    pub fn get_info(&self) -> TokenInfo {
-        TokenInfo {
-            name: self.name.clone(),
-            symbol: self.symbol.clone(),
-            total_supply: self.total_supply,
-            decimals: self.decimals,
-        }
-    }
-
-    /// Deploy the token contract to Stellar
-    pub async fn deploy(mut self, client: &StellarClient) -> anyhow::Result<String> {
-        let contract_id = client.deploy_token_contract(&self).await?;
-        self.address = Some(Address::from_contract_id(&contract_id));
-        Ok(contract_id)
-    }
-
-    /// Mint new tokens
-    pub fn mint(&mut self, to: Address, amount: u64) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
-        }
-        
-        // In a real implementation, this would interact with the Soroban environment
-        self.total_supply += amount;
-        Ok(())
-    }
-
-    /// Burn tokens
-    pub fn burn(&mut self, from: Address, amount: u64) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
-        }
-        
-        if self.total_supply < amount {
-            return Err("Insufficient supply to burn".to_string());
-        }
-        
-        self.total_supply -= amount;
-        Ok(())
-    }
-
-    /// Transfer tokens between addresses
-    pub fn transfer(&self, from: Address, to: Address, amount: u64) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
-        }
-        
-        if from == to {
-            return Err("Cannot transfer to the same address".to_string());
-        }
-        
-        // In a real implementation, this would:
-        // 1. Check balance of 'from' address
-        // 2. Subtract amount from 'from' balance
-        // 3. Add amount to 'to' balance
-        // 4. Emit transfer event
-        
-        Ok(())
-    }
-
-    /// Get balance of an address
-    pub fn balance_of(&self, address: Address) -> u64 {
-        // In a real implementation, this would query the contract state
-        // For now, return a placeholder
-        0
-    }
-
-    /// Approve spending for another address
-    pub fn approve(&self, owner: Address, spender: Address, amount: u64) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
-        }
-        
-        // In a real implementation, this would:
-        // 1. Set allowance for spender
-        // 2. Emit approval event
-        
-        Ok(())
-    }
-
-    /// Get allowance for a spender
-    pub fn allowance(&self, owner: Address, spender: Address) -> u64 {
-        // In a real implementation, this would query the contract state
-        // For now, return a placeholder
-        0
-    }
-
-    /// Transfer from approved address
-    pub fn transfer_from(
-        &self,
-        spender: Address,
-        from: Address,
-        to: Address,
-        amount: u64,
-    ) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
-        }
-        
-        let current_allowance = self.allowance(from, spender);
-        if current_allowance < amount {
-            return Err("Insufficient allowance".to_string());
-        }
-        
-        // In a real implementation, this would:
-        // 1. Check allowance
-        // 2. Perform transfer
-        // 3. Update allowance
-        // 4. Emit events
-        
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_token_creation() {
-        let token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        
-        assert_eq!(token.name, "Test Token");
-        assert_eq!(token.symbol, "TEST");
-        assert_eq!(token.total_supply, 1000000);
-        assert_eq!(token.decimals, 7);
-    }
-
-    #[test]
-    fn test_mint() {
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        let address = Address::generate(&Env::default());
-        
-        let initial_supply = token.total_supply;
-        token.mint(address.clone(), 500000).unwrap();
-        
-        assert_eq!(token.total_supply, initial_supply + 500000);
-    }
-
-    #[test]
-    fn test_burn() {
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        let address = Address::generate(&Env::default());
-        
-        let initial_supply = token.total_supply;
-        token.burn(address, 100000).unwrap();
-        
-        assert_eq!(token.total_supply, initial_supply - 100000);
-    }
-
-    #[test]
-    fn test_invalid_mint_amount() {
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        let address = Address::generate(&Env::default());
-        
-        let result = token.mint(address, 0);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Amount must be greater than 0");
-    }
-
-    #[test]
-    fn test_invalid_burn_amount() {
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        let address = Address::generate(&Env::default());
-        
-        let result = token.burn(address, 2000000); // More than total supply
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Insufficient supply to burn");
+    /// Get the current admin address
+    pub fn get_admin(env: Env) -> Address {
+        env.storage().instance().get(&ADMIN_KEY)
+            .expect("Contract not initialized")
     }
 }
