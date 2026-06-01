@@ -18,7 +18,12 @@ fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
 }
 
 fn setup_protocol() -> (LendingProtocol, PriceOracle) {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -169,4 +174,31 @@ fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
         .set_collateral_enabled("alice", "XLM", false, &oracle)
         .unwrap_err();
     assert_eq!(err, ProtocolError::HealthFactorTooLow);
+}
+
+#[test]
+fn multisig_proposal_flow_works() {
+    use stellar_defi_toolkit::AdminAction;
+    let mut protocol = LendingProtocol::new(
+        vec!["admin1".to_string(), "admin2".to_string()],
+        2,
+        "treasury",
+        InterestRateModel::default(),
+    );
+
+    let action = AdminAction::SetCloseFactor(6_000);
+    let proposal_id = protocol
+        .propose_admin_action("admin1", action, 0)
+        .unwrap();
+
+    // admin2 approves
+    protocol.approve_admin_proposal("admin2", proposal_id).unwrap();
+
+    // Anyone in admin can execute
+    protocol.execute_admin_proposal("admin1", proposal_id, 0).unwrap();
+
+    // Check if executed
+    let snapshot = protocol.snapshot();
+    assert_eq!(snapshot.multisig.threshold, 2);
+    assert_eq!(snapshot.multisig.admins.len(), 2);
 }

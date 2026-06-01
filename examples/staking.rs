@@ -1,10 +1,15 @@
 use stellar_defi_toolkit::{InterestRateModel, LendingProtocol};
 
 fn main() {
-    let protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(
+        vec!["admin".to_string()],
+        1,
+        "treasury",
+        InterestRateModel::default(),
+    );
     println!(
-        "protocol initialized with admin={} treasury={}",
-        protocol.admin(),
+        "protocol initialized with admins={:?} treasury={}",
+        protocol.admins(),
         protocol.treasury()
     );
 }
