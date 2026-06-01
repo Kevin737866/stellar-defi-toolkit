@@ -16,6 +16,29 @@ pub struct LiquidityPool;
 #[contractimpl]
 impl LiquidityPool {
     /// Initialize the pool with token pair and fee.
+
+    pub fn get_liquidity_position(e: Env, provider: Address) -> LiquidityPosition {
+       let shares = get_shares(&e, &provider);
+       let total_shares = get_total_shares(&e);
+       let (reserve_a, reserve_b) = (get_reserve_a(&e), get_reserve_b(&e));
+
+       if total_shares == 0 {
+           return LiquidityPosition {
+               shares,
+               token_a_amount: 0,
+               token_b_amount: 0,
+           };
+       }
+
+       let token_a_amount = (reserve_a * shares) / total_shares;
+       let token_b_amount = (reserve_b * shares) / total_shares;
+
+       LiquidityPosition {
+           shares,
+           token_a_amount,
+           token_b_amount,
+       }
+   }
     pub fn initialize(
         env: Env,
         token_a: Symbol,
