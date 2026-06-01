@@ -233,6 +233,39 @@ pub struct ProtocolSnapshot {
     pub reserves: std::collections::BTreeMap<String, ReserveState>,
     pub reserve_configs: std::collections::BTreeMap<String, ReserveConfig>,
     pub treasury: String,
+    pub multisig: MultiSigConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MultiSigConfig {
+    pub admins: Vec<String>,
+    pub threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AdminAction {
+    SetCloseFactor(u32),
+    RegisterAsset(ReserveConfig),
+    UpdateReserveConfig(ReserveConfig),
+    UpdateMultiSig(MultiSigConfig),
+    CollectProtocolFees(String, i128),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AdminProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminProposal {
+    pub id: u64,
+    pub action: AdminAction,
+    pub proposer: String,
+    pub approvals: std::collections::BTreeSet<String>,
+    pub status: AdminProposalStatus,
+    pub created_at: u64,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

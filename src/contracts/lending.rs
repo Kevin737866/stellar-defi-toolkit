@@ -1,6 +1,8 @@
 use std::cmp::min;
 use std::collections::BTreeMap;
 
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Symbol, log};
+
 use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
     AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
@@ -21,7 +23,9 @@ use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 ///   `events`.  Callers can drain the log with `drain_events()`.
 #[derive(Debug, Clone)]
 pub struct LendingProtocol {
-    admin: String,
+    multisig: MultiSigConfig,
+    proposals: BTreeMap<u64, AdminProposal>,
+    next_proposal_id: u64,
     treasury: String,
     /// Protocol-level default interest rate model, used when a reserve has no
     /// per-asset model configured.
@@ -38,12 +42,15 @@ pub struct LendingProtocol {
 
 impl LendingProtocol {
     pub fn new(
-        admin: impl Into<String>,
+        admins: Vec<String>,
+        threshold: u32,
         treasury: impl Into<String>,
         interest_rate_model: InterestRateModel,
     ) -> Self {
         Self {
-            admin: admin.into(),
+            multisig: MultiSigConfig { admins, threshold },
+            proposals: BTreeMap::new(),
+            next_proposal_id: 1,
             treasury: treasury.into(),
             default_interest_rate_model: interest_rate_model,
             reserves: BTreeMap::new(),
@@ -55,8 +62,12 @@ impl LendingProtocol {
         }
     }
 
-    pub fn admin(&self) -> &str {
-        &self.admin
+    pub fn admins(&self) -> &[String] {
+        &self.multisig.admins
+    }
+
+    pub fn threshold(&self) -> u32 {
+        self.multisig.threshold
     }
 
     pub fn treasury(&self) -> &str {
@@ -116,12 +127,112 @@ impl LendingProtocol {
         &self.default_interest_rate_model
     }
 
-    /// Returns the effective interest rate model for `asset`: the per-asset
-    /// model when one is configured, otherwise the protocol default.
-    pub fn interest_rate_model_for(&self, asset: &str) -> Option<&InterestRateModel> {
-        self.reserve_configs
-            .get(asset)
-            .map(|cfg| cfg.interest_rate_model.as_ref().unwrap_or(&self.default_interest_rate_model))
+    pub fn approve_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.approvals.contains(caller) {
+            return Err(ProtocolError::AlreadyApproved);
+        }
+
+        proposal.approvals.insert(caller.to_string());
+        Ok(())
+    }
+
+    pub fn execute_admin_proposal(
+        &mut self,
+        caller: &str,
+        proposal_id: u64,
+        now: u64,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if (proposal.approvals.len() as u32) < self.multisig.threshold {
+            return Err(ProtocolError::InsufficientApprovals);
+        }
+
+        let action = proposal.action.clone();
+        match action {
+            AdminAction::SetCloseFactor(bps) => {
+                self.close_factor_bps = bps;
+            }
+            AdminAction::RegisterAsset(config) => {
+                if self.reserve_configs.contains_key(&config.asset) {
+                    return Err(ProtocolError::AssetAlreadyExists);
+                }
+                let asset = config.asset.clone();
+                self.reserve_configs.insert(asset.clone(), config);
+                self.reserves.insert(
+                    asset,
+                    ReserveState {
+                        last_accrual_ts: now,
+                        ..ReserveState::default()
+                    },
+                );
+            }
+            AdminAction::UpdateReserveConfig(config) => {
+                let asset = config.asset.clone();
+                let stored = self
+                    .reserve_configs
+                    .get_mut(&asset)
+                    .ok_or(ProtocolError::UnknownAsset)?;
+                *stored = config;
+            }
+            AdminAction::UpdateMultiSig(config) => {
+                self.multisig = config;
+            }
+            AdminAction::CollectProtocolFees(asset, amount) => {
+                let reserve = self
+                    .reserves
+                    .get_mut(&asset)
+                    .ok_or(ProtocolError::UnknownAsset)?;
+                let actual = min(amount, reserve.protocol_fees);
+                if reserve.total_cash < actual {
+                    return Err(ProtocolError::InsufficientLiquidity);
+                }
+                reserve.total_cash -= actual;
+                reserve.protocol_fees -= actual;
+            }
+        }
+
+        let proposal = self.proposals.get_mut(&proposal_id).unwrap();
+        proposal.status = AdminProposalStatus::Executed;
+
+        Ok(())
+    }
+
+    pub fn cancel_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.proposer != caller {
+            return Err(ProtocolError::Unauthorized);
+        }
+
+        proposal.status = AdminProposalStatus::Cancelled;
+        Ok(())
     }
 
     pub fn set_close_factor(
@@ -129,7 +240,10 @@ impl LendingProtocol {
         caller: &str,
         close_factor_bps: u32,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
         self.close_factor_bps = close_factor_bps;
         Ok(())
     }
@@ -224,7 +338,10 @@ impl LendingProtocol {
         config: ReserveConfig,
         now: u64,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
         if self.reserve_configs.contains_key(&config.asset) {
             return Err(ProtocolError::AssetAlreadyExists);
         }
@@ -247,7 +364,10 @@ impl LendingProtocol {
         caller: &str,
         config: ReserveConfig,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
         let asset = config.asset.clone();
         let stored = self
             .reserve_configs
@@ -876,7 +996,10 @@ impl LendingProtocol {
         asset: &str,
         amount: i128,
     ) -> Result<i128, ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
         self.ensure_positive(amount)?;
         let reserve = self
             .reserves
@@ -968,6 +1091,7 @@ impl LendingProtocol {
             reserves: self.reserves.clone(),
             reserve_configs: self.reserve_configs.clone(),
             treasury: self.treasury.clone(),
+            multisig: self.multisig.clone(),
         }
     }
 
@@ -1003,8 +1127,8 @@ impl LendingProtocol {
         Ok(())
     }
 
-    fn ensure_admin(&self, caller: &str) -> Result<(), ProtocolError> {
-        if caller == self.admin {
+    fn ensure_is_admin_member(&self, caller: &str) -> Result<(), ProtocolError> {
+        if self.multisig.admins.iter().any(|a| a == caller) {
             Ok(())
         } else {
             Err(ProtocolError::Unauthorized)
