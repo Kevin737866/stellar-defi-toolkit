@@ -12,7 +12,9 @@ use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 pub struct LendingProtocol {
     admin: String,
     treasury: String,
-    interest_rate_model: InterestRateModel,
+    /// Protocol-level default interest rate model, used when a reserve has no
+    /// per-asset model configured.
+    default_interest_rate_model: InterestRateModel,
     reserves: BTreeMap<String, ReserveState>,
     reserve_configs: BTreeMap<String, ReserveConfig>,
     accounts: BTreeMap<String, AccountPosition>,
@@ -28,7 +30,7 @@ impl LendingProtocol {
         Self {
             admin: admin.into(),
             treasury: treasury.into(),
-            interest_rate_model,
+            default_interest_rate_model: interest_rate_model,
             reserves: BTreeMap::new(),
             reserve_configs: BTreeMap::new(),
             accounts: BTreeMap::new(),
@@ -44,6 +46,19 @@ impl LendingProtocol {
         &self.treasury
     }
 
+    /// Returns the protocol-level default interest rate model.
+    pub fn default_interest_rate_model(&self) -> &InterestRateModel {
+        &self.default_interest_rate_model
+    }
+
+    /// Returns the effective interest rate model for `asset`: the per-asset
+    /// model when one is configured, otherwise the protocol default.
+    pub fn interest_rate_model_for(&self, asset: &str) -> Option<&InterestRateModel> {
+        self.reserve_configs
+            .get(asset)
+            .map(|cfg| cfg.interest_rate_model.as_ref().unwrap_or(&self.default_interest_rate_model))
+    }
+
     pub fn set_close_factor(
         &mut self,
         caller: &str,
@@ -51,6 +66,90 @@ impl LendingProtocol {
     ) -> Result<(), ProtocolError> {
         self.ensure_admin(caller)?;
         self.close_factor_bps = close_factor_bps;
+        Ok(())
+    }
+
+    /// Replace the protocol-level default interest rate model.
+    pub fn set_default_interest_rate_model(
+        &mut self,
+        caller: &str,
+        model: InterestRateModel,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.default_interest_rate_model = model;
+        Ok(())
+    }
+
+    /// Set (or clear) the per-asset interest rate model for `asset`.
+    ///
+    /// Pass `Some(model)` to override the protocol default for this asset, or
+    /// `None` to revert to the protocol default.
+    pub fn set_asset_interest_rate_model(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        model: Option<InterestRateModel>,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.interest_rate_model = model;
+        Ok(())
+    }
+
+    /// Update the supply cap for `asset`.  A value of `0` removes the cap.
+    pub fn set_supply_cap(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        supply_cap: i128,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.supply_cap = supply_cap;
+        Ok(())
+    }
+
+    /// Update the borrow cap for `asset`.  A value of `0` removes the cap.
+    pub fn set_borrow_cap(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        borrow_cap: i128,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.borrow_cap = borrow_cap;
+        Ok(())
+    }
+
+    /// Update the reserve factor for `asset` in basis points (0–10 000).
+    ///
+    /// The reserve factor controls what fraction of accrued interest is
+    /// redirected to the protocol treasury.
+    pub fn set_reserve_factor(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        reserve_factor_bps: u32,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        if reserve_factor_bps > 10_000 {
+            return Err(ProtocolError::InvalidReserveFactor);
+        }
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.reserve_factor_bps = reserve_factor_bps;
         Ok(())
     }
 
@@ -114,7 +213,15 @@ impl LendingProtocol {
         } else {
             wad_div(state.total_debt, supplied).map_err(|_| ProtocolError::MathFailure)?
         };
-        let borrow_rate = self.interest_rate_model.borrow_rate(utilization);
+
+        // Use the per-asset model when configured, otherwise fall back to the
+        // protocol-level default.
+        let model = config
+            .interest_rate_model
+            .as_ref()
+            .unwrap_or(&self.default_interest_rate_model);
+        let borrow_rate = model.borrow_rate(utilization);
+
         let accrued = mul_div(
             state.total_debt,
             borrow_rate
@@ -156,6 +263,18 @@ impl LendingProtocol {
             .ok_or(ProtocolError::UnknownAsset)?;
         if !config.deposit_enabled {
             return Err(ProtocolError::DepositsDisabled(asset.to_string()));
+        }
+
+        // Enforce supply cap (0 means uncapped).
+        let reserve = self
+            .reserves
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if config.supply_cap > 0 {
+            let total_supplied = reserve.total_cash + reserve.total_debt - reserve.protocol_fees;
+            if total_supplied + amount > config.supply_cap {
+                return Err(ProtocolError::SupplyCapExceeded(asset.to_string()));
+            }
         }
 
         let reserve = self
@@ -305,6 +424,11 @@ impl LendingProtocol {
                 .ok_or(ProtocolError::UnknownAsset)?;
             if reserve.total_cash < amount {
                 return Err(ProtocolError::InsufficientLiquidity);
+            }
+
+            // Enforce borrow cap (0 means uncapped).
+            if config.borrow_cap > 0 && reserve.total_debt + amount > config.borrow_cap {
+                return Err(ProtocolError::BorrowCapExceeded(asset.to_string()));
             }
         }
 
