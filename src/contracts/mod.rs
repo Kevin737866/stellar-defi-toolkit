@@ -2,6 +2,8 @@
 
 pub mod lending;
 pub mod oracle;
+pub mod staking;
 
 pub use lending::LendingProtocol;
 pub use oracle::PriceOracle;
+pub use staking::{StakingContract, StakingInfo};
