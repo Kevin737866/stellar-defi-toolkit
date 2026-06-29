@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig};
+use log::info;
+use soroban_sdk::Env;
+use stellar_defi_toolkit::contracts::{TokenContract, LiquidityPoolContract};
+use stellar_defi_toolkit::utils::StellarClient;
 
 #[derive(Parser)]
 #[command(name = "stellar-defi-cli")]
@@ -109,6 +112,12 @@ enum Commands {
         #[arg(long, help = "Price of collateral asset in USD (with 18 decimals)", default_value = "1000000000000000000")]
         collateral_price: i128,
     },
+    /// Start the GraphQL API server
+    ServeApi {
+        /// Port to listen on
+        #[arg(short, long, default_value = "4000")]
+        port: u16,
+    },
 }
 
 fn main() {
@@ -116,169 +125,19 @@ fn main() {
 
     let cli = Cli::parse();
     match cli.command {
-        Commands::QuoteRate { utilization_bps } => {
-            let model = InterestRateModel::default();
-            let utilization = i128::from(utilization_bps) * 100_000;
-            let yearly_rate = model.borrow_rate(utilization);
-            let rate_percent = yearly_rate as f64 / 10_000_000.0 * 100.0;
-
-            let protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", model);
-            let oracle = PriceOracle::new("oracle-admin");
-
-            println!(
-                "borrow_rate={rate_percent:.4}% protocol_admins={:?} oracle_admin={}",
-                protocol.admins(),
-                oracle.admin()
-            );
+        Commands::DeployToken { name, symbol, supply } => {
+            info!("Deploying token contract: {} ({})", name, symbol);
+            let env = Env::default();
+            let token_contract = TokenContract::new_std(&env, name, symbol, supply);
+            let contract_id = token_contract.deploy(&client).await?;
+            println!("Token deployed successfully! Contract ID: {}", contract_id);
         }
-        
-        Commands::Liquidate {
-            liquidator,
-            borrower,
-            debt_asset,
-            collateral_asset,
-            repay_amount,
-            debt_price,
-            collateral_price,
-            timestamp,
-            dry_run,
-        } => {
-            let model = InterestRateModel::default();
-            let mut protocol = LendingProtocol::new("admin", "treasury", model);
-            let mut oracle = PriceOracleSim::new("oracle-admin");
-
-            // Mocking a state so the repay actually succeeds
-            let config = ReserveConfig {
-                asset: asset.clone(),
-                decimals: 7,
-                collateral_factor_bps: 8000,
-                liquidation_threshold_bps: 8500,
-                liquidation_bonus_bps: 500,
-                reserve_factor_bps: 1000,
-                flash_loan_fee_bps: 9,
-                borrow_enabled: true,
-                deposit_enabled: true,
-                flash_loan_enabled: true,
-                supply_cap: 0,
-                borrow_cap: 0,
-                interest_rate_model: None,
-            };
-
-fn handle_liquidation(
-    liquidator: &str,
-    borrower: &str,
-    debt_asset: &str,
-    collateral_asset: &str,
-    repay_amount: i128,
-    debt_price: i128,
-    collateral_price: i128,
-    timestamp: u64,
-    dry_run: bool,
-) {
-    use stellar_defi_toolkit::{InterestRateModel, ReserveConfig, WAD};
-    
-    println!("🔍 Liquidation Request");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Liquidator:        {}", liquidator);
-    println!("Borrower:          {}", borrower);
-    println!("Debt Asset:        {}", debt_asset);
-    println!("Collateral Asset:  {}", collateral_asset);
-    println!("Repay Amount:      {}", repay_amount);
-    println!("Debt Price:        ${:.6}", debt_price as f64 / WAD as f64);
-    println!("Collateral Price:  ${:.6}", collateral_price as f64 / WAD as f64);
-    println!("Dry Run:           {}", if dry_run { "Yes" } else { "No" });
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    
-    // Create a mock protocol for demonstration
-    let model = InterestRateModel::default();
-    let mut protocol = LendingProtocol::new("admin", "treasury", model);
-    
-    // Create a mock oracle with the provided prices
-    let mut oracle = PriceOracle::new("oracle-admin");
-    oracle.set_price("oracle-admin", debt_asset, debt_price).unwrap();
-    oracle.set_price("oracle-admin", collateral_asset, collateral_price).unwrap();
-    
-    // Use current time if timestamp is 0
-    let now = if timestamp == 0 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    } else {
-        timestamp
-    };
-    
-    // Register assets with reasonable default configurations
-    let debt_config = ReserveConfig {
-        asset: debt_asset.to_string(),
-        decimals: 6,
-        collateral_factor_bps: 8000,      // 80%
-        liquidation_threshold_bps: 8500,  // 85%
-        liquidation_bonus_bps: 500,       // 5% bonus
-        reserve_factor_bps: 1000,         // 10%
-        flash_loan_fee_bps: 9,            // 0.09%
-        borrow_enabled: true,
-        deposit_enabled: true,
-        flash_loan_enabled: true,
-    };
-    
-    let collateral_config = ReserveConfig {
-        asset: collateral_asset.to_string(),
-        decimals: 7,
-        collateral_factor_bps: 7500,      // 75%
-        liquidation_threshold_bps: 8000,  // 80%
-        liquidation_bonus_bps: 1000,      // 10% bonus
-        reserve_factor_bps: 1000,         // 10%
-        flash_loan_fee_bps: 9,            // 0.09%
-        borrow_enabled: true,
-        deposit_enabled: true,
-        flash_loan_enabled: true,
-    };
-    
-    protocol.register_asset("admin", debt_config.clone(), now).unwrap();
-    protocol.register_asset("admin", collateral_config.clone(), now).unwrap();
-    
-    // Use current time if timestamp is 0 (already defined above, remove duplicate)
-    
-    if dry_run {
-        println!("🔬 DRY RUN MODE - Simulating liquidation...\n");
-        
-        // Check if position is liquidatable
-        match protocol.position(borrower, &oracle) {
-            Ok(snapshot) => {
-                println!("📊 Position Snapshot:");
-                println!("   Collateral Value:   ${:.2}", snapshot.collateral_value as f64 / WAD as f64);
-                println!("   Liquidation Value:  ${:.2}", snapshot.liquidation_value as f64 / WAD as f64);
-                println!("   Debt Value:         ${:.2}", snapshot.debt_value as f64 / WAD as f64);
-                println!("   Health Factor:      {:.4}", snapshot.health_factor as f64 / WAD as f64);
-                println!();
-                
-                if snapshot.health_factor >= WAD {
-                    println!("❌ Position is NOT liquidatable (health factor >= 1.0)");
-                    println!("   The position is healthy and cannot be liquidated.");
-                    return;
-                }
-                
-                println!("✅ Position IS liquidatable (health factor < 1.0)");
-                println!("   The position is undercollateralized and can be liquidated.\n");
-                
-                // Simulate the liquidation calculation
-                println!("💰 Liquidation Calculation:");
-                let repay_value = (repay_amount as f64 / WAD as f64) * (debt_price as f64 / WAD as f64);
-                let bonus_multiplier = 1.0 + (collateral_config.liquidation_bonus_bps as f64 / 10000.0);
-                let discounted_value = repay_value * bonus_multiplier;
-                let seize_amount = (discounted_value * WAD as f64) / (collateral_price as f64);
-                
-                println!("   Repay Value:        ${:.2}", repay_value);
-                println!("   Liquidation Bonus:  {}%", collateral_config.liquidation_bonus_bps as f64 / 100.0);
-                println!("   Discounted Value:   ${:.2}", discounted_value);
-                println!("   Seize Amount:       {:.6} {}", seize_amount / WAD as f64, collateral_asset);
-                println!("   Liquidator Profit:  ${:.2}", discounted_value - repay_value);
-            }
-            Err(e) => {
-                println!("❌ Error checking position: {:?}", e);
-                return;
-            }
+        Commands::CreatePool { token_a, token_b } => {
+            info!("Creating liquidity pool between {} and {}", token_a, token_b);
+            let env = Env::default();
+            let pool = LiquidityPoolContract::new_std(&env, token_a, token_b);
+            let contract_id = pool.deploy(&client).await?;
+            println!("Liquidity pool created! Contract ID: {}", contract_id);
         }
     } else {
         println!("⚡ EXECUTING LIQUIDATION...\n");
@@ -320,6 +179,10 @@ fn handle_liquidation(
                     _ => {}
                 }
             }
+        }
+        Commands::ServeApi { port } => {
+            info!("Starting Stellar Analytics GraphQL API on port {}", port);
+            stellar_defi_toolkit::api::start_api_server(port, client).await?;
         }
     }
 }

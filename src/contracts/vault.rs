@@ -89,8 +89,8 @@ impl YieldVaultContract {
     pub fn new_std(env: &Env, _asset_token: String, _share_token: String) -> Self {
         Self::new(
             env,
-            Address::generate(env),
-            Address::generate(env),
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
         )
     }
 
@@ -560,8 +560,8 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
 
     fn make_vault(env: &Env) -> YieldVaultContract {
-        let admin = Address::generate(env);
-        let treasury = Address::generate(env);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
         YieldVaultContract::new_std(env, "ASSET_TOKEN".to_string(), "VAULT_SHARE".to_string())
             .initialize(admin, treasury, DEFAULT_PERFORMANCE_FEE_BPS)
             .unwrap()
@@ -570,7 +570,7 @@ mod tests {
     fn make_strategy(env: &Env, name: &str, apy: f64) -> VaultStrategy {
         VaultStrategy {
             name: soroban_sdk::Symbol::new(env, name),
-            contract_address: Address::generate(env),
+            contract_address: Address::generate(&env),
             strategy_type: StrategyType::LiquidityPool,
             estimated_apy: (apy * 100.0) as u32,
             allocated_amount: 0,

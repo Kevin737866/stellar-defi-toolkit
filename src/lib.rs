@@ -13,7 +13,7 @@
 
 pub mod contracts;
 pub mod types;
-pub mod utils;
+pub mod api;
 
 pub use contracts::{
     AssetRegistryContract,
@@ -31,7 +31,7 @@ pub use utils::fixed_point::{
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
 
     #[test]
     fn exports_are_available() {
