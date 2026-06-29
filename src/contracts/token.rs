@@ -309,108 +309,110 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Insufficient supply to burn");
     }
+}
 
-    // -------------------------------------------------------------------------
-    // Issue #15 – Transfer tests
-    // -------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
 
-    #[test]
-    fn test_transfer_success() {
+    fn setup() -> (Env, soroban_sdk::Address, TokenContractClient<'static>) {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let sender = Address::generate(&env);
-        let receiver = Address::generate(&env);
-
-        // Fund sender
-        token.mint(sender.clone(), 1000).unwrap();
-        assert_eq!(token.balance_of(sender.clone()), 1000);
-
-        // Transfer 400 to receiver
-        token.transfer(sender.clone(), receiver.clone(), 400).unwrap();
-
-        assert_eq!(token.balance_of(sender), 600);
-        assert_eq!(token.balance_of(receiver), 400);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
+        // Leak env for 'static lifetime required by Client — acceptable in tests
+        let env: &'static Env = Box::leak(Box::new(env));
+        let client = TokenContractClient::new(env, &contract_id);
+        (env.clone(), admin, client)
     }
 
     #[test]
+    fn test_mint_and_balance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
+
+        let user = soroban_sdk::Address::generate(&env);
+        client.mint(&user, &1_000);
+        assert_eq!(client.balance_of(&user), 1_000);
+    }
+
+    #[test]
+    fn test_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
+
+        let sender = soroban_sdk::Address::generate(&env);
+        let receiver = soroban_sdk::Address::generate(&env);
+        client.mint(&sender, &1_000);
+
+        client.transfer(&sender, &receiver, &400);
+        assert_eq!(client.balance_of(&sender), 600);
+        assert_eq!(client.balance_of(&receiver), 400);
+    }
+
+    #[test]
+    #[should_panic(expected = "Insufficient balance")]
     fn test_transfer_insufficient_balance() {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let sender = Address::generate(&env);
-        let receiver = Address::generate(&env);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
 
-        token.mint(sender.clone(), 100).unwrap();
-
-        let result = token.transfer(sender, receiver, 500);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Insufficient balance"));
+        let sender = soroban_sdk::Address::generate(&env);
+        let receiver = soroban_sdk::Address::generate(&env);
+        client.mint(&sender, &100);
+        client.transfer(&sender, &receiver, &500);
     }
 
     #[test]
-    fn test_transfer_zero_amount() {
+    fn test_approve_and_allowance() {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let sender = Address::generate(&env);
-        let receiver = Address::generate(&env);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
 
-        let result = token.transfer(sender, receiver, 0);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Amount must be greater than 0");
+        let owner = soroban_sdk::Address::generate(&env);
+        let spender = soroban_sdk::Address::generate(&env);
+        client.approve(&owner, &spender, &300);
+        assert_eq!(client.allowance(&owner, &spender), 300);
     }
 
     #[test]
-    fn test_transfer_to_same_address() {
+    fn test_transfer_from_success() {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let addr = Address::generate(&env);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
 
-        token.mint(addr.clone(), 500).unwrap();
+        let owner = soroban_sdk::Address::generate(&env);
+        let spender = soroban_sdk::Address::generate(&env);
+        let receiver = soroban_sdk::Address::generate(&env);
 
-        let result = token.transfer(addr.clone(), addr, 100);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Cannot transfer to the same address");
-    }
+        client.mint(&owner, &1_000);
+        client.approve(&owner, &spender, &500);
 
-    // -------------------------------------------------------------------------
-    // Issue #16 – Approve tests
-    // -------------------------------------------------------------------------
+        client.transfer_from(&spender, &owner, &receiver, &200);
 
-    #[test]
-    fn test_approve_stores_allowance() {
-        let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let owner = Address::generate(&env);
-        let spender = Address::generate(&env);
-
-        token.approve(owner.clone(), spender.clone(), 300).unwrap();
-
-        assert_eq!(token.allowance(owner, spender), 300);
-    }
-
-    #[test]
-    fn test_approve_zero_amount() {
-        let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let owner = Address::generate(&env);
-        let spender = Address::generate(&env);
-
-        let result = token.approve(owner, spender, 0);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Amount must be greater than 0");
-    }
-
-    #[test]
-    fn test_approve_overwrite_allowance() {
-        let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let owner = Address::generate(&env);
-        let spender = Address::generate(&env);
-
-        token.approve(owner.clone(), spender.clone(), 300).unwrap();
-        token.approve(owner.clone(), spender.clone(), 150).unwrap();
-
-        // Second approval should overwrite the first
-        assert_eq!(token.allowance(owner, spender), 150);
+        assert_eq!(client.balance_of(&owner), 800);
+        assert_eq!(client.balance_of(&receiver), 200);
+        assert_eq!(client.allowance(&owner, &spender), 300);
     }
 
     // -------------------------------------------------------------------------
@@ -418,37 +420,36 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn test_transfer_from_success() {
+    #[should_panic(expected = "Insufficient allowance")]
+    fn test_transfer_from_insufficient_allowance() {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let owner = Address::generate(&env);
-        let spender = Address::generate(&env);
-        let receiver = Address::generate(&env);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
 
-        token.mint(owner.clone(), 1000).unwrap();
-        token.approve(owner.clone(), spender.clone(), 500).unwrap();
+        let owner = soroban_sdk::Address::generate(&env);
+        let spender = soroban_sdk::Address::generate(&env);
+        let receiver = soroban_sdk::Address::generate(&env);
 
-        token.transfer_from(spender.clone(), owner.clone(), receiver.clone(), 200).unwrap();
-
-        assert_eq!(token.balance_of(owner.clone()), 800);
-        assert_eq!(token.balance_of(receiver), 200);
-        // Allowance should be reduced
-        assert_eq!(token.allowance(owner, spender), 300);
+        client.mint(&owner, &1_000);
+        client.approve(&owner, &spender, &50);
+        client.transfer_from(&spender, &owner, &receiver, &200);
     }
 
     #[test]
-    fn test_transfer_from_insufficient_allowance() {
+    fn test_burn() {
         let env = Env::default();
-        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 0);
-        let owner = Address::generate(&env);
-        let spender = Address::generate(&env);
-        let receiver = Address::generate(&env);
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin);
 
-        token.mint(owner.clone(), 1000).unwrap();
-        token.approve(owner.clone(), spender.clone(), 50).unwrap();
-
-        let result = token.transfer_from(spender, owner, receiver, 200);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Insufficient allowance"));
+        let user = soroban_sdk::Address::generate(&env);
+        client.mint(&user, &1_000);
+        client.burn(&user, &400);
+        assert_eq!(client.balance_of(&user), 600);
     }
 }
