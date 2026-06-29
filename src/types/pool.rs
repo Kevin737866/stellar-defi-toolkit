@@ -18,6 +18,12 @@ pub struct PoolInfo {
     pub total_liquidity: u64,
     /// Fee percentage in basis points (e.g., 30 = 0.3%)
     pub fee_percentage: u32,
+    /// Flash loan fee in basis points (e.g., 9 = 0.09%)
+    pub flash_loan_fee_bps: u32,
+    /// Price oracle contract address
+    pub oracle_address: Option<Address>,
+    /// Whether the pool is in emergency mode
+    pub is_emergency_mode: bool,
 }
 
 /// Liquidity position for a user
@@ -227,6 +233,9 @@ impl Default for PoolInfo {
             reserve_b: 0,
             total_liquidity: 0,
             fee_percentage: 30, // 0.3% standard fee
+            flash_loan_fee_bps: 9, // 0.09% default flash loan fee
+            oracle_address: None,
+            is_emergency_mode: false,
         }
     }
 }
@@ -241,7 +250,11 @@ impl PoolInfo {
             reserve_b: 0,
             total_liquidity: 0,
             fee_percentage,
+            flash_loan_fee_bps: 9,
+            oracle_address: None,
+            is_emergency_mode: false,
         }
+    }
     }
 
     /// Get the current price of token A in terms of token B

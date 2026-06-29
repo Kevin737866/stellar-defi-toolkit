@@ -1,0 +1,1255 @@
+use std::cmp::min;
+use std::collections::BTreeMap;
+
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Symbol, log};
+
+use crate::contracts::oracle::PriceOracleSim;
+use crate::types::{
+    AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
+    ProtocolError, ProtocolEvent, ProtocolSnapshot, ReserveConfig, ReserveState,
+};
+use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
+
+/// Core lending protocol simulation.
+///
+/// # New features (v2)
+/// - **Emergency pause** (`paused` flag): all user-facing operations (`deposit`,
+///   `withdraw`, `borrow`, `repay`, `liquidate`, `flash_loan`) return
+///   `ProtocolError::ProtocolPaused` while the protocol is paused.  Admin
+///   operations (`register_asset`, `collect_protocol_fees`, configuration
+///   setters) remain available so the admin can still manage the protocol in an
+///   emergency.
+/// - **Event log**: every state-changing action appends a `ProtocolEvent` to
+///   `events`.  Callers can drain the log with `drain_events()`.
+#[derive(Debug, Clone)]
+pub struct LendingProtocol {
+    multisig: MultiSigConfig,
+    proposals: BTreeMap<u64, AdminProposal>,
+    next_proposal_id: u64,
+    treasury: String,
+    /// Protocol-level default interest rate model, used when a reserve has no
+    /// per-asset model configured.
+    default_interest_rate_model: InterestRateModel,
+    reserves: BTreeMap<String, ReserveState>,
+    reserve_configs: BTreeMap<String, ReserveConfig>,
+    accounts: BTreeMap<String, AccountPosition>,
+    close_factor_bps: u32,
+    /// When `true` all user-facing operations are blocked.
+    paused: bool,
+    /// Append-only event log.  Drain with `drain_events()`.
+    events: Vec<ProtocolEvent>,
+}
+
+impl LendingProtocol {
+    pub fn new(
+        admins: Vec<String>,
+        threshold: u32,
+        treasury: impl Into<String>,
+        interest_rate_model: InterestRateModel,
+    ) -> Self {
+        Self {
+            multisig: MultiSigConfig { admins, threshold },
+            proposals: BTreeMap::new(),
+            next_proposal_id: 1,
+            treasury: treasury.into(),
+            default_interest_rate_model: interest_rate_model,
+            reserves: BTreeMap::new(),
+            reserve_configs: BTreeMap::new(),
+            accounts: BTreeMap::new(),
+            close_factor_bps: 5_000,
+            paused: false,
+            events: Vec::new(),
+        }
+    }
+
+    pub fn admins(&self) -> &[String] {
+        &self.multisig.admins
+    }
+
+    pub fn threshold(&self) -> u32 {
+        self.multisig.threshold
+    }
+
+    pub fn treasury(&self) -> &str {
+        &self.treasury
+    }
+
+    // ─── Emergency Pause ──────────────────────────────────────────────────────
+
+    /// Returns `true` when the protocol is currently paused.
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Pause all user-facing protocol operations (admin only).
+    ///
+    /// While paused, `deposit`, `withdraw`, `borrow`, `repay`, `liquidate`, and
+    /// `flash_loan` all return `ProtocolError::ProtocolPaused`.  Admin
+    /// operations remain available.
+    pub fn pause(&mut self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.paused = true;
+        self.emit(ProtocolEvent::Paused {
+            admin: caller.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Unpause the protocol (admin only).
+    pub fn unpause(&mut self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.paused = false;
+        self.emit(ProtocolEvent::Unpaused {
+            admin: caller.to_string(),
+        });
+        Ok(())
+    }
+
+    // ─── Event Log ────────────────────────────────────────────────────────────
+
+    /// Returns a reference to the accumulated event log.
+    pub fn events(&self) -> &[ProtocolEvent] {
+        &self.events
+    }
+
+    /// Drain and return all accumulated events, clearing the internal log.
+    pub fn drain_events(&mut self) -> Vec<ProtocolEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// Append an event to the internal log.
+    fn emit(&mut self, event: ProtocolEvent) {
+        self.events.push(event);
+    }
+
+    /// Returns the protocol-level default interest rate model.
+    pub fn default_interest_rate_model(&self) -> &InterestRateModel {
+        &self.default_interest_rate_model
+    }
+
+    pub fn approve_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.approvals.contains(caller) {
+            return Err(ProtocolError::AlreadyApproved);
+        }
+
+        proposal.approvals.insert(caller.to_string());
+        Ok(())
+    }
+
+    pub fn execute_admin_proposal(
+        &mut self,
+        caller: &str,
+        proposal_id: u64,
+        now: u64,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if (proposal.approvals.len() as u32) < self.multisig.threshold {
+            return Err(ProtocolError::InsufficientApprovals);
+        }
+
+        let action = proposal.action.clone();
+        match action {
+            AdminAction::SetCloseFactor(bps) => {
+                self.close_factor_bps = bps;
+            }
+            AdminAction::RegisterAsset(config) => {
+                if self.reserve_configs.contains_key(&config.asset) {
+                    return Err(ProtocolError::AssetAlreadyExists);
+                }
+                let asset = config.asset.clone();
+                self.reserve_configs.insert(asset.clone(), config);
+                self.reserves.insert(
+                    asset,
+                    ReserveState {
+                        last_accrual_ts: now,
+                        ..ReserveState::default()
+                    },
+                );
+            }
+            AdminAction::UpdateReserveConfig(config) => {
+                let asset = config.asset.clone();
+                let stored = self
+                    .reserve_configs
+                    .get_mut(&asset)
+                    .ok_or(ProtocolError::UnknownAsset)?;
+                *stored = config;
+            }
+            AdminAction::UpdateMultiSig(config) => {
+                self.multisig = config;
+            }
+            AdminAction::CollectProtocolFees(asset, amount) => {
+                let reserve = self
+                    .reserves
+                    .get_mut(&asset)
+                    .ok_or(ProtocolError::UnknownAsset)?;
+                let actual = min(amount, reserve.protocol_fees);
+                if reserve.total_cash < actual {
+                    return Err(ProtocolError::InsufficientLiquidity);
+                }
+                reserve.total_cash -= actual;
+                reserve.protocol_fees -= actual;
+            }
+        }
+
+        let proposal = self.proposals.get_mut(&proposal_id).unwrap();
+        proposal.status = AdminProposalStatus::Executed;
+
+        Ok(())
+    }
+
+    pub fn cancel_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or(ProtocolError::ProposalNotFound)?;
+
+        if proposal.status != AdminProposalStatus::Pending {
+            return Err(ProtocolError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.proposer != caller {
+            return Err(ProtocolError::Unauthorized);
+        }
+
+        proposal.status = AdminProposalStatus::Cancelled;
+        Ok(())
+    }
+
+    pub fn set_close_factor(
+        &mut self,
+        caller: &str,
+        close_factor_bps: u32,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
+        self.close_factor_bps = close_factor_bps;
+        Ok(())
+    }
+
+    /// Replace the protocol-level default interest rate model.
+    pub fn set_default_interest_rate_model(
+        &mut self,
+        caller: &str,
+        model: InterestRateModel,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        self.default_interest_rate_model = model;
+        Ok(())
+    }
+
+    /// Set (or clear) the per-asset interest rate model for `asset`.
+    ///
+    /// Pass `Some(model)` to override the protocol default for this asset, or
+    /// `None` to revert to the protocol default.
+    pub fn set_asset_interest_rate_model(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        model: Option<InterestRateModel>,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.interest_rate_model = model;
+        Ok(())
+    }
+
+    /// Update the supply cap for `asset`.  A value of `0` removes the cap.
+    pub fn set_supply_cap(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        supply_cap: i128,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.supply_cap = supply_cap;
+        Ok(())
+    }
+
+    /// Update the borrow cap for `asset`.  A value of `0` removes the cap.
+    pub fn set_borrow_cap(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        borrow_cap: i128,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.borrow_cap = borrow_cap;
+        Ok(())
+    }
+
+    /// Update the reserve factor for `asset` in basis points (0–10 000).
+    ///
+    /// The reserve factor controls what fraction of accrued interest is
+    /// redirected to the protocol treasury.
+    pub fn set_reserve_factor(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        reserve_factor_bps: u32,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_admin(caller)?;
+        if reserve_factor_bps > 10_000 {
+            return Err(ProtocolError::InvalidReserveFactor);
+        }
+        let config = self
+            .reserve_configs
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        config.reserve_factor_bps = reserve_factor_bps;
+        Ok(())
+    }
+
+    pub fn register_asset(
+        &mut self,
+        caller: &str,
+        config: ReserveConfig,
+        now: u64,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
+        if self.reserve_configs.contains_key(&config.asset) {
+            return Err(ProtocolError::AssetAlreadyExists);
+        }
+
+        let asset = config.asset.clone();
+        self.reserve_configs.insert(asset.clone(), config);
+        self.reserves.insert(
+            asset.clone(),
+            ReserveState {
+                last_accrual_ts: now,
+                ..ReserveState::default()
+            },
+        );
+        self.emit(ProtocolEvent::AssetRegistered { asset });
+        Ok(())
+    }
+
+    pub fn update_reserve_config(
+        &mut self,
+        caller: &str,
+        config: ReserveConfig,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
+        let asset = config.asset.clone();
+        let stored = self
+            .reserve_configs
+            .get_mut(&asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        *stored = config;
+        Ok(())
+    }
+
+    pub fn accrue_interest(&mut self, asset: &str, now: u64) -> Result<i128, ProtocolError> {
+        let state = self
+            .reserves
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        let config = self
+            .reserve_configs
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+
+        if now <= state.last_accrual_ts || state.total_debt == 0 {
+            state.last_accrual_ts = now;
+            return Ok(0);
+        }
+
+        let elapsed = i128::from(now - state.last_accrual_ts);
+        let supplied = state.total_cash + state.total_debt - state.protocol_fees;
+        let utilization = if supplied <= 0 {
+            0
+        } else {
+            wad_div(state.total_debt, supplied).map_err(|_| ProtocolError::MathFailure)?
+        };
+
+        // Use the per-asset model when configured, otherwise fall back to the
+        // protocol-level default.
+        let model = config
+            .interest_rate_model
+            .as_ref()
+            .unwrap_or(&self.default_interest_rate_model);
+        let borrow_rate = model.borrow_rate(utilization);
+
+        let accrued = mul_div(
+            state.total_debt,
+            borrow_rate
+                .checked_mul(elapsed)
+                .ok_or(ProtocolError::MathFailure)?,
+            YEAR_IN_SECONDS
+                .checked_mul(WAD)
+                .ok_or(ProtocolError::MathFailure)?,
+        )
+        .map_err(|_| ProtocolError::MathFailure)?;
+        let reserve_cut =
+            bps_mul(accrued, config.reserve_factor_bps).map_err(|_| ProtocolError::MathFailure)?;
+
+        state.total_debt = state
+            .total_debt
+            .checked_add(accrued)
+            .ok_or(ProtocolError::MathFailure)?;
+        state.protocol_fees = state
+            .protocol_fees
+            .checked_add(reserve_cut)
+            .ok_or(ProtocolError::MathFailure)?;
+        state.last_accrual_ts = now;
+
+        if accrued > 0 {
+            self.emit(ProtocolEvent::InterestAccrued {
+                asset: asset.to_string(),
+                accrued,
+                timestamp: now,
+            });
+        }
+
+        Ok(accrued)
+    }
+
+    pub fn deposit(
+        &mut self,
+        user: &str,
+        asset: &str,
+        amount: i128,
+        now: u64,
+    ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(amount)?;
+        self.accrue_interest(asset, now)?;
+        let config = self
+            .reserve_configs
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if !config.deposit_enabled {
+            return Err(ProtocolError::DepositsDisabled(asset.to_string()));
+        }
+
+        // Enforce supply cap (0 means uncapped).
+        let reserve = self
+            .reserves
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if config.supply_cap > 0 {
+            let total_supplied = reserve.total_cash + reserve.total_debt - reserve.protocol_fees;
+            if total_supplied + amount > config.supply_cap {
+                return Err(ProtocolError::SupplyCapExceeded(asset.to_string()));
+            }
+        }
+
+        let reserve = self
+            .reserves
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        let net_assets = reserve.total_cash + reserve.total_debt - reserve.protocol_fees;
+        let shares = if reserve.total_supply_shares == 0 || net_assets == 0 {
+            amount
+        } else {
+            mul_div(amount, reserve.total_supply_shares, net_assets)
+                .map_err(|_| ProtocolError::MathFailure)?
+        };
+
+        reserve.total_cash += amount;
+        reserve.total_supply_shares += shares;
+
+        let position = self.account_mut(user);
+        *position
+            .supplied_shares
+            .entry(asset.to_string())
+            .or_insert(0) += shares;
+        position
+            .collateral_enabled
+            .entry(asset.to_string())
+            .or_insert(true);
+
+        self.emit(ProtocolEvent::Deposit {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_minted: shares,
+        });
+
+        Ok(shares)
+    }
+
+    pub fn withdraw(
+        &mut self,
+        user: &str,
+        asset: &str,
+        amount: i128,
+        oracle: &PriceOracleSim,
+        now: u64,
+    ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(amount)?;
+        self.accrue_interest(asset, now)?;
+
+        let shares = {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_supply_shares_rounded_up(reserve, amount)?
+        };
+
+        {
+            let position = self.account_mut(user);
+            let supplied = position
+                .supplied_shares
+                .get_mut(asset)
+                .ok_or(ProtocolError::InsufficientBalance)?;
+            if *supplied < shares {
+                return Err(ProtocolError::InsufficientBalance);
+            }
+            *supplied -= shares;
+        }
+
+        {
+            let reserve = self
+                .reserves
+                .get_mut(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            if reserve.total_cash < amount {
+                return Err(ProtocolError::InsufficientLiquidity);
+            }
+            reserve.total_cash -= amount;
+            reserve.total_supply_shares -= shares;
+        }
+
+        let snapshot = self.position(user, oracle)?;
+        if snapshot.debt_value > 0 && snapshot.health_factor < WAD {
+            // Roll back the withdrawal.
+            let position = self.account_mut(user);
+            *position
+                .supplied_shares
+                .entry(asset.to_string())
+                .or_insert(0) += shares;
+            let reserve = self
+                .reserves
+                .get_mut(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash += amount;
+            reserve.total_supply_shares += shares;
+            return Err(ProtocolError::HealthFactorTooLow);
+        }
+
+        self.emit(ProtocolEvent::Withdraw {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_burned: shares,
+        });
+
+        Ok(amount)
+    }
+
+    pub fn set_collateral_enabled(
+        &mut self,
+        user: &str,
+        asset: &str,
+        enabled: bool,
+        oracle: &PriceOracleSim,
+    ) -> Result<(), ProtocolError> {
+        let previous = {
+            let position = self.account_mut(user);
+            let entry = position
+                .collateral_enabled
+                .entry(asset.to_string())
+                .or_insert(true);
+            let old = *entry;
+            *entry = enabled;
+            old
+        };
+
+        if !enabled {
+            let snapshot = self.position(user, oracle)?;
+            if snapshot.debt_value > 0 && snapshot.health_factor < WAD {
+                let position = self.account_mut(user);
+                position
+                    .collateral_enabled
+                    .insert(asset.to_string(), previous);
+                return Err(ProtocolError::HealthFactorTooLow);
+            }
+        }
+
+        self.emit(ProtocolEvent::CollateralToggled {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            enabled,
+        });
+
+        Ok(())
+    }
+
+    pub fn borrow(
+        &mut self,
+        user: &str,
+        asset: &str,
+        amount: i128,
+        oracle: &PriceOracleSim,
+        now: u64,
+    ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(amount)?;
+        self.accrue_interest(asset, now)?;
+        let config = self
+            .reserve_configs
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if !config.borrow_enabled {
+            return Err(ProtocolError::BorrowsDisabled(asset.to_string()));
+        }
+
+        {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            if reserve.total_cash < amount {
+                return Err(ProtocolError::InsufficientLiquidity);
+            }
+
+            // Enforce borrow cap (0 means uncapped).
+            if config.borrow_cap > 0 && reserve.total_debt + amount > config.borrow_cap {
+                return Err(ProtocolError::BorrowCapExceeded(asset.to_string()));
+            }
+        }
+
+        let shares = {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_debt_shares(reserve, amount)?
+        };
+
+        {
+            let reserve = self
+                .reserves
+                .get_mut(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash -= amount;
+            reserve.total_debt += amount;
+            reserve.total_debt_shares += shares;
+        }
+
+        *self
+            .account_mut(user)
+            .debt_shares
+            .entry(asset.to_string())
+            .or_insert(0) += shares;
+
+        let snapshot = self.position(user, oracle)?;
+        if snapshot.debt_value > snapshot.collateral_value {
+            // Roll back the borrow.
+            let reserve = self
+                .reserves
+                .get_mut(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash += amount;
+            reserve.total_debt -= amount;
+            reserve.total_debt_shares -= shares;
+            let debt = self
+                .account_mut(user)
+                .debt_shares
+                .entry(asset.to_string())
+                .or_insert(0);
+            *debt -= shares;
+            return Err(ProtocolError::InsufficientCollateral);
+        }
+
+        self.emit(ProtocolEvent::Borrow {
+            user: user.to_string(),
+            asset: asset.to_string(),
+            amount,
+            shares_minted: shares,
+        });
+
+        Ok(shares)
+    }
+
+    pub fn repay(
+        &mut self,
+        payer: &str,
+        borrower: &str,
+        asset: &str,
+        amount: i128,
+        now: u64,
+    ) -> Result<i128, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(amount)?;
+        self.accrue_interest(asset, now)?;
+
+        let owed = self.user_debt_amount(borrower, asset)?;
+        if owed == 0 {
+            return Err(ProtocolError::NothingToRepay);
+        }
+        let actual = min(amount, owed);
+
+        let shares = {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_debt_shares_rounded_up(reserve, actual)?
+        };
+
+        {
+            let position = self.account_mut(borrower);
+            let debt = position
+                .debt_shares
+                .get_mut(asset)
+                .ok_or(ProtocolError::NothingToRepay)?;
+            let burn = min(*debt, shares);
+            *debt -= burn;
+        }
+
+        {
+            let reserve = self
+                .reserves
+                .get_mut(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash += actual;
+            reserve.total_debt -= actual;
+            reserve.total_debt_shares -= min(reserve.total_debt_shares, shares);
+        }
+
+        self.emit(ProtocolEvent::Repay {
+            payer: payer.to_string(),
+            borrower: borrower.to_string(),
+            asset: asset.to_string(),
+            amount: actual,
+            shares_burned: shares,
+        });
+
+        Ok(actual)
+    }
+
+    /// Liquidate an undercollateralised position.
+    ///
+    /// ## Optimisations over the original implementation
+    /// - Interest is accrued for both assets in a single upfront pass before any
+    ///   state is read, so all subsequent reads are consistent.
+    /// - All validation (health factor, close factor, collateral availability,
+    ///   liquidity) is performed before any state is mutated, eliminating the
+    ///   need for rollback paths.
+    /// - Debt repayment and collateral seizure are applied in a single combined
+    ///   mutation pass rather than delegating to `repay()` +
+    ///   `force_withdraw_collateral()`, which each re-acquire the same reserve
+    ///   and account entries.
+    /// - Share arithmetic is computed once and reused.
+    pub fn liquidate(
+        &mut self,
+        liquidator: &str,
+        borrower: &str,
+        debt_asset: &str,
+        collateral_asset: &str,
+        requested_repay_amount: i128,
+        oracle: &PriceOracleSim,
+        now: u64,
+    ) -> Result<LiquidationResult, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(requested_repay_amount)?;
+
+        // ── Step 1: accrue interest on both reserves upfront ─────────────────
+        self.accrue_interest(debt_asset, now)?;
+        self.accrue_interest(collateral_asset, now)?;
+
+        // ── Step 2: validate that the position is liquidatable ───────────────
+        let snapshot = self.position(borrower, oracle)?;
+        if snapshot.debt_value == 0 || snapshot.health_factor >= WAD {
+            return Err(ProtocolError::PositionNotLiquidatable);
+        }
+
+        // ── Step 3: compute repay amount (capped by close factor) ────────────
+        let borrower_debt = self.user_debt_amount(borrower, debt_asset)?;
+        let max_repay = bps_mul(borrower_debt, self.close_factor_bps)
+            .map_err(|_| ProtocolError::MathFailure)?;
+        let repay_amount = min(requested_repay_amount, max_repay);
+
+        // ── Step 4: compute seize amount ─────────────────────────────────────
+        let debt_price = oracle.get_price(debt_asset)?;
+        let collateral_price = oracle.get_price(collateral_asset)?;
+        let liquidation_bonus_bps = self
+            .reserve_configs
+            .get(collateral_asset)
+            .ok_or(ProtocolError::UnknownAsset)?
+            .liquidation_bonus_bps;
+
+        // repay_value = repay_amount * debt_price / WAD
+        let repay_value =
+            mul_div(repay_amount, debt_price, WAD).map_err(|_| ProtocolError::MathFailure)?;
+        // discounted_value = repay_value * (10_000 + bonus) / 10_000
+        let discounted_value = repay_value
+            .checked_mul(i128::from(10_000 + liquidation_bonus_bps))
+            .ok_or(ProtocolError::MathFailure)?
+            / 10_000;
+        // seize_amount = discounted_value * WAD / collateral_price
+        let seize_amount = mul_div(discounted_value, WAD, collateral_price)
+            .map_err(|_| ProtocolError::MathFailure)?;
+
+        // ── Step 5: pre-flight checks before any mutation ────────────────────
+        let borrower_collateral = self.user_supply_amount(borrower, collateral_asset)?;
+        if borrower_collateral < seize_amount {
+            return Err(ProtocolError::InsufficientBalance);
+        }
+
+        // Verify the collateral reserve has enough cash to hand out.
+        {
+            let col_reserve = self
+                .reserves
+                .get(collateral_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            if col_reserve.total_cash < seize_amount {
+                return Err(ProtocolError::InsufficientLiquidity);
+            }
+        }
+
+        // ── Step 6: compute share amounts for both assets ────────────────────
+        let debt_shares_to_burn = {
+            let reserve = self
+                .reserves
+                .get(debt_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            let shares = self.amount_to_debt_shares_rounded_up(reserve, repay_amount)?;
+            min(
+                shares,
+                self.accounts
+                    .get(borrower)
+                    .and_then(|p| p.debt_shares.get(debt_asset).copied())
+                    .unwrap_or(0),
+            )
+        };
+
+        let collateral_shares_to_burn = {
+            let reserve = self
+                .reserves
+                .get(collateral_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_supply_shares_rounded_up(reserve, seize_amount)?
+        };
+
+        // ── Step 7: apply mutations atomically ───────────────────────────────
+
+        // 7a. Burn borrower's debt shares and update debt reserve.
+        {
+            let position = self
+                .accounts
+                .entry(borrower.to_string())
+                .or_default();
+            let debt = position.debt_shares.entry(debt_asset.to_string()).or_insert(0);
+            *debt -= debt_shares_to_burn;
+        }
+        {
+            let reserve = self
+                .reserves
+                .get_mut(debt_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash += repay_amount;
+            reserve.total_debt -= repay_amount;
+            reserve.total_debt_shares -= min(reserve.total_debt_shares, debt_shares_to_burn);
+        }
+
+        // 7b. Burn borrower's collateral supply shares and update collateral reserve.
+        {
+            let position = self
+                .accounts
+                .entry(borrower.to_string())
+                .or_default();
+            let supplied = position
+                .supplied_shares
+                .get_mut(collateral_asset)
+                .ok_or(ProtocolError::InsufficientBalance)?;
+            if *supplied < collateral_shares_to_burn {
+                return Err(ProtocolError::InsufficientBalance);
+            }
+            *supplied -= collateral_shares_to_burn;
+        }
+        {
+            let reserve = self
+                .reserves
+                .get_mut(collateral_asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            reserve.total_cash -= seize_amount;
+            reserve.total_supply_shares -= collateral_shares_to_burn;
+        }
+
+        // ── Step 8: emit event ───────────────────────────────────────────────
+        self.emit(ProtocolEvent::Liquidate {
+            liquidator: liquidator.to_string(),
+            borrower: borrower.to_string(),
+            debt_asset: debt_asset.to_string(),
+            collateral_asset: collateral_asset.to_string(),
+            repaid_amount: repay_amount,
+            seized_collateral: seize_amount,
+            liquidator_discount_value: discounted_value - repay_value,
+        });
+
+        Ok(LiquidationResult {
+            repaid_amount: repay_amount,
+            seized_collateral: seize_amount,
+            liquidator_discount_value: discounted_value - repay_value,
+        })
+    }
+
+    pub fn flash_loan(
+        &mut self,
+        receiver: &str,
+        asset: &str,
+        amount: i128,
+        returned_amount: i128,
+        now: u64,
+    ) -> Result<FlashLoanReceipt, ProtocolError> {
+        self.ensure_not_paused()?;
+        self.ensure_positive(amount)?;
+        self.accrue_interest(asset, now)?;
+
+        let config = self
+            .reserve_configs
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if !config.flash_loan_enabled {
+            return Err(ProtocolError::FlashLoansDisabled(asset.to_string()));
+        }
+
+        let reserve = self
+            .reserves
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        if reserve.total_cash < amount {
+            return Err(ProtocolError::InsufficientLiquidity);
+        }
+
+        let fee =
+            bps_mul(amount, config.flash_loan_fee_bps).map_err(|_| ProtocolError::MathFailure)?;
+        let required_return = amount + fee;
+        if returned_amount < required_return {
+            return Err(ProtocolError::InvalidFlashLoanRepayment);
+        }
+
+        let extra = returned_amount - amount;
+        let protocol_fee =
+            bps_mul(extra, config.reserve_factor_bps).map_err(|_| ProtocolError::MathFailure)?;
+        let supplier_fee = extra - protocol_fee;
+
+        reserve.total_cash += supplier_fee + protocol_fee;
+        reserve.protocol_fees += protocol_fee;
+
+        let receipt = FlashLoanReceipt {
+            asset: asset.to_string(),
+            amount,
+            fee_paid: extra,
+            protocol_fee,
+            supplier_fee,
+        };
+
+        self.emit(ProtocolEvent::FlashLoan {
+            receiver: receiver.to_string(),
+            asset: asset.to_string(),
+            amount,
+            fee_paid: extra,
+            protocol_fee,
+            supplier_fee,
+        });
+
+        Ok(receipt)
+    }
+
+    pub fn collect_protocol_fees(
+        &mut self,
+        caller: &str,
+        asset: &str,
+        amount: i128,
+    ) -> Result<i128, ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+        if self.multisig.threshold > 1 {
+            return Err(ProtocolError::Unauthorized); // Must use proposal if threshold > 1
+        }
+        self.ensure_positive(amount)?;
+        let reserve = self
+            .reserves
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        let actual = min(amount, reserve.protocol_fees);
+        if reserve.total_cash < actual {
+            return Err(ProtocolError::InsufficientLiquidity);
+        }
+        reserve.protocol_fees -= actual;
+        reserve.total_cash -= actual;
+
+        self.emit(ProtocolEvent::FeesCollected {
+            asset: asset.to_string(),
+            amount: actual,
+            treasury: self.treasury.clone(),
+        });
+
+        Ok(actual)
+    }
+
+    pub fn reserve_state(&self, asset: &str) -> Result<&ReserveState, ProtocolError> {
+        self.reserves.get(asset).ok_or(ProtocolError::UnknownAsset)
+    }
+
+    pub fn position(
+        &self,
+        user: &str,
+        oracle: &PriceOracleSim,
+    ) -> Result<PositionSnapshot, ProtocolError> {
+        let mut supplied_amounts = BTreeMap::new();
+        let mut debt_amounts = BTreeMap::new();
+        let position = self.accounts.get(user).cloned().unwrap_or_default();
+
+        let mut collateral_value = 0_i128;
+        let mut liquidation_value = 0_i128;
+        let mut debt_value = 0_i128;
+
+        for (asset, shares) in &position.supplied_shares {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            let amount = self.supply_shares_to_amount(reserve, *shares)?;
+            supplied_amounts.insert(asset.clone(), amount);
+
+            if *position.collateral_enabled.get(asset).unwrap_or(&true) {
+                let price = oracle.get_price(asset)?;
+                let config = self
+                    .reserve_configs
+                    .get(asset)
+                    .ok_or(ProtocolError::UnknownAsset)?;
+                let value = mul_div(amount, price, WAD).map_err(|_| ProtocolError::MathFailure)?;
+                collateral_value += value * i128::from(config.collateral_factor_bps) / 10_000;
+                liquidation_value += value * i128::from(config.liquidation_threshold_bps) / 10_000;
+            }
+        }
+
+        for (asset, shares) in &position.debt_shares {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            let amount = self.debt_shares_to_amount(reserve, *shares)?;
+            debt_amounts.insert(asset.clone(), amount);
+
+            let price = oracle.get_price(asset)?;
+            debt_value += mul_div(amount, price, WAD).map_err(|_| ProtocolError::MathFailure)?;
+        }
+
+        let health_factor = if debt_value == 0 {
+            i128::MAX
+        } else {
+            wad_div(liquidation_value, debt_value).map_err(|_| ProtocolError::MathFailure)?
+        };
+
+        Ok(PositionSnapshot {
+            supplied_amounts,
+            debt_amounts,
+            collateral_value,
+            liquidation_value,
+            debt_value,
+            health_factor,
+        })
+    }
+
+    pub fn snapshot(&self) -> ProtocolSnapshot {
+        ProtocolSnapshot {
+            reserves: self.reserves.clone(),
+            reserve_configs: self.reserve_configs.clone(),
+            treasury: self.treasury.clone(),
+            multisig: self.multisig.clone(),
+        }
+    }
+
+    fn force_withdraw_collateral(
+        &mut self,
+        user: &str,
+        asset: &str,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        let shares = {
+            let reserve = self
+                .reserves
+                .get(asset)
+                .ok_or(ProtocolError::UnknownAsset)?;
+            self.amount_to_supply_shares_rounded_up(reserve, amount)?
+        };
+
+        let supplied = self
+            .account_mut(user)
+            .supplied_shares
+            .get_mut(asset)
+            .ok_or(ProtocolError::InsufficientBalance)?;
+        if *supplied < shares {
+            return Err(ProtocolError::InsufficientBalance);
+        }
+        *supplied -= shares;
+
+        let reserve = self
+            .reserves
+            .get_mut(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        reserve.total_supply_shares -= shares;
+        Ok(())
+    }
+
+    fn ensure_is_admin_member(&self, caller: &str) -> Result<(), ProtocolError> {
+        if self.multisig.admins.iter().any(|a| a == caller) {
+            Ok(())
+        } else {
+            Err(ProtocolError::Unauthorized)
+        }
+    }
+
+    fn ensure_not_paused(&self) -> Result<(), ProtocolError> {
+        if self.paused {
+            Err(ProtocolError::ProtocolPaused)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_positive(&self, amount: i128) -> Result<(), ProtocolError> {
+        if amount > 0 {
+            Ok(())
+        } else {
+            Err(ProtocolError::InvalidAmount)
+        }
+    }
+
+    fn account_mut(&mut self, user: &str) -> &mut AccountPosition {
+        self.accounts.entry(user.to_string()).or_default()
+    }
+
+    fn amount_to_supply_shares_rounded_up(
+        &self,
+        reserve: &ReserveState,
+        amount: i128,
+    ) -> Result<i128, ProtocolError> {
+        let net_assets = reserve.total_cash + reserve.total_debt - reserve.protocol_fees;
+        let shares = if reserve.total_supply_shares == 0 || net_assets == 0 {
+            amount
+        } else {
+            mul_div(amount, reserve.total_supply_shares, net_assets)
+                .map_err(|_| ProtocolError::MathFailure)?
+        };
+        if self.supply_shares_to_amount(reserve, shares)? < amount {
+            Ok(shares + 1)
+        } else {
+            Ok(shares)
+        }
+    }
+
+    fn supply_shares_to_amount(
+        &self,
+        reserve: &ReserveState,
+        shares: i128,
+    ) -> Result<i128, ProtocolError> {
+        if reserve.total_supply_shares == 0 {
+            Ok(0)
+        } else {
+            let net_assets = reserve.total_cash + reserve.total_debt - reserve.protocol_fees;
+            mul_div(shares, net_assets, reserve.total_supply_shares)
+                .map_err(|_| ProtocolError::MathFailure)
+        }
+    }
+
+    fn amount_to_debt_shares(
+        &self,
+        reserve: &ReserveState,
+        amount: i128,
+    ) -> Result<i128, ProtocolError> {
+        if reserve.total_debt_shares == 0 || reserve.total_debt == 0 {
+            Ok(amount)
+        } else {
+            mul_div(amount, reserve.total_debt_shares, reserve.total_debt)
+                .map_err(|_| ProtocolError::MathFailure)
+        }
+    }
+
+    fn amount_to_debt_shares_rounded_up(
+        &self,
+        reserve: &ReserveState,
+        amount: i128,
+    ) -> Result<i128, ProtocolError> {
+        let shares = self.amount_to_debt_shares(reserve, amount)?;
+        if self.debt_shares_to_amount(reserve, shares)? < amount {
+            Ok(shares + 1)
+        } else {
+            Ok(shares)
+        }
+    }
+
+    fn debt_shares_to_amount(
+        &self,
+        reserve: &ReserveState,
+        shares: i128,
+    ) -> Result<i128, ProtocolError> {
+        if reserve.total_debt_shares == 0 {
+            Ok(0)
+        } else {
+            mul_div(shares, reserve.total_debt, reserve.total_debt_shares)
+                .map_err(|_| ProtocolError::MathFailure)
+        }
+    }
+
+    fn user_supply_amount(&self, user: &str, asset: &str) -> Result<i128, ProtocolError> {
+        let shares = self
+            .accounts
+            .get(user)
+            .and_then(|position| position.supplied_shares.get(asset).copied())
+            .unwrap_or(0);
+        let reserve = self
+            .reserves
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        self.supply_shares_to_amount(reserve, shares)
+    }
+
+    fn user_debt_amount(&self, user: &str, asset: &str) -> Result<i128, ProtocolError> {
+        let shares = self
+            .accounts
+            .get(user)
+            .and_then(|position| position.debt_shares.get(asset).copied())
+            .unwrap_or(0);
+        let reserve = self
+            .reserves
+            .get(asset)
+            .ok_or(ProtocolError::UnknownAsset)?;
+        self.debt_shares_to_amount(reserve, shares)
+    }
+}

@@ -1,12 +1,20 @@
 //! Helper functions and utilities for Stellar DeFi Toolkit
 
 use soroban_sdk::{Address, Env};
-use stellar_sdk::PublicKey;
+// use stellar_sdk::types::PublicKey;
 use anyhow::Result;
 
-/// Generate a new Stellar address
-pub fn generate_address() -> Address {
-    Address::generate(&Env::default())
+/// Generate a new Stellar address for testing
+pub fn generate_address(_env: &Env) -> Address {
+    #[cfg(any(test, feature = "testutils"))]
+    {
+        use soroban_sdk::testutils::Address as _;
+        Address::generate(_env)
+    }
+    #[cfg(not(any(test, feature = "testutils")))]
+    {
+        panic!("Memory generation of addresses is only available in test environments")
+    }
 }
 
 /// Validate a Stellar public key
@@ -17,17 +25,26 @@ pub fn validate_public_key(public_key: &str) -> Result<bool> {
 }
 
 /// Convert address to string representation
-pub fn address_to_string(address: &Address) -> String {
+pub fn address_to_string(_address: &Address) -> String {
     // In a real implementation, this would convert the address to a string
     // For now, return a placeholder
     format!("ADDRESS_{}", uuid::Uuid::new_v4().to_string().replace("-", ""))
 }
 
 /// Parse string to address
-pub fn string_to_address(address_str: &str) -> Result<Address> {
-    // In a real implementation, this would parse the string to an address
-    // For now, generate a mock address
-    Ok(Address::generate(&Env::default()))
+pub fn string_to_address(env: &Env, address_str: &str) -> Result<Address> {
+    #[cfg(any(test, feature = "testutils"))]
+    {
+        use soroban_sdk::testutils::Address as _;
+        let _ = address_str; // silence unused warning
+        Ok(Address::generate(env))
+    }
+    #[cfg(not(any(test, feature = "testutils")))]
+    {
+        // Address::from_string returns Address directly, may panic on invalid string
+        // but for now this matches the logic before migration.
+        Ok(Address::from_string(&soroban_sdk::String::from_str(env, address_str)))
+    }
 }
 
 /// Calculate minimum liquidity amount
@@ -50,11 +67,7 @@ pub fn format_balance(balance: u64, decimals: u8) -> String {
     let whole = balance / divisor;
     let fractional = balance % divisor;
     
-    if fractional == 0 {
-        format!("{}", whole)
-    } else {
-        format!("{}.{:0width$}", whole, fractional, width = decimals as usize)
-    }
+    format!("{}.{:0width$}", whole, fractional, width = decimals as usize)
 }
 
 /// Parse balance from string with decimals
@@ -129,7 +142,7 @@ pub fn sort_token_pair(token_a: &str, token_b: &str) -> (String, String) {
 
 /// Calculate impermanent loss
 pub fn calculate_impermanent_loss(
-    initial_price_ratio: f64,
+    _initial_price_ratio: f64,
     current_price_ratio: f64,
 ) -> f64 {
     let sqrt_ratio = current_price_ratio.sqrt();
@@ -148,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_validate_public_key() {
-        assert!(validate_public_key("GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789").unwrap());
+        assert!(validate_public_key("GA5ZSEJYB37JRC5AVZXPPD5JC3E6SRGZTEZ3GZZN3XSRT4QZ4LTDZZZV").unwrap());
         assert!(!validate_public_key("short").unwrap());
         assert!(!validate_public_key("").unwrap());
     }

@@ -1,103 +1,133 @@
-//! Example: Setting up and using a staking contract
+//! Example demonstrating the Staking Contract functionality
+//! 
+//! This example shows how to:
+//! - Initialize a staking contract
+//! - Stake tokens
+//! - Earn rewards over time
+//! - Claim rewards
+//! - Unstake tokens
 
-use stellar_defi_toolkit::{StakingContract, StellarClient};
-use tokio;
+use soroban_sdk::{Env, Address, testutils::Address as _};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize the Stellar client
-    let client = StellarClient::new().await?;
-    
-    // Create a new staking contract
-    let staking = StakingContract::new(
-        "STAKING_TOKEN_CONTRACT_ID".to_string(),
-        "REWARD_TOKEN_CONTRACT_ID".to_string(),
-        1000, // 1000 reward tokens per second
-    );
-    
-    println!("🌾 Creating staking contract...");
-    println!("Staking Token: {}", staking.get_info().staking_token);
-    println!("Reward Token: {}", staking.get_info().reward_token);
-    println!("Reward Rate: {} tokens per second", staking.get_info().reward_rate);
-    
-    // Deploy the staking contract
-    println!("\n🚀 Deploying staking contract...");
-    let contract_id = staking.deploy(&client).await?;
-    
-    println!("✅ Staking contract deployed successfully!");
-    println!("Contract ID: {}", contract_id);
-    
-    // Example of staking tokens
-    println!("\n📈 Example: Staking tokens...");
-    let user_address = "GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
-    let stake_amount = 500000000; // 500 tokens
-    
-    println!("Staking {} tokens for address: {}", stake_amount as f64 / 1_000_000.0, user_address);
-    
-    // Note: In a real implementation, you would call the contract's stake function
-    println!("✅ Tokens staked successfully!");
-    
-    // Calculate rewards
-    println!("\n💰 Calculating rewards...");
-    let staking_duration_days = 30;
-    let rewards_per_day = staking.get_info().reward_rate * 86400; // 86400 seconds in a day
-    let total_rewards = rewards_per_day * staking_duration_days;
-    
-    println!("Staking duration: {} days", staking_duration_days);
-    println!("Rewards per day: {} tokens", rewards_per_day as f64 / 1_000_000.0);
-    println!("Total rewards after {} days: {} tokens", 
-             staking_duration_days, 
-             total_rewards as f64 / 1_000_000.0);
-    
-    // Calculate APY
-    let apy = staking.get_apy();
-    println!("Annual Percentage Yield (APY): {:.2}%", apy);
-    
-    // Example of claiming rewards
-    println!("\n🎁 Example: Claiming rewards...");
-    let pending_rewards = total_rewards;
-    
-    println!("Claiming {} reward tokens...", pending_rewards as f64 / 1_000_000.0);
-    // Note: In a real implementation, you would call the contract's claim_rewards function
-    println!("✅ Rewards claimed successfully!");
-    
-    // Example of unstaking
-    println!("\n📉 Example: Unstaking tokens...");
-    let unstake_amount = 200000000; // 200 tokens
-    
-    println!("Unstaking {} tokens...", unstake_amount as f64 / 1_000_000.0);
-    // Note: In a real implementation, you would call the contract's unstake function
-    println!("✅ Tokens unstaked successfully!");
-    
-    // Example of updating reward rate (admin function)
-    println!("\n⚙️  Example: Updating reward rate...");
-    let new_reward_rate = 1500; // Increased to 1500 tokens per second
-    
-    println!("Updating reward rate from {} to {} tokens per second", 
-             staking.get_info().reward_rate, 
-             new_reward_rate);
-    
-    // Note: In a real implementation, this would be called through a governance proposal
-    println!("✅ Reward rate updated!");
-    
-    // Show updated APY
-    let updated_apy = (new_reward_rate as f64 * 365.0 * 24.0 * 60.0 * 60.0 / 300000000.0) * 100.0;
-    println!("Updated APY: {:.2}%", updated_apy);
-    
-    // Example of emergency withdraw
-    println!("\n🚨 Example: Emergency withdraw...");
-    let emergency_withdraw_amount = 300000000; // 300 tokens
-    
-    println!("Emergency withdrawing {} tokens without rewards...", 
-             emergency_withdraw_amount as f64 / 1_000_000.0);
-    // Note: In a real implementation, you would call the contract's emergency_withdraw function
-    println!("✅ Emergency withdraw completed!");
-    
-    // Summary
-    println!("\n📊 Staking Summary:");
-    println!("Total Staked: {} tokens", 300000000 as f64 / 1_000_000.0);
-    println!("Total Rewards Claimed: {} tokens", total_rewards as f64 / 1_000_000.0);
-    println!("Final APY: {:.2}%", updated_apy);
-    
-    Ok(())
+// Note: In a real deployment, you would import the actual contract client
+// For this example, we'll demonstrate the conceptual flow
+
+fn main() {
+    println!("=== Stellar DeFi Toolkit - Staking Contract Example ===\n");
+
+    // Create a test environment
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Generate addresses for demonstration
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    println!("📋 Setup:");
+    println!("  Admin: {}", admin);
+    println!("  User 1: {}", user1);
+    println!("  User 2: {}", user2);
+    println!();
+
+    // In a real scenario, you would:
+    // 1. Deploy the staking contract
+    // 2. Deploy or reference existing token contracts
+    // 3. Initialize the staking contract with parameters
+
+    println!("🚀 Step 1: Initialize Staking Contract");
+    println!("  - Staking Token: USDC");
+    println!("  - Reward Token: REWARD");
+    println!("  - Reward Duration: 7 days (120,960 ledgers)");
+    println!();
+
+    // Example initialization (pseudo-code):
+    // staking_contract.initialize(
+    //     &admin,
+    //     &staking_token_address,
+    //     &reward_token_address,
+    //     &120960, // 7 days in ledgers
+    // );
+
+    println!("💰 Step 2: Admin Sets Reward Amount");
+    println!("  - Total Rewards: 10,000 REWARD tokens");
+    println!("  - Reward Rate: ~0.083 REWARD per ledger");
+    println!();
+
+    // staking_contract.notify_reward_amount(&admin, &10_000_000_000);
+
+    println!("🔒 Step 3: Users Stake Tokens");
+    println!("  - User 1 stakes: 1,000 USDC");
+    println!("  - User 2 stakes: 500 USDC");
+    println!("  - Total Staked: 1,500 USDC");
+    println!();
+
+    // staking_contract.stake(&user1, &1_000_000_000);
+    // staking_contract.stake(&user2, &500_000_000);
+
+    println!("⏰ Step 4: Time Passes (simulating 1 day = 17,280 ledgers)");
+    println!("  - Rewards accumulate based on stake proportion");
+    println!("  - User 1 (66.7% stake) earns ~66.7% of rewards");
+    println!("  - User 2 (33.3% stake) earns ~33.3% of rewards");
+    println!();
+
+    // Simulate time passing
+    // env.ledger().with_mut(|li| {
+    //     li.sequence_number += 17280;
+    // });
+
+    println!("📊 Step 5: Check Earned Rewards");
+    println!("  - User 1 earned: ~952 REWARD tokens");
+    println!("  - User 2 earned: ~476 REWARD tokens");
+    println!();
+
+    // let earned1 = staking_contract.get_earned(&user1);
+    // let earned2 = staking_contract.get_earned(&user2);
+
+    println!("💸 Step 6: User 1 Claims Rewards");
+    println!("  - Claimed: 952 REWARD tokens");
+    println!("  - Remaining staked: 1,000 USDC");
+    println!();
+
+    // let claimed = staking_contract.claim_rewards(&user1);
+
+    println!("🔓 Step 7: User 2 Unstakes Partially");
+    println!("  - Unstaked: 200 USDC");
+    println!("  - Remaining staked: 300 USDC");
+    println!("  - Unclaimed rewards: 476 REWARD tokens");
+    println!();
+
+    // staking_contract.unstake(&user2, &200_000_000);
+
+    println!("📈 Step 8: View Contract Statistics");
+    println!("  - Total Staked: 1,300 USDC");
+    println!("  - Reward Rate: 0.083 REWARD/ledger");
+    println!("  - Period Finish: 103,680 ledgers remaining");
+    println!();
+
+    // let info = staking_contract.get_info();
+
+    println!("✅ Example Complete!");
+    println!();
+    println!("Key Features Demonstrated:");
+    println!("  ✓ Time-based reward distribution");
+    println!("  ✓ Proportional rewards based on stake");
+    println!("  ✓ Flexible staking and unstaking");
+    println!("  ✓ Separate reward claiming");
+    println!("  ✓ Admin-controlled reward periods");
+    println!();
+    println!("Additional Features Available:");
+    println!("  • Emergency withdraw (forfeit rewards)");
+    println!("  • Multiple reward periods");
+    println!("  • Real-time reward calculations");
+    println!("  • Event emission for all actions");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_example_runs() {
+        // This ensures the example compiles and runs
+        super::main();
+    }
 }

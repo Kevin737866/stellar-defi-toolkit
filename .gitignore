@@ -78,3 +78,4 @@ clippy.toml
 # Local development
 .local/
 local/
+AGENTS.md
