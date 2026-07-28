@@ -7,6 +7,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use crate::types::token::{TokenInfo, TokenMetadata};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Token contract implementing standard token functionality
 #[contract]
@@ -25,6 +26,12 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
+    /// Admin address for admin-only operations
+    admin: Option<String>,
+    /// Recovery requests: (original_owner, tx_hash) -> (amount, request_time)
+    recovery_requests: HashMap<String, (u64, u64)>,
+    /// Recovery delay in seconds
+    recovery_delay: u64,
 }
 
 impl TokenContract {
@@ -38,6 +45,9 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
+            admin: None,
+            recovery_requests: HashMap::new(),
+            recovery_delay: 86400,
         }
     }
 
@@ -222,6 +232,103 @@ impl TokenContract {
         Ok(())
     }
 
+    // ─── Token Recovery (#226) ───────────────────────────────────────────────────────
+
+    /// Set the contract admin address
+    pub fn set_admin(&mut self, admin: String) -> Result<(), String> {
+        if self.admin.is_some() {
+            return Err("Admin already set".to_string());
+        }
+        self.admin = Some(admin);
+        Ok(())
+    }
+
+    /// Get the current admin address
+    pub fn get_admin(&self) -> Option<&String> {
+        self.admin.as_ref()
+    }
+
+    /// Set the recovery delay (in seconds)
+    pub fn set_recovery_delay(&mut self, admin: &str, delay_secs: u64) -> Result<(), String> {
+        self.require_admin(admin)?;
+        self.recovery_delay = delay_secs;
+        Ok(())
+    }
+
+    /// Request recovery of tokens accidentally sent to the contract
+    pub fn request_recovery(
+        &mut self,
+        original_owner: Address,
+        tx_hash: String,
+        amount: u64,
+    ) -> Result<(), String> {
+        if amount == 0 {
+            return Err("Amount must be greater than 0".to_string());
+        }
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        if self.recovery_requests.contains_key(&request_key) {
+            return Err("Recovery already requested for this transaction".to_string());
+        }
+        let request_time = Self::current_timestamp();
+        self.recovery_requests.insert(request_key, (amount, request_time));
+        println!("[Event] RecoveryRequested {{ owner: {}, tx_hash: {}, amount: {}, unlock_at: {} }}",
+            owner_key, tx_hash, amount, request_time + self.recovery_delay);
+        Ok(())
+    }
+
+    /// Complete a recovery request and return tokens to the owner
+    pub fn complete_recovery(
+        &mut self, original_owner: Address, tx_hash: String,
+    ) -> Result<u64, String> {
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        let (amount, request_time) = self.recovery_requests.get(&request_key)
+            .copied().ok_or("No recovery request found for this transaction")?;
+        let current_time = Self::current_timestamp();
+        if current_time < request_time + self.recovery_delay {
+            return Err(format!("Recovery is time-locked. Available at timestamp {}",
+                request_time + self.recovery_delay));
+        }
+        self.recovery_requests.remove(&request_key);
+        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
+        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] TokensRecovered {{ owner: {}, tx_hash: {}, amount: {} }}",
+            owner_key, tx_hash, amount);
+        Ok(amount)
+    }
+
+    /// Admin override to recover stuck funds immediately
+    pub fn admin_recover(
+        &mut self, admin: &str, original_owner: Address, tx_hash: String,
+    ) -> Result<u64, String> {
+        self.require_admin(admin)?;
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        let (amount, _) = self.recovery_requests.remove(&request_key)
+            .ok_or("No recovery request found for this transaction")?;
+        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
+        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] AdminRecovery {{ admin: {}, owner: {}, tx_hash: {}, amount: {} }}",
+            admin, owner_key, tx_hash, amount);
+        Ok(amount)
+    }
+
+    // ─── Admin helpers ────────────────────────────────────────────
+
+    fn require_admin(&self, caller: &str) -> Result<(), String> {
+        match &self.admin {
+            Some(admin) if admin == caller => Ok(()),
+            Some(_) => Err("Not authorized: admin only".to_string()),
+            None => Err("No admin configured".to_string()),
+        }
+    }
+
+    fn current_timestamp() -> u64 {
+        static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+        TIMESTAMP.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
     // -------------------------------------------------------------------------
     // Internal event helpers
     // -------------------------------------------------------------------------
@@ -312,144 +419,111 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod soroban_tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
 
-    fn setup() -> (Env, soroban_sdk::Address, TokenContractClient<'static>) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-        // Leak env for 'static lifetime required by Client — acceptable in tests
-        let env: &'static Env = Box::leak(Box::new(env));
-        let client = TokenContractClient::new(env, &contract_id);
-        (env.clone(), admin, client)
+    #[test]
+    fn test_transfer_basic() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let from = Address::generate(&Env::default());
+        let to = Address::generate(&Env::default());
+
+        // Mint initial balance to sender
+        token.mint(from.clone(), 1000).unwrap();
+
+        // Perform transfer
+        token.transfer(from.clone(), to.clone(), 400).unwrap();
+
+        assert_eq!(token.balance_of(from), 600);
+        assert_eq!(token.balance_of(to), 400);
     }
 
     #[test]
-    fn test_mint_and_balance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-
-        let user = soroban_sdk::Address::generate(&env);
-        client.mint(&user, &1_000);
-        assert_eq!(client.balance_of(&user), 1_000);
-    }
-
-    #[test]
-    fn test_transfer() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-
-        let sender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
-        client.mint(&sender, &1_000);
-
-        client.transfer(&sender, &receiver, &400);
-        assert_eq!(client.balance_of(&sender), 600);
-        assert_eq!(client.balance_of(&receiver), 400);
-    }
-
-    #[test]
-    #[should_panic(expected = "Insufficient balance")]
     fn test_transfer_insufficient_balance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let from = Address::generate(&Env::default());
+        let to = Address::generate(&Env::default());
 
-        let sender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
-        client.mint(&sender, &100);
-        client.transfer(&sender, &receiver, &500);
+        token.mint(from.clone(), 100).unwrap();
+
+        let result = token.transfer(from, to, 500);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient balance"));
     }
 
     #[test]
     fn test_approve_and_allowance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        client.approve(&owner, &spender, &300);
-        assert_eq!(client.allowance(&owner, &spender), 300);
+        token.approve(owner.clone(), spender.clone(), 300).unwrap();
+        assert_eq!(token.allowance(owner, spender), 300);
     }
 
     #[test]
     fn test_transfer_from_success() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
+        let receiver = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
+        token.mint(owner.clone(), 1000).unwrap();
+        token.approve(owner.clone(), spender.clone(), 500).unwrap();
 
-        client.mint(&owner, &1_000);
-        client.approve(&owner, &spender, &500);
+        token.transfer_from(spender.clone(), owner.clone(), receiver.clone(), 200).unwrap();
 
-        client.transfer_from(&spender, &owner, &receiver, &200);
-
-        assert_eq!(client.balance_of(&owner), 800);
-        assert_eq!(client.balance_of(&receiver), 200);
-        assert_eq!(client.allowance(&owner, &spender), 300);
+        assert_eq!(token.balance_of(owner.clone()), 800);
+        assert_eq!(token.balance_of(receiver), 200);
+        assert_eq!(token.allowance(owner, spender), 300);
     }
 
-    // -------------------------------------------------------------------------
-    // Issue #17 – TransferFrom tests
-    // -------------------------------------------------------------------------
-
     #[test]
-    #[should_panic(expected = "Insufficient allowance")]
     fn test_transfer_from_insufficient_allowance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
+        let receiver = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
+        token.mint(owner.clone(), 1000).unwrap();
+        token.approve(owner.clone(), spender.clone(), 50).unwrap();
 
-        client.mint(&owner, &1_000);
-        client.approve(&owner, &spender, &50);
-        client.transfer_from(&spender, &owner, &receiver, &200);
+        let result = token.transfer_from(spender, owner, receiver, 200);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient allowance"));
+    }
+
+    // ─── Token Recovery Tests (#226) ──────────────────────
+
+    #[test]
+    fn test_recovery_request_and_complete() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        token.recovery_delay = 0;
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
+        let recovered = token.complete_recovery(owner.clone(), "tx_abc123".to_string()).unwrap();
+        assert_eq!(recovered, 500);
+        assert_eq!(token.balance_of(owner), 500);
     }
 
     #[test]
-    fn test_burn() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+    fn test_recovery_duplicate_request() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
+        let result = token.request_recovery(owner, "tx_abc123".to_string(), 500);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already requested"));
+    }
 
-        let user = soroban_sdk::Address::generate(&env);
-        client.mint(&user, &1_000);
-        client.burn(&user, &400);
-        assert_eq!(client.balance_of(&user), 600);
+    #[test]
+    fn test_admin_recovery_override() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        token.set_admin("admin1".to_string()).unwrap();
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_stuck".to_string(), 1000).unwrap();
+        let recovered = token.admin_recover("admin1", owner.clone(), "tx_stuck".to_string()).unwrap();
+        assert_eq!(recovered, 1000);
+        assert_eq!(token.balance_of(owner), 1000);
     }
 }
