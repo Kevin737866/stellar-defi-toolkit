@@ -27,6 +27,7 @@ pub use contracts::{
     StellarDexAdapter,
 };
 pub use types::lending::*;
+pub use types::token::VestingSchedule;
 pub use contracts::price_feed_adapters::{DexAdapterConfig, DexOrderBook};
 pub use utils::fixed_point::{
     bps_mul, mul_div, wad_div, wad_mul, BPS_DENOMINATOR, WAD, YEAR_IN_SECONDS,

@@ -15,6 +15,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Token contract implementing standard token functionality
 #[contract]
@@ -33,10 +34,12 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
-    /// Vesting schedules: id -> VestingSchedule
-    vesting_schedules: HashMap<u64, VestingSchedule>,
-    /// Next vesting schedule ID
-    next_vesting_id: u64,
+    /// Admin address for admin-only operations
+    admin: Option<String>,
+    /// Recovery requests: (original_owner, tx_hash) -> (amount, request_time)
+    recovery_requests: HashMap<String, (u64, u64)>,
+    /// Recovery delay in seconds
+    recovery_delay: u64,
 }
 
 impl TokenContract {
@@ -50,8 +53,9 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
-            vesting_schedules: HashMap::new(),
-            next_vesting_id: 1,
+            admin: None,
+            recovery_requests: HashMap::new(),
+            recovery_delay: 86400,
         }
     }
 
@@ -236,66 +240,101 @@ impl TokenContract {
         Ok(())
     }
 
-    // ─── Token Vesting (#223) ──────────────────────────────────────────
+    // ─── Token Recovery (#226) ───────────────────────────────────────────────────────
 
-    /// Create a vesting schedule with cliff and linear release.
-    /// Tokens are deducted from the caller's balance.
-    pub fn create_vesting_schedule(
-        &mut self, caller: Address, beneficiary: Address, amount: u64,
-        start_time: u64, cliff_duration: u64, total_duration: u64,
-    ) -> Result<u64, String> {
-        if amount == 0 { return Err("Vesting amount must be greater than 0".to_string()); }
-        if total_duration == 0 { return Err("Total duration must be greater than 0".to_string()); }
-        if cliff_duration > total_duration { return Err("Cliff duration cannot exceed total duration".to_string()); }
-        let caller_key = caller.to_string();
-        let caller_balance = self.balances.get(&caller_key).copied().unwrap_or(0);
-        if caller_balance < amount {
-            return Err(format!("Insufficient balance: caller has {}, vesting requires {}", caller_balance, amount));
+    /// Set the contract admin address
+    pub fn set_admin(&mut self, admin: String) -> Result<(), String> {
+        if self.admin.is_some() {
+            return Err("Admin already set".to_string());
         }
-        *self.balances.entry(caller_key).or_insert(0) -= amount;
-        let id = self.next_vesting_id;
-        self.next_vesting_id = self.next_vesting_id.checked_add(1).ok_or("Vesting ID overflow")?;
-        let schedule = VestingSchedule::new(id, beneficiary.to_string(), amount, start_time, cliff_duration, total_duration, None);
-        self.vesting_schedules.insert(id, schedule);
-        println!("[Event] VestingScheduleCreated {{ id: {}, beneficiary: {}, amount: {}, cliff: {}s, duration: {}s }}",
-            id, beneficiary.to_string(), amount, cliff_duration, total_duration);
-        Ok(id)
+        self.admin = Some(admin);
+        Ok(())
     }
 
-    /// Get the claimable vested amount for a schedule
-    pub fn get_claimable_amount(&self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
-        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
-        Ok(schedule.claimable_amount(current_time))
+    /// Get the current admin address
+    pub fn get_admin(&self) -> Option<&String> {
+        self.admin.as_ref()
     }
 
-    /// Claim vested tokens from a schedule
-    pub fn claim_vested(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
-        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
-        let claimable = schedule.claim(current_time)?;
-        let beneficiary_key = schedule.beneficiary.clone();
-        let entry = self.balances.entry(beneficiary_key.clone()).or_insert(0);
-        *entry = entry.checked_add(claimable).ok_or("Overflow: balance exceeded u64::MAX")?;
-        println!("[Event] VestingClaimed {{ id: {}, beneficiary: {}, amount: {} }}", schedule_id, beneficiary_key, claimable);
-        Ok(claimable)
+    /// Set the recovery delay (in seconds)
+    pub fn set_recovery_delay(&mut self, admin: &str, delay_secs: u64) -> Result<(), String> {
+        self.require_admin(admin)?;
+        self.recovery_delay = delay_secs;
+        Ok(())
     }
 
-    /// Revoke a vesting schedule
-    pub fn revoke_vesting(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
-        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
-        let unvested = schedule.revoke(current_time);
-        println!("[Event] VestingRevoked {{ id: {}, unvested_amount: {} }}", schedule_id, unvested);
-        Ok(unvested)
+    /// Request recovery of tokens accidentally sent to the contract
+    pub fn request_recovery(
+        &mut self,
+        original_owner: Address,
+        tx_hash: String,
+        amount: u64,
+    ) -> Result<(), String> {
+        if amount == 0 {
+            return Err("Amount must be greater than 0".to_string());
+        }
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        if self.recovery_requests.contains_key(&request_key) {
+            return Err("Recovery already requested for this transaction".to_string());
+        }
+        let request_time = Self::current_timestamp();
+        self.recovery_requests.insert(request_key, (amount, request_time));
+        println!("[Event] RecoveryRequested {{ owner: {}, tx_hash: {}, amount: {}, unlock_at: {} }}",
+            owner_key, tx_hash, amount, request_time + self.recovery_delay);
+        Ok(())
     }
 
-    /// Get a vesting schedule by ID
-    pub fn get_vesting_schedule(&self, schedule_id: u64) -> Option<&VestingSchedule> {
-        self.vesting_schedules.get(&schedule_id)
+    /// Complete a recovery request and return tokens to the owner
+    pub fn complete_recovery(
+        &mut self, original_owner: Address, tx_hash: String,
+    ) -> Result<u64, String> {
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        let (amount, request_time) = self.recovery_requests.get(&request_key)
+            .copied().ok_or("No recovery request found for this transaction")?;
+        let current_time = Self::current_timestamp();
+        if current_time < request_time + self.recovery_delay {
+            return Err(format!("Recovery is time-locked. Available at timestamp {}",
+                request_time + self.recovery_delay));
+        }
+        self.recovery_requests.remove(&request_key);
+        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
+        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] TokensRecovered {{ owner: {}, tx_hash: {}, amount: {} }}",
+            owner_key, tx_hash, amount);
+        Ok(amount)
     }
 
-    /// Check if a vesting schedule is fully vested
-    pub fn is_vesting_complete(&self, schedule_id: u64, current_time: u64) -> Result<bool, String> {
-        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
-        Ok(schedule.is_fully_vested(current_time))
+    /// Admin override to recover stuck funds immediately
+    pub fn admin_recover(
+        &mut self, admin: &str, original_owner: Address, tx_hash: String,
+    ) -> Result<u64, String> {
+        self.require_admin(admin)?;
+        let owner_key = original_owner.to_string();
+        let request_key = format!("{}:{}", owner_key, tx_hash);
+        let (amount, _) = self.recovery_requests.remove(&request_key)
+            .ok_or("No recovery request found for this transaction")?;
+        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
+        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] AdminRecovery {{ admin: {}, owner: {}, tx_hash: {}, amount: {} }}",
+            admin, owner_key, tx_hash, amount);
+        Ok(amount)
+    }
+
+    // ─── Admin helpers ────────────────────────────────────────────
+
+    fn require_admin(&self, caller: &str) -> Result<(), String> {
+        match &self.admin {
+            Some(admin) if admin == caller => Ok(()),
+            Some(_) => Err("Not authorized: admin only".to_string()),
+            None => Err("No admin configured".to_string()),
+        }
+    }
+
+    fn current_timestamp() -> u64 {
+        static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+        TIMESTAMP.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     // -------------------------------------------------------------------------
@@ -460,5 +499,39 @@ mod soroban_tests {
         let result = token.transfer_from(spender, owner, receiver, 200);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Insufficient allowance"));
+    }
+
+    // ─── Token Recovery Tests (#226) ──────────────────────
+
+    #[test]
+    fn test_recovery_request_and_complete() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        token.recovery_delay = 0;
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
+        let recovered = token.complete_recovery(owner.clone(), "tx_abc123".to_string()).unwrap();
+        assert_eq!(recovered, 500);
+        assert_eq!(token.balance_of(owner), 500);
+    }
+
+    #[test]
+    fn test_recovery_duplicate_request() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
+        let result = token.request_recovery(owner, "tx_abc123".to_string(), 500);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already requested"));
+    }
+
+    #[test]
+    fn test_admin_recovery_override() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        token.set_admin("admin1".to_string()).unwrap();
+        let owner = Address::generate(&Env::default());
+        token.request_recovery(owner.clone(), "tx_stuck".to_string(), 1000).unwrap();
+        let recovered = token.admin_recover("admin1", owner.clone(), "tx_stuck".to_string()).unwrap();
+        assert_eq!(recovered, 1000);
+        assert_eq!(token.balance_of(owner), 1000);
     }
 }
