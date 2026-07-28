@@ -763,3 +763,47 @@ impl PriceOracleContract {
         env.storage().instance().get(&PRICE_UPDATE_THRESHOLD).unwrap()
     }
 }
+
+// ─── Off‑chain Price Change Notification (mock) ────────────────────────────
+//
+// In a production system an event listener would subscribe to Soroban contract
+// events (env.events().publish(...)) and forward them to the WebSocket layer.
+// This mock notifier provides the same interface for demonstration purposes.
+
+use tokio::sync::broadcast;
+
+/// Off‑chain notifier that pushes price changes to WebSocket subscribers.
+///
+/// Attach a [`broadcast::Sender`] obtained from
+/// [`crate::api::ws::PriceBroadcaster`] to relay every notified price update
+/// to all connected WebSocket clients.
+#[derive(Clone, Default)]
+pub struct PriceChangeNotifier {
+    tx: Option<broadcast::Sender<crate::api::ws::PriceUpdate>>,
+}
+
+impl PriceChangeNotifier {
+    /// Attach a broadcast sender from the WebSocket layer.
+    pub fn attach(&mut self, tx: broadcast::Sender<crate::api::ws::PriceUpdate>) {
+        self.tx = Some(tx);
+    }
+
+    /// Notify subscribers of a price change.
+    ///
+    /// This would typically be called from an event listener that observes
+    /// `PRICE_UPDATED` events emitted by the Soroban contract.
+    pub fn notify(&self, asset: &str, price: u64, decimals: u32) {
+        if let Some(ref tx) = self.tx {
+            let update = crate::api::ws::PriceUpdate {
+                asset: asset.to_string(),
+                price,
+                decimals,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            };
+            let _ = tx.send(update);
+        }
+    }
+}
