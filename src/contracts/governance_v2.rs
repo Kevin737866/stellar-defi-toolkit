@@ -10,6 +10,18 @@
 //! - Quadratic voting support
 //! - Emergency governance actions
 //! - Delegation of voting power
+//!
+//! ## Access Control
+//! - **Admin**: `update_params`, `emergency_pause`, `unpause` — a documented temporary
+//!   fast-path ("should only be callable through a successful proposal... For now,
+//!   we'll require admin for testing"), gated by a broken `require_admin()` that
+//!   compares the contract's own address rather than the caller. See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Governance**: `create_proposal`, `vote`, `delegate` — no `require_auth()` on the
+//!   proposer/voter/delegator address; `get_voting_power` is a hardcoded mock.
+//! - **Keeper**: `execute_proposal` — permissionless by design, after quorum + the
+//!   2-day execution delay.
+//! - **User**: read-only (proposal/params/voting-power lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::stablecoin::{

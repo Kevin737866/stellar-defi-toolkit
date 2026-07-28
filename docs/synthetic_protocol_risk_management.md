@@ -114,13 +114,21 @@ pub struct RiskParameters {
 
 ### Asset-Specific Parameters
 
-| Asset Type | Min Collateral Ratio | Max Collateral Ratio | Minting Fee | Position Limit |
-|-------------|-------------------|-------------------|-------------|-------------|
-| Stocks | 150% | 500% | 0.5% | $500K |
-| Crypto | 200% | 800% | 0.75% | $1M |
-| Commodities | 120% | 400% | 0.25% | $2M |
-| Forex | 110% | 300% | 0.1% | $5M |
-| Indices | 180% | 600% | 0.3% | $100K |
+> **Reconciliation note.** The contract enforces a hard floor of
+> `MIN_COLLATERAL_RATIO = 15000` (150 %) via `risk_params.global_min_ratio`
+> ([synthetic_protocol.rs:25](../src/contracts/synthetic_protocol.rs#L25)). The
+> Commodities (120 %) and Forex (110 %) rows below are **unreachable as written** —
+> `list_asset` will accept them but `mint_synthetic` rejects any position under
+> 150 %. Either raise those rows to 150 % or lower `global_min_ratio` by
+> governance. The contract is authoritative.
+
+| Asset Type | Min Collateral Ratio | Max Collateral Ratio | Minting Fee | Position Limit | Reachable? |
+|-------------|-------------------|-------------------|-------------|-------------|------------|
+| Stocks | 150% | 500% | 0.5% | $500K | Yes |
+| Crypto | 200% | 800% | 0.75% | $1M | Yes |
+| Commodities | 120% | 400% | 0.25% | $2M | **No — below 150 % floor** |
+| Forex | 110% | 300% | 0.1% | $5M | **No — below 150 % floor** |
+| Indices | 180% | 600% | 0.3% | $100K | Yes |
 
 ### Oracle Risk Parameters
 
@@ -131,6 +139,223 @@ pub struct RiskParameters {
 | 80-90% | 60% | 3% | 2 hours |
 | 70-80% | 40% | 5% | 6 hours |
 | <70% | 20% | 10% | 12 hours |
+
+## Economic Risk Analysis
+
+The sections above describe the intended risk framework. This section analyses
+the economics actually implemented in
+[synthetic_protocol.rs](../src/contracts/synthetic_protocol.rs). Cross-module
+context is in [economic_risk_analysis.md](./economic_risk_analysis.md).
+
+### Contract Parameters as Deployed
+
+Set by `initialize` ([synthetic_protocol.rs:63](../src/contracts/synthetic_protocol.rs#L63))
+and the module constants:
+
+| Parameter | Raw | Value |
+|-----------|-----|-------|
+| `MIN_COLLATERAL_RATIO` / `global_min_ratio` | `15000` | 150 % |
+| `MAX_COLLATERAL_RATIO` | `100000` | 1000 % |
+| `liquidation_threshold` | `12000` | 120 % |
+| `emergency_pause_threshold` | `5000` | 50 % |
+| `max_debt_per_user` | `1_000_000_000_000` | $1 M |
+| `max_total_debt` | `100_000_000_000_000` | $100 M |
+| `DEFAULT_MINTING_FEE_BPS` | `50` | 0.5 % |
+| `LIQUIDATION_PENALTY_BPS` | `1000` | 10 % |
+| `MIN_ORACLE_CONFIDENCE` | `8000` | 80 % |
+| `STAKING_REWARD_RATE_BPS` | `1000` | 10 % |
+
+### Debt Pool Risk
+
+#### The protocol does not run a shared debt pool
+
+Positions are individually collateralised: `SyntheticPosition` carries its own
+`collateral_deposits` and `debt_amount`, and `calculate_collateral_ratio` reads
+only that position. There is no price-indexed pooled debt of the Synthetix kind.
+
+This is a significant risk decision and it should be stated explicitly rather
+than left implicit:
+
+| | Shared debt pool | Per-position (this implementation) |
+|---|---|---|
+| Minter absorbs others' PnL | Yes | **No** |
+| Contagion between minters | High | **None** |
+| Capital efficiency | Higher (pooled backing) | Lower (each position over-collateralised) |
+| Liquidation complexity | Low | **Per-position, must be individually profitable** |
+| Concentration risk | Systemic, pooled | **Sits at the protocol cap** |
+
+The upside is that no minter can be harmed by another minter's asset selection.
+The cost is that all risk concentrates in two places: per-position liquidation
+mechanics, and the global `max_total_debt` cap.
+
+#### Capital efficiency and the liquidation buffer
+
+| State | Collateral ratio | Synth per $1 collateral | Move to next boundary |
+|-------|-----------------:|------------------------:|----------------------:|
+| Mint floor | 150 % | $0.667 | −20.0 % → liquidatable |
+| Liquidation trigger | 120 % | $0.833 | −16.7 % → insolvent |
+| Insolvency | 100 % | $1.000 | — |
+
+A freshly minted position absorbs a 20 % adverse move before it is liquidatable
+and a further 16.7 % before the protocol takes a loss. For equity and forex
+synthetics this is generous; for crypto synthetics with 80 %+ annualised
+volatility, a 20 % move is roughly a 1.5-day 2-σ event and the buffer is thin.
+Per-asset `min_collateral_ratio` should be scaled to the underlying's volatility
+rather than left at the 150 % global floor.
+
+#### Concentration risk at the protocol cap
+
+`max_total_debt` is a single $100 M global limit with **no per-asset sub-cap**.
+Nothing prevents the entire $100 M from being minted against one synthetic. Since
+oracle error on a given asset hits every position in that asset simultaneously
+(correlation = 1), the effective worst case is that the whole protocol debt is
+exposed to a single price feed. Add a per-asset cap — e.g. 20 % of
+`max_total_debt` — enforced in `list_asset` and re-checked in `mint_synthetic`.
+
+`max_debt_per_user` at $1 M limits any single user to 1 % of protocol debt, which
+is a reasonable per-account bound and is not the binding constraint.
+
+#### Critical: liquidator payout is decoupled from debt
+
+`liquidate_position`
+([synthetic_protocol.rs:371](../src/contracts/synthetic_protocol.rs#L371))
+computes:
+
+```rust
+let liquidation_penalty = (debt_value * LIQUIDATION_PENALTY_BPS as u64) / 10000;
+let total_collateral_value = Self::get_position_collateral_value(&env, &position);
+let liquidator_share = (total_collateral_value * 9000) / 10000; // 90% to liquidator
+let user_share = total_collateral_value - liquidator_share;
+```
+
+`liquidation_penalty` is computed and routed to `distribute_fees`, but the
+liquidator's payout is `90 % of the entire position collateral` — a figure that
+never references the debt being retired. The two calculations describe
+inconsistent economics:
+
+| Collateral ratio at liquidation | Nominal payout (debt × 1.10) | Actual payout (collateral × 0.90) | Effective bonus | Borrower keeps |
+|--------------------------------:|-----------------------------:|----------------------------------:|----------------:|---------------:|
+| 120 % (trigger) | 1.100 × debt | 1.080 × debt | 8.0 % | 12 % of collateral |
+| 119 % | 1.100 × debt | 1.071 × debt | 7.1 % | 11.9 % |
+| 110 % | 1.100 × debt | 0.990 × debt | −1.0 % | 11 % |
+| 100 % | 1.100 × debt | 0.900 × debt | −10.0 % | 10 % |
+
+Two distinct failures follow:
+
+1. **The borrower is over-penalised at every ratio.** A position liquidated one
+   basis point below the 120 % trigger loses 90 % of its collateral, not the
+   10 % the penalty parameter advertises. The residual returned is 12 % of
+   collateral against a nominal expectation of ~9 % *of debt* plus all remaining
+   equity.
+2. **The liquidator is under-paid below ~111 %.** Once collateral falls under
+   `debt × 1.111`, 90 % of it is worth less than the debt retired, so
+   liquidation becomes loss-making and stops happening — exactly in the band
+   where it is most needed.
+
+**Recommended fix:**
+
+```rust
+let payout = min(
+    debt_value * (10_000 + LIQUIDATION_PENALTY_BPS) / 10_000,
+    total_collateral_value,
+);
+let user_share = total_collateral_value - payout;
+```
+
+This makes the penalty parameter meaningful, returns genuine residual equity to
+the borrower, and keeps liquidation profitable down to `c = 1.10`.
+
+#### Other liquidation defects
+
+- **No close factor.** The whole position is retired in one call; there is no
+  partial-liquidation path.
+- **`liquidating` flag is set but never cleared.** The position is removed from
+  storage at the end of the call, so the flag is moot in the happy path — but any
+  future partial-liquidation path would deadlock on it.
+- **Collateral maps are placeholders.** `collateral_to_liquidator` and
+  `collateral_returned` are built as `Map::new(&env)` under the comment
+  `// In production, handle actual collateral transfers`. **No collateral moves.**
+  Liquidator profit is currently zero and every figure in the table above is
+  hypothetical until the transfer paths land.
+- **`asset_info.total_collateral -= position.debt_amount`** subtracts a debt
+  figure from a collateral accumulator (flagged `// Simplified` in the source).
+  Protocol-level collateral accounting will drift from reality on every
+  liquidation.
+
+### Oracle Dependency
+
+#### Synthetics are the most oracle-dependent module
+
+In lending, the oracle prices *collateral* — an error changes how much you may
+borrow. Here the oracle defines the *debt itself*. A 10 % upward error on `sBTC`
+inflates every sBTC minter's liability by 10 % instantly, and can move an entire
+cohort from healthy to liquidatable in a single update. There is no diversifying
+effect: every position in an asset shares one feed.
+
+| Oracle error | Effect on a 150 % position | Effect on a 130 % position |
+|-------------:|---------------------------|---------------------------|
+| +10 % | 136 % — healthy | 118 % — **liquidatable** |
+| +20 % | 125 % — healthy | 108 % — liquidatable, near insolvent |
+| +25 % | 120 % — **at trigger** | 104 % — liquidatable |
+| +50 % | 100 % — **insolvent** | 87 % — insolvent |
+
+A sustained 25 % feed error is a protocol-wide solvency event for that asset.
+
+#### Confidence is self-attested
+
+Both `mint_synthetic` ([synthetic_protocol.rs:191](../src/contracts/synthetic_protocol.rs#L191))
+and `update_oracle_price` ([synthetic_protocol.rs:498](../src/contracts/synthetic_protocol.rs#L498))
+enforce `confidence >= MIN_ORACLE_CONFIDENCE` (80 %). The confidence value is
+supplied by the reporting oracle in the same call as the price. A faulty or
+compromised reporter simply asserts `confidence = 10000` alongside an arbitrary
+price and passes the check.
+
+**This is a data-quality filter, not a security control**, and should not be
+counted as a defence in threat modelling. The controls that would make it one:
+
+| Control | Purpose | Status |
+|---------|---------|--------|
+| On-chain multi-source median | Removes single-reporter authority | **Not enforced in this contract** |
+| Minimum reporter count per asset | Prevents degradation to one source | **Not enforced** |
+| Per-asset circuit breaker on the *synthetic* price | Bounds debt-side error, not just collateral-side | **Not present** |
+| Reporter staking + slashing | Makes confidence economically backed | Not present |
+| Staleness bound on synthetic prices | Caps how old a debt valuation may be | Not enforced here |
+
+`ORACLES` maps `asset_id → Vec<Address>`, so multiple reporters can be
+registered, but the price path does not require agreement among them.
+
+#### Interaction with the circuit breaker
+
+The circuit breaker in [circuit_breaker.rs](../src/contracts/circuit_breaker.rs)
+guards collateral price feeds. If it also gates the synthetic's own feed, a trip
+freezes both minting and liquidation for the asset — during which minters'
+liabilities keep moving in the real world while the protocol cannot act. See
+[economic_risk_analysis.md §5.3](./economic_risk_analysis.md#53-conflict-with-liquidation--the-central-systemic-finding)
+for the general form of this conflict and the proposed liquidation-only mode.
+
+### Systemic Risk
+
+| Channel | Mechanism | Severity |
+|---------|-----------|----------|
+| Single-feed correlation | One oracle error hits 100 % of an asset's positions at once | **High** |
+| No per-asset debt cap | Entire $100 M protocol debt may sit on one feed | **High** |
+| Liquidation payout defect | Liquidation unprofitable below ~111 %, so bad positions persist | **High** |
+| Breaker/liquidation conflict | Freeze defers liquidation while the loss grows | Medium |
+| Shared collateral with lending and stablecoin | The same collateral asset backs three protocols | Medium |
+| Fee/staking coupling | `STAKING_REWARD_RATE_BPS` = 10 % paid from fees; a fee shortfall in a quiet market makes staking rewards unfunded | Low |
+
+### Summary of Findings
+
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| 1 | Collateral transfers on liquidation unimplemented | Critical | Mainnet blocker |
+| 2 | Liquidator receives 90 % of collateral irrespective of debt | Critical | Open |
+| 3 | No per-asset debt cap under the $100 M global limit | High | Open |
+| 4 | Oracle confidence is self-attested, not enforced by aggregation | High | Open |
+| 5 | Doc asset table lists ratios below the 150 % contract floor | Medium | Annotated above |
+| 6 | `total_collateral -= debt_amount` corrupts protocol accounting | Medium | Open |
+| 7 | No close factor / partial liquidation | Medium | Open |
+| 8 | `liquidating` flag never cleared | Low | Open |
 
 ## Risk Monitoring
 

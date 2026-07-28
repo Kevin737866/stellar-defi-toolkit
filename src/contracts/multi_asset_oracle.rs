@@ -2,6 +2,13 @@
 //!
 //! Enhanced price oracle that supports a wide range of Stellar assets
 //! with type-specific configurations and price feed routing.
+//!
+//! ## Access Control
+//! - **Admin**: `clear_deviation_alerts`, `pause`, `unpause`, `update_asset_registry` —
+//!   gated by a broken `require_admin()` (compares the contract's own address, not the
+//!   caller). See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `submit_price` — no auth check on the reporting address.
+//! - **User**: read-only (price/TWAP/history/alert lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{
@@ -9,6 +16,7 @@ use crate::types::asset::{
     AssetMetadata, PriceFeedConfig, AggregationMethod, PriceDeviationAlert,
     AlertSeverity, AssetStats,
 };
+use crate::contracts::price_feed_adapters::StellarDexAdapter;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -268,6 +276,37 @@ impl MultiAssetOracleContract {
             Symbol::short("REGISTRY_UPDATED"),
             new_address,
         );
+    }
+
+    /// Get price from Stellar DEX on-chain order books
+    ///
+    /// Uses the StellarDexAdapter to read mid-price from native
+    /// DEX order books, providing on-chain price data without
+    /// external oracle dependencies.
+    ///
+    /// # Arguments
+    /// * `base_asset` - Base asset of the pair
+    /// * `quote_asset` - Quote asset of the pair
+    pub fn get_dex_price(
+        env: Env,
+        base_asset: StellarAssetId,
+        quote_asset: StellarAssetId,
+    ) -> AssetPrice {
+        Self::require_not_paused(&env);
+        StellarDexAdapter::get_dex_mid_price(env, base_asset, quote_asset)
+    }
+
+    /// Check if order book data for a pair is stale
+    ///
+    /// # Arguments
+    /// * `base_asset` - Base asset of the pair
+    /// * `quote_asset` - Quote asset of the pair
+    pub fn is_dex_price_stale(
+        env: Env,
+        base_asset: StellarAssetId,
+        quote_asset: StellarAssetId,
+    ) -> bool {
+        StellarDexAdapter::is_stale(env, base_asset, quote_asset)
     }
 
     // ─── Internal Helpers ─────────────────────────────────────────────────────

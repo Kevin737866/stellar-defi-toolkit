@@ -11,6 +11,16 @@
 //! - Governance through token holders
 //! - Price deviation detection and alerts
 //! - Circuit breaker for extreme price movements
+//!
+//! ## Access Control
+//! - **Admin**: `slash_oracle`, `update_config`, `pause`, `unpause` — `require_admin()`
+//!   compares the passed-in admin argument to the stored admin, but never calls
+//!   `require_auth()`, so it is not cryptographically enforced. See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `register_oracle`, `submit_price`, `request_unbond`, `withdraw_stake` —
+//!   no auth check on the `oracle_address` parameter; any caller can act on behalf of
+//!   any registered oracle.
+//! - **User**: read-only (price/stake/reputation lookups).
 
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized, symbol_short, panic_with_error};
 

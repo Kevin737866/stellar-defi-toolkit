@@ -319,6 +319,14 @@ pub enum ProtocolError {
     /// Emitted when an oracle price is stale.
     #[error("oracle price for {0} is stale")]
     OraclePriceStale(String),
+    #[error("admin proposal not found")]
+    ProposalNotFound,
+    #[error("admin proposal was already executed or cancelled")]
+    ProposalAlreadyExecuted,
+    #[error("admin proposal does not have enough approvals yet")]
+    InsufficientApprovals,
+    #[error("caller already approved this proposal")]
+    AlreadyApproved,
 }
 
 impl InterestRateModel {

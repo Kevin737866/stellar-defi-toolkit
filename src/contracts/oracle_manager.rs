@@ -9,6 +9,14 @@
 //! - Oracle reputation system
 //! - Price deviation detection
 //! - Automatic oracle failover
+//!
+//! ## Access Control
+//! - **Admin**: `register_oracle`, `deactivate_oracle`, `update_oracle_weight`,
+//!   `update_aggregation_params` — gated by a broken `require_admin()` (compares the
+//!   contract's own address, not the caller). See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `submit_price` — intended for a registered oracle, but has no
+//!   `require_auth()` on the `oracle_address` parameter.
+//! - **User**: read-only (aggregated price/oracle info/alert lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{OraclePrice, SyntheticAsset};

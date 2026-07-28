@@ -10,6 +10,15 @@
 //! - Per-asset circuit breaker status
 //! - Rate limiting on price updates
 //! - Cascading protection across dependent contracts
+//!
+//! ## Access Control
+//! One of the few contracts in this codebase with fully correct enforcement — see
+//! `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Admin**: `manual_trip`, `reset`, `update_config`, `set_global_pause`,
+//!   `force_recovery`, `clear_warning_alerts` — enforced via `admin.require_auth()`.
+//! - **Keeper**: `check_price_update` — intended for an oracle/feeder, but has no
+//!   auth check.
+//! - **User**: read-only (status/history/health-score lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Map, Vec};
 

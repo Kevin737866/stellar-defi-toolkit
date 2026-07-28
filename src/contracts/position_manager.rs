@@ -10,6 +10,15 @@
 //! - Position consolidation
 //! - Performance analytics
 //! - Batch operations
+//!
+//! ## Access Control
+//! - **Admin**: `create_monitored_position`, `create_batch_operation`,
+//!   `rebalance_position` — gated by a broken `require_admin()` (compares the
+//!   contract's own address, not the caller). See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `monitor_positions`, `execute_batch_operation`, `acknowledge_alert` —
+//!   no auth check at all; any caller can execute another user's pending batch or
+//!   acknowledge any alert.
+//! - **User**: read-only (`get_position_analytics`, `get_user_alerts`).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{

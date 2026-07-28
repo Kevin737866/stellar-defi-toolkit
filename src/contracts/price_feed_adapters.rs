@@ -2,6 +2,13 @@
 //!
 //! Provides specialized adapters for different types of price feed sources
 //! and asset categories, with category-specific validation and processing.
+//!
+//! ## Access Control
+//! - **Admin**: `register_adapter`, `activate_adapter`, `deactivate_adapter`,
+//!   `update_adapter_settings`, `update_category_config` — gated by a broken
+//!   `require_admin()` (compares the contract's own address, not the caller). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **User**: read-only (adapter/category config lookups, `validate_price`).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{
