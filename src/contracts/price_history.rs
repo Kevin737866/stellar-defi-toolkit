@@ -28,7 +28,7 @@ const MAX_HISTORY_RETENTION: u64 = 2592000;
 // ─── Time Bucket Definitions ─────────────────────────────────────────────────
 
 /// Time bucket intervals for organizing price data
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, async_graphql::Enum)]
 pub enum TimeBucket {
     /// 1-minute bucket
     OneMinute,
@@ -61,6 +61,18 @@ impl TimeBucket {
     pub fn bucket_index(&self, timestamp: u64) -> u64 {
         timestamp / self.duration()
     }
+
+    /// Parse a granularity string into a TimeBucket
+    pub fn from_granularity_str(granularity: &str) -> Result<Self, PriceHistoryError> {
+        match granularity {
+            "1min" => Ok(TimeBucket::OneMinute),
+            "5min" => Ok(TimeBucket::FiveMinute),
+            "15min" => Ok(TimeBucket::FifteenMinute),
+            "1hr" => Ok(TimeBucket::OneHour),
+            "1day" => Ok(TimeBucket::OneDay),
+            other => Err(PriceHistoryError::InvalidGranularity(other.to_string())),
+        }
+    }
 }
 
 // ─── Enhanced Price Data Structures ─────────────────────────────────────────
@@ -85,7 +97,7 @@ pub struct PriceHistoryEntry {
 }
 
 /// Time-bucketed price data for efficient querying
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct PriceBucket {
     /// Time bucket type
     pub bucket_type: TimeBucket,
@@ -182,6 +194,19 @@ pub struct TwapResult {
     pub calculated_at: u64,
 }
 
+/// Result of a paginated historical price query
+#[derive(Clone, Debug, Serialize, Deserialize, async_graphql::SimpleObject)]
+pub struct PriceQueryResult {
+    /// List of price buckets for the requested range
+    pub prices: Vec<PriceBucket>,
+    /// TWAP price over the query period
+    pub twap: u64,
+    /// Total number of buckets matching the query (before pagination)
+    pub total_count: u64,
+    /// Whether more results exist beyond the current page
+    pub has_more: bool,
+}
+
 // ─── Error Codes ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,6 +218,7 @@ pub enum PriceHistoryError {
     AssetNotFound,
     InsufficientData,
     InvalidPeriod,
+    InvalidGranularity(String),
 }
 
 impl std::fmt::Display for PriceHistoryError {
@@ -205,6 +231,7 @@ impl std::fmt::Display for PriceHistoryError {
             PriceHistoryError::AssetNotFound => write!(f, "Asset not found"),
             PriceHistoryError::InsufficientData => write!(f, "Insufficient data"),
             PriceHistoryError::InvalidPeriod => write!(f, "Invalid period"),
+            PriceHistoryError::InvalidGranularity(ref g) => write!(f, "Invalid granularity: {}", g),
         }
     }
 }
@@ -287,6 +314,8 @@ impl PriceHistoryManager {
         bucket_type: TimeBucket,
         start_time: u64,
         end_time: u64,
+        limit: Option<usize>,
+        offset: Option<usize>,
     ) -> Result<Vec<PriceBucket>, PriceHistoryError> {
         let asset_buckets = self.price_buckets.get(asset_id)
             .ok_or(PriceHistoryError::AssetNotFound)?;
@@ -298,9 +327,15 @@ impl PriceHistoryManager {
         let start_index = start_time / bucket_duration;
         let end_index = end_time / bucket_duration;
 
-        let mut result = Vec::new();
-        for (_index, bucket) in buckets.range(start_index..=end_index) {
-            result.push(bucket.clone());
+        let mut result: Vec<PriceBucket> = buckets.range(start_index..=end_index)
+            .map(|(_, b)| b.clone())
+            .collect();
+
+        let offset = offset.unwrap_or(0);
+        let limit = limit.unwrap_or(result.len());
+
+        if offset > 0 || limit < result.len() {
+            result = result.into_iter().skip(offset).take(limit).collect();
         }
 
         Ok(result)
@@ -335,6 +370,8 @@ impl PriceHistoryManager {
             TimeBucket::OneMinute,
             start_time,
             current_time,
+            None,
+            None,
         )?;
 
         if price_buckets.is_empty() {
@@ -374,6 +411,53 @@ impl PriceHistoryManager {
             period,
             data_points,
             calculated_at: current_time,
+        })
+    }
+
+    /// Query historical prices with granularity conversion, TWAP, and pagination
+    ///
+    /// # Arguments
+    /// * `asset_id` - Asset identifier
+    /// * `start_time` - Start timestamp
+    /// * `end_time` - End timestamp
+    /// * `granularity` - Bucket granularity ("1min", "5min", "15min", "1hr", "1day")
+    /// * `limit` - Maximum number of buckets to return
+    /// * `offset` - Number of buckets to skip
+    ///
+    /// # Returns
+    /// Price query result with prices, TWAP, total count, and pagination flag
+    pub fn query_historical_prices(
+        &self,
+        asset_id: &str,
+        start_time: u64,
+        end_time: u64,
+        granularity: &str,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<PriceQueryResult, PriceHistoryError> {
+        let bucket_type = TimeBucket::from_granularity_str(granularity)?;
+
+        let total_count =
+            self.count_prices_in_range(asset_id, &bucket_type, start_time, end_time)?;
+        let prices =
+            self.get_price_history(asset_id, bucket_type, start_time, end_time, limit, offset)?;
+
+        let twap = if prices.is_empty() {
+            0
+        } else {
+            let sum: u128 = prices.iter().map(|b| b.close as u128).sum();
+            (sum / prices.len() as u128) as u64
+        };
+
+        let limit = limit.unwrap_or(usize::MAX) as u64;
+        let offset = offset.unwrap_or(0) as u64;
+        let has_more = total_count > offset + limit;
+
+        Ok(PriceQueryResult {
+            prices,
+            twap,
+            total_count,
+            has_more,
         })
     }
 
@@ -426,6 +510,8 @@ impl PriceHistoryManager {
             TimeBucket::OneMinute,
             start_time,
             current_time,
+            None,
+            None,
         )?;
 
         if price_buckets.is_empty() {
@@ -466,6 +552,8 @@ impl PriceHistoryManager {
             TimeBucket::OneMinute,
             start_time,
             current_time,
+            None,
+            None,
         )?;
 
         if price_buckets.is_empty() {
@@ -689,6 +777,25 @@ impl PriceHistoryManager {
     fn invalidate_analytics_cache(&mut self, asset_id: &str) {
         self.analytics_cache.remove(asset_id);
     }
+
+    fn count_prices_in_range(
+        &self,
+        asset_id: &str,
+        bucket_type: &TimeBucket,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<u64, PriceHistoryError> {
+        let asset_buckets = self.price_buckets.get(asset_id)
+            .ok_or(PriceHistoryError::AssetNotFound)?;
+        let buckets = asset_buckets.get(bucket_type)
+            .ok_or(PriceHistoryError::AssetNotFound)?;
+
+        let bucket_duration = bucket_type.duration();
+        let start_index = start_time / bucket_duration;
+        let end_index = end_time / bucket_duration;
+
+        Ok(buckets.range(start_index..=end_index).count() as u64)
+    }
 }
 
 impl Default for PriceHistoryManager {
@@ -754,6 +861,128 @@ mod tests {
 
         let twap = manager.calculate_twap("XLM", 600).unwrap();
         assert!(twap.twap_price > 0);
+    }
+
+    #[test]
+    fn test_get_price_history_pagination() {
+        let mut manager = PriceHistoryManager::new();
+        let base_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        for i in 0..10 {
+            let entry = PriceHistoryEntry {
+                asset_id: "XLM".to_string(),
+                price: 1000000 + (i * 10000),
+                decimals: 6,
+                timestamp: base_time + (i * 60),
+                source: "oracle1".to_string(),
+                volume: 1000,
+                transaction_count: 10,
+            };
+            manager.store_price(entry).unwrap();
+        }
+
+        // Full range without pagination
+        let all = manager.get_price_history("XLM", TimeBucket::OneMinute, base_time, base_time + 600, None, None).unwrap();
+        assert_eq!(all.len(), 10);
+
+        // With limit
+        let limited = manager.get_price_history("XLM", TimeBucket::OneMinute, base_time, base_time + 600, Some(3), None).unwrap();
+        assert_eq!(limited.len(), 3);
+        assert_eq!(limited[0].close, 1000000);
+
+        // With offset
+        let offset = manager.get_price_history("XLM", TimeBucket::OneMinute, base_time, base_time + 600, None, Some(5)).unwrap();
+        assert_eq!(offset.len(), 5);
+        assert_eq!(offset[0].close, 1050000);
+
+        // With limit and offset
+        let paginated = manager.get_price_history("XLM", TimeBucket::OneMinute, base_time, base_time + 600, Some(2), Some(3)).unwrap();
+        assert_eq!(paginated.len(), 2);
+        assert_eq!(paginated[0].close, 1030000);
+        assert_eq!(paginated[1].close, 1040000);
+    }
+
+    #[test]
+    fn test_query_historical_prices() {
+        let mut manager = PriceHistoryManager::new();
+        let base_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        for i in 0..10 {
+            let entry = PriceHistoryEntry {
+                asset_id: "XLM".to_string(),
+                price: 1000000 + (i * 10000),
+                decimals: 6,
+                timestamp: base_time + (i * 60),
+                source: "oracle1".to_string(),
+                volume: 1000,
+                transaction_count: 10,
+            };
+            manager.store_price(entry).unwrap();
+        }
+
+        let result = manager.query_historical_prices(
+            "XLM", base_time, base_time + 600, "1min",
+            Some(3), Some(0),
+        ).unwrap();
+
+        assert_eq!(result.prices.len(), 3);
+        assert!(result.twap > 0);
+        assert_eq!(result.total_count, 10);
+        assert!(result.has_more);
+    }
+
+    #[test]
+    fn test_without_pagination_flag() {
+        let mut manager = PriceHistoryManager::new();
+        let base_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let entry = PriceHistoryEntry {
+            asset_id: "XLM".to_string(),
+            price: 1000000,
+            decimals: 6,
+            timestamp: base_time,
+            source: "oracle1".to_string(),
+            volume: 1000,
+            transaction_count: 10,
+        };
+        manager.store_price(entry).unwrap();
+
+        let result = manager.query_historical_prices(
+            "XLM", base_time, base_time + 60, "1min",
+            None, None,
+        ).unwrap();
+
+        assert_eq!(result.prices.len(), 1);
+        assert_eq!(result.has_more, false);
+        assert_eq!(result.total_count, 1);
+    }
+
+    #[test]
+    fn test_invalid_granularity() {
+        let manager = PriceHistoryManager::new();
+        let err = manager.query_historical_prices(
+            "XLM", 0, 100, "invalid", None, None,
+        ).unwrap_err();
+        assert_eq!(err, PriceHistoryError::InvalidGranularity("invalid".to_string()));
+    }
+
+    #[test]
+    fn test_granularity_mapping() {
+        assert_eq!(TimeBucket::from_granularity_str("1min").unwrap(), TimeBucket::OneMinute);
+        assert_eq!(TimeBucket::from_granularity_str("5min").unwrap(), TimeBucket::FiveMinute);
+        assert_eq!(TimeBucket::from_granularity_str("15min").unwrap(), TimeBucket::FifteenMinute);
+        assert_eq!(TimeBucket::from_granularity_str("1hr").unwrap(), TimeBucket::OneHour);
+        assert_eq!(TimeBucket::from_granularity_str("1day").unwrap(), TimeBucket::OneDay);
+        assert!(TimeBucket::from_granularity_str("bad").is_err());
     }
 
     #[test]

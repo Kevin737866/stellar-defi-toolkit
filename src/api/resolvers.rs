@@ -2,40 +2,7 @@ use async_graphql::{Object, Result, Context};
 use crate::api::types::{Ledger, Transaction, Operation, Account, NetworkStats, AccountStats, AssetVolume, Portfolio};
 use crate::utils::StellarClient;
 use crate::api::aggregations::Aggregator;
-use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
-use chrono::{DateTime, Utc, Duration};
-
-pub struct PortfolioCache {
-    cache: Arc<RwLock<HashMap<String, (DateTime<Utc>, Portfolio)>>>,
-    ttl_seconds: i64,
-}
-
-impl PortfolioCache {
-    pub fn new(ttl_seconds: i64) -> Self {
-        Self {
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            ttl_seconds,
-        }
-    }
-
-    pub fn get(&self, key: &str) -> Option<Portfolio> {
-        if let Ok(cache) = self.cache.read() {
-            if let Some((timestamp, portfolio)) = cache.get(key) {
-                if Utc::now() - *timestamp < Duration::seconds(self.ttl_seconds) {
-                    return Some(portfolio.clone());
-                }
-            }
-        }
-        None
-    }
-
-    pub fn set(&self, key: String, portfolio: Portfolio) {
-        if let Ok(mut cache) = self.cache.write() {
-            cache.insert(key, (Utc::now(), portfolio));
-        }
-    }
-}
+use crate::contracts::price_history::{PriceHistoryManager, PriceQueryResult};
 
 pub struct QueryRoot;
 
@@ -113,5 +80,24 @@ impl QueryRoot {
         let client = ctx.data::<StellarClient>()?;
         let aggregator = Aggregator::new(client.clone());
         Ok(aggregator.get_daily_stats().await?)
+    }
+
+    /// Query historical prices with time range and granularity
+    async fn historical_prices(
+        &self,
+        ctx: &Context<'_>,
+        asset_id: String,
+        start_time: u64,
+        end_time: u64,
+        granularity: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Result<PriceQueryResult> {
+        let manager = ctx.data::<PriceHistoryManager>()?;
+        let limit = limit.map(|l| l as usize);
+        let offset = offset.map(|o| o as usize);
+        manager
+            .query_historical_prices(&asset_id, start_time, end_time, &granularity, limit, offset)
+            .map_err(|e| async_graphql::Error::new(format!("{}", e)))
     }
 }
