@@ -102,3 +102,15 @@ pub struct YieldSummary {
     pub projected_annual: String,
     pub average_apy: f64,
 }
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct PoolHealth {
+    pub coverage_ratio_bps: i32,
+    pub concentration_bps: i32,
+    pub withdrawal_pressure_bps: i32,
+    pub reward_sustainability_bps: i32,
+    pub health_score: i32,
+    pub pool_size: String,
+    pub total_debt: String,
+    pub depositor_count: i32,
+}
