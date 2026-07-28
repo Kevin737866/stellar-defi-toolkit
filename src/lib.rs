@@ -14,10 +14,12 @@
 pub mod contracts;
 pub mod types;
 pub mod api;
+pub mod utils;
 
 pub use contracts::{
     AssetRegistryContract,
     LendingProtocol,
+    MockOracle,
     MultiAssetOracleContract,
     PriceFeedAdaptersContract,
     PriceOracle,
