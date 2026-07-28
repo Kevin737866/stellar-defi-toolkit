@@ -11,6 +11,15 @@
 //! - Oracle integration for price feeds
 //! - Governance controls for parameter management
 //! - Emergency shutdown functionality
+//!
+//! ## Access Control
+//! - **Admin**: `add_collateral`, `pause`, `unpause`, `emergency_shutdown`,
+//!   `set_minting_fee`, `set_redemption_fee` — gated by a broken `require_admin()`
+//!   (compares the contract's own address, not the caller). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `liquidate` — intended for any external liquidator, no auth check.
+//! - **User**: `mint`, `redeem`, `deposit_stability_pool`, `withdraw_stability_pool` —
+//!   none of these call `require_auth()` on the acting address (`to`/`from`/`depositor`).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use soroban_token_sdk::{Token, TokenInterface};

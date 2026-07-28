@@ -10,6 +10,18 @@
 //! - Timelock execution
 //! - Voting power delegation
 //! - Emergency controls
+//!
+//! ## Access Control
+//! - **Admin**: `create_multisig_requirement`, `pause`, `unpause`,
+//!   `update_governance_params`, `emergency_pause` — gated by a broken
+//!   `require_admin()` (compares the contract's own address, not the caller). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Governance**: `create_proposal`, `vote`, `delegate` — no `require_auth()` on
+//!   proposer/voter/delegator; voting power is mocked to a constant and the
+//!   double-vote guard (`has_voted`) always returns `false`.
+//! - **Keeper**: `execute_proposal` — permissionless by design, after the voting/
+//!   execution-delay timelock.
+//! - **User**: read-only (proposal/voting-power/params lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{

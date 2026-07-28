@@ -194,6 +194,21 @@ fn main() {
 
 For more details, see [STAKING_README.md](STAKING_README.md) and [docs/staking_contract.md](docs/staking_contract.md).
 
+## 🏛️ Architecture
+
+The toolkit is organized into five layers: an **oracle layer** for price discovery,
+a **core protocol layer** (lending, stablecoin, synthetic assets, liquidity pools,
+vaults, staking), a **safety layer** (circuit breakers, stability pool), a
+**governance layer**, and an **interface layer** (GraphQL API + CLI). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full component diagram, key
+module-interaction sequence diagrams (minting, liquidation, oracle aggregation,
+governance execution), the protocol-wide economic model with formulas, and a
+consolidated risk-parameter reference.
+
+Every contract's permission model — which roles (Admin, Governance, Keeper, User)
+can call which functions — is documented in
+[docs/ACCESS_CONTROL_MATRIX.md](docs/ACCESS_CONTROL_MATRIX.md).
+
 ## 🏗️ Project Structure
 
 ```
