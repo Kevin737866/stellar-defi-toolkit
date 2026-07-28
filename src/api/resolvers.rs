@@ -2,6 +2,7 @@ use async_graphql::{Object, Result, Context};
 use crate::api::types::{Ledger, Transaction, Operation, Account, NetworkStats, AccountStats, AssetVolume};
 use crate::utils::StellarClient;
 use crate::api::aggregations::Aggregator;
+use crate::contracts::price_history::{PriceHistoryManager, PriceQueryResult};
 
 pub struct QueryRoot;
 
@@ -66,5 +67,24 @@ impl QueryRoot {
         let client = ctx.data::<StellarClient>()?;
         let aggregator = Aggregator::new(client.clone());
         Ok(aggregator.get_daily_stats().await?)
+    }
+
+    /// Query historical prices with time range and granularity
+    async fn historical_prices(
+        &self,
+        ctx: &Context<'_>,
+        asset_id: String,
+        start_time: u64,
+        end_time: u64,
+        granularity: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Result<PriceQueryResult> {
+        let manager = ctx.data::<PriceHistoryManager>()?;
+        let limit = limit.map(|l| l as usize);
+        let offset = offset.map(|o| o as usize);
+        manager
+            .query_historical_prices(&asset_id, start_time, end_time, &granularity, limit, offset)
+            .map_err(|e| async_graphql::Error::new(format!("{}", e)))
     }
 }

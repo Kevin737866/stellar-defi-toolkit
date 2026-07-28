@@ -255,7 +255,6 @@ impl PoolInfo {
             is_emergency_mode: false,
         }
     }
-    }
 
     /// Get the current price of token A in terms of token B
     pub fn get_price_a_to_b(&self) -> f64 {
