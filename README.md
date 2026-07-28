@@ -194,6 +194,21 @@ fn main() {
 
 For more details, see [STAKING_README.md](STAKING_README.md) and [docs/staking_contract.md](docs/staking_contract.md).
 
+## 🏛️ Architecture
+
+The toolkit is organized into five layers: an **oracle layer** for price discovery,
+a **core protocol layer** (lending, stablecoin, synthetic assets, liquidity pools,
+vaults, staking), a **safety layer** (circuit breakers, stability pool), a
+**governance layer**, and an **interface layer** (GraphQL API + CLI). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full component diagram, key
+module-interaction sequence diagrams (minting, liquidation, oracle aggregation,
+governance execution), the protocol-wide economic model with formulas, and a
+consolidated risk-parameter reference.
+
+Every contract's permission model — which roles (Admin, Governance, Keeper, User)
+can call which functions — is documented in
+[docs/ACCESS_CONTROL_MATRIX.md](docs/ACCESS_CONTROL_MATRIX.md).
+
 ## 🏗️ Project Structure
 
 ```
@@ -296,8 +311,12 @@ cargo run --example liquidity_pool
 
 ## 📚 Documentation
 
+- [Architecture Overview](docs/ARCHITECTURE.md) - Component diagram, interaction flows, economic model, risk parameters
+- [Access Control Matrix](docs/ACCESS_CONTROL_MATRIX.md) - Contract x Role x Action permission reference
+- [Security Audit Checklist & Threat Model](docs/SECURITY_AUDIT_CHECKLIST.md) - Attack surface inventory and pre-audit checklist
 - [Circuit Breaker Guide](docs/circuit_breaker_guide.md) - Price volatility protection
 - [Risk Management Framework](docs/synthetic_protocol_risk_management.md) - Comprehensive risk controls
+- [Stablecoin Economic Model](docs/stablecoin_economic_model.md) - Peg mechanism and parameters
 - [Soroban Documentation](https://soroban.stellar.org/)
 - [Stellar Documentation](https://developers.stellar.org/)
 - [API Reference](https://docs.rs/stellar-defi-toolkit/)

@@ -2,6 +2,16 @@
 //! 
 //! Provides decentralized governance functionality for protocol
 //! management and decision-making on the Stellar blockchain.
+//!
+//! ## Access Control
+//! This is a plain Rust simulation struct (no Soroban `require_auth` capability exists
+//! in this file). See `docs/ACCESS_CONTROL_MATRIX.md` for the full breakdown.
+//! - **Governance**: `create_proposal`, `vote`, `cancel_proposal`, `delegate` — caller
+//!   identity is a trusted `&str`/`Address` field, never authenticated; `vote` also lets
+//!   the caller self-report their own voting power.
+//! - **Keeper**: `execute_proposal` — permissionless by design.
+//! - **Admin**: `update_parameters` — doc comment says it should be proposal-gated, but
+//!   the code enforces no such restriction.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
 use std::collections::HashMap;

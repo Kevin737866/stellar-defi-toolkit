@@ -2,6 +2,14 @@
 //!
 //! Provides ERC-20-like token functionality on the Stellar blockchain
 //! using Soroban smart contracts.
+//!
+//! ## Access Control
+//! This is a plain in-memory Rust struct, not a deployed Soroban `#[contract]` — there
+//! is no `Env`/`require_auth` capability in this file at all, so `mint`, `burn`,
+//! `transfer`, `approve`, and `transfer_from` have **no access control whatsoever**;
+//! any caller can act on behalf of any address. See `docs/ACCESS_CONTROL_MATRIX.md`
+//! for the full breakdown and the deployable, correctly-authenticated alternative in
+//! `soroban_token_contract.rs`.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};

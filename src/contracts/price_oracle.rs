@@ -11,6 +11,16 @@
 //! - Circuit breaker for extreme price movements
 //! - Governance-controlled price sources
 //! - Automatic halt on excessive volatility
+//!
+//! ## Access Control
+//! - **Admin**: `add_price_source`, `remove_price_source`, `update_source_weight`,
+//!   `set_price_update_threshold`, `reset_circuit_breaker`,
+//!   `set_circuit_breaker_enabled`, `pause`, `unpause` — gated by a broken
+//!   `require_admin()` (compares the contract's own address, not the caller). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `update_price` — only checks the source address is *listed*, never
+//!   authenticates it; any caller can spoof a registered source.
+//! - **User**: read-only (price/TWAP/source/alert lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::stablecoin::{OraclePrice, PriceDeviationAlert, AlertSeverity};

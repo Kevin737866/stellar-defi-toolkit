@@ -3,6 +3,16 @@
 //! Manages registration and configuration of a wide range of Stellar assets
 //! for price feed support. This contract serves as a central registry for
 //! asset metadata, price feed configurations, and asset whitelisting.
+//!
+//! ## Access Control
+//! - **Admin**: `register_asset`, `update_asset_metadata`, `update_price_config`,
+//!   `add_price_source`, `remove_price_source`, `register_price_source`,
+//!   `whitelist_asset`, `remove_from_whitelist`, `register_cross_chain_asset`,
+//!   `activate_asset`, `deactivate_asset`, `pause`, `unpause` — gated by a broken
+//!   `require_admin()` (see `docs/ACCESS_CONTROL_MATRIX.md`).
+//! - **Keeper**: `update_price` — intended for an approved price source, but has
+//!   **no membership or auth check at all**, the most severe gap in this file.
+//! - **User**: read-only (asset/price/whitelist lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{

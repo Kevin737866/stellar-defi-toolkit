@@ -22,6 +22,22 @@ use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 ///   emergency.
 /// - **Event log**: every state-changing action appends a `ProtocolEvent` to
 ///   `events`.  Callers can drain the log with `drain_events()`.
+///
+/// # Access Control
+/// This is a plain Rust struct simulation — no Soroban `require_auth` capability
+/// exists in this module. See `docs/ACCESS_CONTROL_MATRIX.md` for the full breakdown.
+/// - **Admin** (multisig `admins`/`threshold`): `pause`, `unpause`,
+///   `set_default_interest_rate_model`, `set_asset_interest_rate_model`,
+///   `set_supply_cap`, `set_borrow_cap`, `set_reserve_factor` call `ensure_admin()`,
+///   which is referenced but **never defined** anywhere in this codebase — a compile
+///   blocker, not just an access-control gap. `register_asset`,
+///   `update_reserve_config`, `set_close_factor`, `collect_protocol_fees` are gated
+///   by `threshold == 1`; with a multisig `threshold > 1` they route through
+///   `approve_admin_proposal`/`execute_admin_proposal`, but no `propose_*` function
+///   ever inserts into `proposals`, so that path is currently unreachable.
+/// - **Keeper**: `liquidate`, `flash_loan` — permissionless by design, no auth check.
+/// - **User**: `deposit`, `withdraw`, `borrow`, `repay`, `set_collateral_enabled` —
+///   caller identity is an unauthenticated `&str` parameter.
 #[derive(Debug, Clone)]
 pub struct LendingProtocol {
     multisig: MultiSigConfig,

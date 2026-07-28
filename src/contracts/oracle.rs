@@ -3,6 +3,16 @@
 //! Provides two implementations:
 //! 1. `PriceOracle`: A proper, production-ready Soroban smart contract using `#[contract]` and `#[contractimpl]`.
 //! 2. `PriceOracleSim`: A simulated, standard Rust version of the price oracle for backward compatibility.
+//!
+//! ## Access Control
+//! - **`PriceOracle`** (Soroban contract): `set_price` is correctly gated — **Admin**
+//!   only, enforced via `caller.require_auth()` plus a stored-admin equality check.
+//!   This is one of the few functions in the whole codebase with fully correct
+//!   enforcement; see `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **`PriceOracleSim`** (internal simulation, used by `lending.rs`): `set_price`,
+//!   `set_price_at`, `set_sanity_config` are gated by plain `String` equality against
+//!   the stored admin — no cryptographic auth exists in this struct.
+//! - **User**: read-only (`get_price`, `get_price_at`, `admin`).
 
 use std::collections::BTreeMap;
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Map, String as SorobanString, Symbol};
