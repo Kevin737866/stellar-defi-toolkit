@@ -13,19 +13,18 @@
 
 pub mod contracts;
 pub mod types;
-pub mod api;
 pub mod utils;
 
+// NOTE: `api` (GraphQL server) is temporarily excluded — it depends on
+// `utils::client::StellarClient`, which is itself excluded. See
+// `utils/mod.rs` for why.
+// pub mod api;
+
 pub use contracts::{
-    AssetRegistryContract,
     LendingProtocol,
-    MockOracle,
-    MultiAssetOracleContract,
-    PriceFeedAdaptersContract,
     PriceOracle,
     PriceOracleSim,
 };
-pub use types::asset::*;
 pub use types::lending::*;
 pub use utils::fixed_point::{
     bps_mul, mul_div, wad_div, wad_mul, BPS_DENOMINATOR, WAD, YEAR_IN_SECONDS,
@@ -33,7 +32,7 @@ pub use utils::fixed_point::{
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
 
     #[test]
     fn exports_are_available() {

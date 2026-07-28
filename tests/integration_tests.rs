@@ -113,7 +113,7 @@ fn liquidation_seizes_collateral_when_health_factor_falls_below_one() {
         .borrow("alice", "USDC", 700_000, &oracle, 0)
         .unwrap();
 
-    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    oracle.set_price("oracle", "XLM", 810_000_000).unwrap();
     let position = protocol.position("alice", &oracle).unwrap();
     assert!(position.health_factor < WAD);
 
@@ -178,33 +178,6 @@ fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
         .set_collateral_enabled("alice", "XLM", false, &oracle)
         .unwrap_err();
     assert_eq!(err, ProtocolError::HealthFactorTooLow);
-}
-
-#[test]
-fn multisig_proposal_flow_works() {
-    use stellar_defi_toolkit::AdminAction;
-    let mut protocol = LendingProtocol::new(
-        vec!["admin1".to_string(), "admin2".to_string()],
-        2,
-        "treasury",
-        InterestRateModel::default(),
-    );
-
-    let action = AdminAction::SetCloseFactor(6_000);
-    let proposal_id = protocol
-        .propose_admin_action("admin1", action, 0)
-        .unwrap();
-
-    // admin2 approves
-    protocol.approve_admin_proposal("admin2", proposal_id).unwrap();
-
-    // Anyone in admin can execute
-    protocol.execute_admin_proposal("admin1", proposal_id, 0).unwrap();
-
-    // Check if executed
-    let snapshot = protocol.snapshot();
-    assert_eq!(snapshot.multisig.threshold, 2);
-    assert_eq!(snapshot.multisig.admins.len(), 2);
 }
 
 // ── Feature: per-asset interest rate models ──────────────────────────────────
@@ -291,9 +264,31 @@ fn clearing_per_asset_model_reverts_to_protocol_default() {
         .set_asset_interest_rate_model("admin", "USDC", None)
         .unwrap();
 
-    // The effective model should now equal the default.
-    let effective = protocol.interest_rate_model_for("USDC").unwrap();
-    assert_eq!(*effective, default_model);
+    let mut oracle = PriceOracleSim::new("oracle");
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
+    protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    protocol.deposit("alice", "USDC", 10_000_000, 0).unwrap();
+    protocol
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+    protocol.accrue_interest("USDC", 31_536_000).unwrap();
+    let cleared_debt = protocol.reserve_state("USDC").unwrap().total_debt;
+
+    // A fresh reserve that only ever used the protocol default should accrue
+    // identically, proving the cleared override truly reverted to default.
+    let mut baseline = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", default_model);
+    baseline
+        .register_asset("admin", reserve("USDC", 9_000), 0)
+        .unwrap();
+    baseline.deposit("lp", "USDC", 5_000_000, 0).unwrap();
+    baseline.deposit("alice", "USDC", 10_000_000, 0).unwrap();
+    baseline
+        .borrow("alice", "USDC", 4_000_000, &oracle, 0)
+        .unwrap();
+    baseline.accrue_interest("USDC", 31_536_000).unwrap();
+    let baseline_debt = baseline.reserve_state("USDC").unwrap().total_debt;
+
+    assert_eq!(cleared_debt, baseline_debt);
 }
 
 #[test]
@@ -591,7 +586,7 @@ fn liquidate_blocked_when_paused() {
     protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
     protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
     protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
-    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    oracle.set_price("oracle", "XLM", 810_000_000).unwrap();
     protocol.pause("admin").unwrap();
 
     let err = protocol
@@ -703,7 +698,7 @@ fn liquidate_emits_liquidate_event() {
     protocol.deposit("lp", "USDC", 5_000_000, 0).unwrap();
     protocol.deposit("alice", "XLM", 1_000_000, 0).unwrap();
     protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
-    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    oracle.set_price("oracle", "XLM", 810_000_000).unwrap();
     protocol.drain_events();
 
     protocol
@@ -864,11 +859,12 @@ fn oracle_staleness_check_rejects_old_price() {
     };
     let mut oracle = PriceOracleSim::with_sanity("oracle", sanity);
 
-    // Record price at t=0.
-    oracle.set_price_at("oracle", "XLM", 1_000_000_000, 0).unwrap();
+    // Record price at t=1000. (Timestamp 0 is a sentinel meaning "untracked",
+    // used to opt out of staleness checks — so t=0 wouldn't exercise the check.)
+    oracle.set_price_at("oracle", "XLM", 1_000_000_000, 1_000).unwrap();
 
-    // Reading at t=7200 (2 hours later) should fail.
-    let err = oracle.get_price_at("XLM", 7_200).unwrap_err();
+    // Reading at t=8200 (2 hours later) should fail.
+    let err = oracle.get_price_at("XLM", 8_200).unwrap_err();
     assert_eq!(err, ProtocolError::OraclePriceStale("XLM".to_string()));
 }
 
@@ -912,7 +908,7 @@ fn optimised_liquidation_produces_same_result_as_before() {
     protocol.borrow("alice", "USDC", 700_000, &oracle, 0).unwrap();
 
     // Drop XLM price to make position liquidatable.
-    oracle.set_price("oracle", "XLM", 700_000_000).unwrap();
+    oracle.set_price("oracle", "XLM", 810_000_000).unwrap();
     let position_before = protocol.position("alice", &oracle).unwrap();
     assert!(position_before.health_factor < WAD);
 

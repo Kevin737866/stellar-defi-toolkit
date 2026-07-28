@@ -88,7 +88,7 @@ impl LendingProtocol {
     /// `flash_loan` all return `ProtocolError::ProtocolPaused`.  Admin
     /// operations remain available.
     pub fn pause(&mut self, caller: &str) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.paused = true;
         self.emit(ProtocolEvent::Paused {
             admin: caller.to_string(),
@@ -98,7 +98,7 @@ impl LendingProtocol {
 
     /// Unpause the protocol (admin only).
     pub fn unpause(&mut self, caller: &str) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.paused = false;
         self.emit(ProtocolEvent::Unpaused {
             admin: caller.to_string(),
@@ -286,7 +286,7 @@ impl LendingProtocol {
         caller: &str,
         model: InterestRateModel,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.default_interest_rate_model = model;
         Ok(())
     }
@@ -301,7 +301,7 @@ impl LendingProtocol {
         asset: &str,
         model: Option<InterestRateModel>,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -317,7 +317,7 @@ impl LendingProtocol {
         asset: &str,
         supply_cap: i128,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -333,7 +333,7 @@ impl LendingProtocol {
         asset: &str,
         borrow_cap: i128,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -352,7 +352,7 @@ impl LendingProtocol {
         asset: &str,
         reserve_factor_bps: u32,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         if reserve_factor_bps > 10_000 {
             return Err(ProtocolError::InvalidReserveFactor);
         }

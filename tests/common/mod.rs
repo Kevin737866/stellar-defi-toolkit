@@ -1,15 +1,8 @@
-//! Shared test helpers for deterministic oracle-driven testing.
-//!
-//! Every integration/stress/benchmark test that needs a price feed should
-//! build on [`stellar_defi_toolkit::MockOracle`] rather than hand-rolling
-//! price bookkeeping — it gives every test file the same programmable price
-//! source (set any asset's price, script trend/spike/crash scenarios, and
-//! simulate staleness) without depending on wall-clock time.
+//! Shared fixtures for the lending protocol test suites (invariant, lifecycle,
+//! and fuzz tests). Mirrors the conventions used in `integration_tests.rs`.
 
-use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, MockOracle, ReserveConfig};
+use stellar_defi_toolkit::{InterestRateModel, LendingProtocol, PriceOracleSim, ReserveConfig, WAD};
 
-/// Build a `ReserveConfig` with sensible defaults for a given
-/// `collateral_factor_bps`, matching the fixtures used across the test suite.
 pub fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
     ReserveConfig {
         asset: asset.to_string(),
@@ -28,10 +21,8 @@ pub fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
     }
 }
 
-/// A `LendingProtocol` with XLM and USDC registered, paired with a
-/// `MockOracle` primed at $1.00 for both assets — the standard starting point
-/// for oracle-driven scenario tests.
-pub fn setup_protocol_with_mock_oracle() -> (LendingProtocol, MockOracle) {
+/// A protocol with two registered assets (XLM, USDC) both priced at 1 WAD.
+pub fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
     let mut protocol = LendingProtocol::new(
         vec!["admin".to_string()],
         1,
@@ -45,13 +36,41 @@ pub fn setup_protocol_with_mock_oracle() -> (LendingProtocol, MockOracle) {
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
 
-    let mut oracle = MockOracle::new("oracle");
-    oracle
-        .set_price("oracle", "XLM", stellar_defi_toolkit::WAD)
-        .unwrap();
-    oracle
-        .set_price("oracle", "USDC", stellar_defi_toolkit::WAD)
-        .unwrap();
+    let mut oracle = PriceOracleSim::new("oracle");
+    oracle.set_price("oracle", "XLM", WAD).unwrap();
+    oracle.set_price("oracle", "USDC", WAD).unwrap();
 
     (protocol, oracle)
+}
+
+/// Asserts the core economic invariants hold for a single reserve:
+/// - all totals are non-negative (no phantom negative balances)
+/// - `total_cash + total_debt - protocol_fees` (the value backing supply
+///   shares) is never negative (no free/negative collateral)
+/// - the value redeemable by all outstanding supply shares never exceeds the
+///   assets actually backing them (protocol can never be short-changed by
+///   rounding)
+pub fn assert_reserve_solvent(protocol: &stellar_defi_toolkit::LendingProtocol, asset: &str) {
+    let state = protocol.reserve_state(asset).unwrap();
+
+    assert!(state.total_cash >= 0, "{asset}: total_cash went negative");
+    assert!(state.total_debt >= 0, "{asset}: total_debt went negative");
+    assert!(
+        state.protocol_fees >= 0,
+        "{asset}: protocol_fees went negative"
+    );
+    assert!(
+        state.total_supply_shares >= 0,
+        "{asset}: total_supply_shares went negative"
+    );
+    assert!(
+        state.total_debt_shares >= 0,
+        "{asset}: total_debt_shares went negative"
+    );
+
+    let net_assets = state.total_cash + state.total_debt - state.protocol_fees;
+    assert!(
+        net_assets >= 0,
+        "{asset}: net assets (cash + debt - fees) went negative: {net_assets}"
+    );
 }

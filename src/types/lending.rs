@@ -319,19 +319,14 @@ pub enum ProtocolError {
     /// Emitted when an oracle price is stale.
     #[error("oracle price for {0} is stale")]
     OraclePriceStale(String),
-    /// Emitted when referencing an admin proposal id that doesn't exist.
     #[error("admin proposal not found")]
     ProposalNotFound,
-    /// Emitted when approving, executing, or cancelling a proposal that has
-    /// already been executed or cancelled.
-    #[error("admin proposal already executed or cancelled")]
+    #[error("admin proposal was already executed or cancelled")]
     ProposalAlreadyExecuted,
-    /// Emitted when an admin tries to approve a proposal they already approved.
-    #[error("admin proposal already approved by this admin")]
-    AlreadyApproved,
-    /// Emitted when executing a proposal that hasn't met the multisig threshold.
-    #[error("admin proposal has insufficient approvals")]
+    #[error("admin proposal does not have enough approvals yet")]
     InsufficientApprovals,
+    #[error("caller already approved this proposal")]
+    AlreadyApproved,
 }
 
 impl InterestRateModel {
