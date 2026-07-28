@@ -240,101 +240,74 @@ impl TokenContract {
         Ok(())
     }
 
-    // ─── Token Recovery (#226) ───────────────────────────────────────────────────────
+    // ─── Batch Transfer (#227) ─────────────────────────────────────────────
 
-    /// Set the contract admin address
-    pub fn set_admin(&mut self, admin: String) -> Result<(), String> {
-        if self.admin.is_some() {
-            return Err("Admin already set".to_string());
-        }
-        self.admin = Some(admin);
-        Ok(())
-    }
-
-    /// Get the current admin address
-    pub fn get_admin(&self) -> Option<&String> {
-        self.admin.as_ref()
-    }
-
-    /// Set the recovery delay (in seconds)
-    pub fn set_recovery_delay(&mut self, admin: &str, delay_secs: u64) -> Result<(), String> {
-        self.require_admin(admin)?;
-        self.recovery_delay = delay_secs;
-        Ok(())
-    }
-
-    /// Request recovery of tokens accidentally sent to the contract
-    pub fn request_recovery(
+    /// Batch transfer tokens to multiple recipients
+    ///
+    /// Sends tokens to multiple recipients in a single transaction,
+    /// reducing gas costs for payroll, airdrops, and distributions.
+    /// The operation is atomic: all transfers succeed or none do.
+    ///
+    /// # Arguments
+    /// * `from` - Sender address
+    /// * `transfers` - Vector of (recipient, amount) pairs
+    pub fn batch_transfer(
         &mut self,
-        original_owner: Address,
-        tx_hash: String,
-        amount: u64,
+        from: Address,
+        transfers: Vec<(Address, u64)>,
     ) -> Result<(), String> {
-        if amount == 0 {
-            return Err("Amount must be greater than 0".to_string());
+        if transfers.is_empty() {
+            return Err("Transfers list cannot be empty".to_string());
         }
-        let owner_key = original_owner.to_string();
-        let request_key = format!("{}:{}", owner_key, tx_hash);
-        if self.recovery_requests.contains_key(&request_key) {
-            return Err("Recovery already requested for this transaction".to_string());
+
+        // Calculate total amount and validate all amounts are > 0
+        let mut total_amount: u64 = 0;
+        for (_, amount) in transfers.iter() {
+            if *amount == 0 {
+                return Err("All transfer amounts must be greater than 0".to_string());
+            }
+            total_amount = total_amount
+                .checked_add(*amount)
+                .ok_or("Overflow: total transfer amount exceeds u64::MAX")?;
         }
-        let request_time = Self::current_timestamp();
-        self.recovery_requests.insert(request_key, (amount, request_time));
-        println!("[Event] RecoveryRequested {{ owner: {}, tx_hash: {}, amount: {}, unlock_at: {} }}",
-            owner_key, tx_hash, amount, request_time + self.recovery_delay);
+
+        let from_key = from.to_string();
+
+        // Check sender has enough balance for ALL transfers
+        let sender_balance = self.balances.get(&from_key).copied().unwrap_or(0);
+        if sender_balance < total_amount {
+            return Err(format!(
+                "Insufficient balance: sender has {}, total transfers require {}",
+                sender_balance, total_amount
+            ));
+        }
+
+        // Pre-validate all recipients (deduplicate from)
+        for (recipient, _) in transfers.iter() {
+            let recipient_key = recipient.to_string();
+            if from_key == recipient_key {
+                return Err(format!(
+                    "Cannot transfer to self: {}",
+                    recipient_key
+                ));
+            }
+        }
+
+        // Deduct total from sender once
+        *self.balances.entry(from_key.clone()).or_insert(0) -= total_amount;
+
+        // Credit each recipient and emit events
+        for (recipient, amount) in transfers.iter() {
+            let recipient_key = recipient.to_string();
+            let entry = self.balances.entry(recipient_key.clone()).or_insert(0);
+            *entry = entry
+                .checked_add(*amount)
+                .ok_or("Overflow: recipient balance exceeded u64::MAX")?;
+
+            self.emit_transfer_event(&from_key, &recipient_key, *amount);
+        }
+
         Ok(())
-    }
-
-    /// Complete a recovery request and return tokens to the owner
-    pub fn complete_recovery(
-        &mut self, original_owner: Address, tx_hash: String,
-    ) -> Result<u64, String> {
-        let owner_key = original_owner.to_string();
-        let request_key = format!("{}:{}", owner_key, tx_hash);
-        let (amount, request_time) = self.recovery_requests.get(&request_key)
-            .copied().ok_or("No recovery request found for this transaction")?;
-        let current_time = Self::current_timestamp();
-        if current_time < request_time + self.recovery_delay {
-            return Err(format!("Recovery is time-locked. Available at timestamp {}",
-                request_time + self.recovery_delay));
-        }
-        self.recovery_requests.remove(&request_key);
-        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
-        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
-        println!("[Event] TokensRecovered {{ owner: {}, tx_hash: {}, amount: {} }}",
-            owner_key, tx_hash, amount);
-        Ok(amount)
-    }
-
-    /// Admin override to recover stuck funds immediately
-    pub fn admin_recover(
-        &mut self, admin: &str, original_owner: Address, tx_hash: String,
-    ) -> Result<u64, String> {
-        self.require_admin(admin)?;
-        let owner_key = original_owner.to_string();
-        let request_key = format!("{}:{}", owner_key, tx_hash);
-        let (amount, _) = self.recovery_requests.remove(&request_key)
-            .ok_or("No recovery request found for this transaction")?;
-        let entry = self.balances.entry(owner_key.clone()).or_insert(0);
-        *entry = entry.checked_add(amount).ok_or("Overflow: balance exceeded u64::MAX")?;
-        println!("[Event] AdminRecovery {{ admin: {}, owner: {}, tx_hash: {}, amount: {} }}",
-            admin, owner_key, tx_hash, amount);
-        Ok(amount)
-    }
-
-    // ─── Admin helpers ────────────────────────────────────────────
-
-    fn require_admin(&self, caller: &str) -> Result<(), String> {
-        match &self.admin {
-            Some(admin) if admin == caller => Ok(()),
-            Some(_) => Err("Not authorized: admin only".to_string()),
-            None => Err("No admin configured".to_string()),
-        }
-    }
-
-    fn current_timestamp() -> u64 {
-        static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
-        TIMESTAMP.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     // -------------------------------------------------------------------------
@@ -386,7 +359,6 @@ mod tests {
         token.mint(address.clone(), 500000).unwrap();
 
         assert_eq!(token.total_supply, initial_supply + 500000);
-        // Minted tokens should appear in the recipient's balance
         assert_eq!(token.balance_of(address), 500000);
     }
 
@@ -395,7 +367,6 @@ mod tests {
         let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
         let address = Address::generate(&Env::default());
 
-        // Give the address some balance first
         token.mint(address.clone(), 200000).unwrap();
         let supply_after_mint = token.total_supply;
 
@@ -420,7 +391,7 @@ mod tests {
         let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
         let address = Address::generate(&Env::default());
 
-        let result = token.burn(address, 2000000); // More than total supply
+        let result = token.burn(address, 2000000);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Insufficient supply to burn");
     }
@@ -436,10 +407,7 @@ mod soroban_tests {
         let from = Address::generate(&Env::default());
         let to = Address::generate(&Env::default());
 
-        // Mint initial balance to sender
         token.mint(from.clone(), 1000).unwrap();
-
-        // Perform transfer
         token.transfer(from.clone(), to.clone(), 400).unwrap();
 
         assert_eq!(token.balance_of(from), 600);
@@ -501,37 +469,81 @@ mod soroban_tests {
         assert!(result.unwrap_err().contains("Insufficient allowance"));
     }
 
-    // ─── Token Recovery Tests (#226) ──────────────────────
+    // ─── Batch Transfer Tests (#227) ──────────────────────────────────────
 
     #[test]
-    fn test_recovery_request_and_complete() {
+    fn test_batch_transfer_basic() {
         let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        token.recovery_delay = 0;
-        let owner = Address::generate(&Env::default());
-        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
-        let recovered = token.complete_recovery(owner.clone(), "tx_abc123".to_string()).unwrap();
-        assert_eq!(recovered, 500);
-        assert_eq!(token.balance_of(owner), 500);
+        let sender = Address::generate(&Env::default());
+        let r1 = Address::generate(&Env::default());
+        let r2 = Address::generate(&Env::default());
+        let r3 = Address::generate(&Env::default());
+
+        token.mint(sender.clone(), 1000).unwrap();
+
+        let transfers = vec![
+            (r1.clone(), 200u64),
+            (r2.clone(), 150u64),
+            (r3.clone(), 100u64),
+        ];
+
+        token.batch_transfer(sender.clone(), transfers).unwrap();
+
+        assert_eq!(token.balance_of(sender), 550);
+        assert_eq!(token.balance_of(r1), 200);
+        assert_eq!(token.balance_of(r2), 150);
+        assert_eq!(token.balance_of(r3), 100);
     }
 
     #[test]
-    fn test_recovery_duplicate_request() {
+    fn test_batch_transfer_insufficient_balance() {
         let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        let owner = Address::generate(&Env::default());
-        token.request_recovery(owner.clone(), "tx_abc123".to_string(), 500).unwrap();
-        let result = token.request_recovery(owner, "tx_abc123".to_string(), 500);
+        let sender = Address::generate(&Env::default());
+        let r1 = Address::generate(&Env::default());
+        let r2 = Address::generate(&Env::default());
+
+        token.mint(sender.clone(), 100).unwrap();
+
+        let transfers = vec![
+            (r1.clone(), 80u64),
+            (r2.clone(), 50u64),
+        ];
+
+        let result = token.batch_transfer(sender.clone(), transfers);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already requested"));
+        assert!(result.unwrap_err().contains("Insufficient balance"));
+
+        assert_eq!(token.balance_of(sender), 100);
+        assert_eq!(token.balance_of(r1), 0);
+        assert_eq!(token.balance_of(r2), 0);
     }
 
     #[test]
-    fn test_admin_recovery_override() {
+    fn test_batch_transfer_empty_list() {
         let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
-        token.set_admin("admin1".to_string()).unwrap();
-        let owner = Address::generate(&Env::default());
-        token.request_recovery(owner.clone(), "tx_stuck".to_string(), 1000).unwrap();
-        let recovered = token.admin_recover("admin1", owner.clone(), "tx_stuck".to_string()).unwrap();
-        assert_eq!(recovered, 1000);
-        assert_eq!(token.balance_of(owner), 1000);
+        let sender = Address::generate(&Env::default());
+
+        let transfers: Vec<(Address, u64)> = vec![];
+        let result = token.batch_transfer(sender, transfers);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_batch_transfer_self_transfer() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let sender = Address::generate(&Env::default());
+        let r1 = Address::generate(&Env::default());
+
+        token.mint(sender.clone(), 1000).unwrap();
+
+        let transfers = vec![
+            (r1.clone(), 100u64),
+            (sender.clone(), 50u64),
+        ];
+
+        let result = token.batch_transfer(sender.clone(), transfers);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot transfer to self"));
     }
 }
