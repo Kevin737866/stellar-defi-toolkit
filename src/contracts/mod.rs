@@ -12,6 +12,7 @@ pub mod oracle;
 pub mod oracle_manager;
 pub mod position_manager;
 pub mod price_feed_adapters;
+pub mod price_history;
 pub mod price_oracle;
 pub mod stability_pool;
 pub mod stablecoin;

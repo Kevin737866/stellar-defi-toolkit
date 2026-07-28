@@ -193,6 +193,7 @@ pub enum PriceHistoryError {
     AssetNotFound,
     InsufficientData,
     InvalidPeriod,
+    ExportError,
 }
 
 impl std::fmt::Display for PriceHistoryError {
@@ -205,6 +206,7 @@ impl std::fmt::Display for PriceHistoryError {
             PriceHistoryError::AssetNotFound => write!(f, "Asset not found"),
             PriceHistoryError::InsufficientData => write!(f, "Insufficient data"),
             PriceHistoryError::InvalidPeriod => write!(f, "Invalid period"),
+            PriceHistoryError::ExportError => write!(f, "Export failed"),
         }
     }
 }
@@ -552,6 +554,123 @@ impl PriceHistoryManager {
                 buckets.retain(|&index, _| index >= cutoff_index);
             }
         }
+    }
+
+    /// Export price history to CSV format for external analytics
+    ///
+    /// # Arguments
+    /// * `asset_id` - Asset identifier
+    /// * `bucket_type` - Time bucket type to export
+    /// * `start_time` - Start timestamp
+    /// * `end_time` - End timestamp
+    /// * `include_metadata` - Whether to include asset metadata in output
+    ///
+    /// # Returns
+    /// CSV-formatted string with price history data
+    pub fn export_to_csv(
+        &self,
+        asset_id: &str,
+        bucket_type: TimeBucket,
+        start_time: u64,
+        end_time: u64,
+        include_metadata: bool,
+    ) -> Result<String, PriceHistoryError> {
+        let buckets = self.get_price_history(asset_id, bucket_type, start_time, end_time)?;
+
+        let mut csv_output = String::new();
+
+        // Write header
+        csv_output.push_str("timestamp,open,high,low,close,volume,entry_count,bucket_index\n");
+
+        // Write data rows
+        for bucket in &buckets {
+            csv_output.push_str(&format!(
+                "{},{},{},{},{},{},{},{}\n",
+                bucket.first_timestamp,
+                bucket.open,
+                bucket.high,
+                bucket.low,
+                bucket.close,
+                bucket.volume,
+                bucket.entry_count,
+                bucket.bucket_index,
+            ));
+        }
+
+        // Optionally include metadata
+        if include_metadata {
+            if let Ok(metadata) = self.get_asset_metadata(asset_id) {
+                csv_output.push_str("\n# Asset Metadata\n");
+                csv_output.push_str(&format!("asset_id,{},total_entries,{},first_timestamp,{},last_timestamp,{},current_price,{}\n",
+                    metadata.asset_id,
+                    metadata.total_entries,
+                    metadata.first_timestamp,
+                    metadata.last_timestamp,
+                    metadata.current_price,
+                ));
+            }
+        }
+
+        Ok(csv_output)
+    }
+
+    /// Export price history to JSON format for external analytics
+    ///
+    /// # Arguments
+    /// * `asset_id` - Asset identifier
+    /// * `bucket_type` - Time bucket type to export
+    /// * `start_time` - Start timestamp
+    /// * `end_time` - End timestamp
+    /// * `include_metadata` - Whether to include asset metadata in output
+    ///
+    /// # Returns
+    /// JSON-formatted string with price history data
+    pub fn export_to_json(
+        &self,
+        asset_id: &str,
+        bucket_type: TimeBucket,
+        start_time: u64,
+        end_time: u64,
+        include_metadata: bool,
+    ) -> Result<String, PriceHistoryError> {
+        let buckets = self.get_price_history(asset_id, bucket_type, start_time, end_time)?;
+
+        let mut output = serde_json::Map::new();
+
+        // Add data array
+        let data_array: Vec<serde_json::Value> = buckets.iter().map(|bucket| {
+            serde_json::json!({
+                "timestamp": bucket.first_timestamp,
+                "open": bucket.open,
+                "high": bucket.high,
+                "low": bucket.low,
+                "close": bucket.close,
+                "volume": bucket.volume,
+                "entry_count": bucket.entry_count,
+                "bucket_index": bucket.bucket_index,
+            })
+        }).collect();
+        output.insert("data".to_string(), serde_json::Value::Array(data_array));
+
+        // Optionally include metadata
+        if include_metadata {
+            if let Ok(metadata) = self.get_asset_metadata(asset_id) {
+                let metadata_json = serde_json::json!({
+                    "asset_id": metadata.asset_id,
+                    "total_entries": metadata.total_entries,
+                    "first_timestamp": metadata.first_timestamp,
+                    "last_timestamp": metadata.last_timestamp,
+                    "current_price": metadata.current_price,
+                    "high_24h": metadata.high_24h,
+                    "low_24h": metadata.low_24h,
+                    "volume_24h": metadata.volume_24h,
+                    "price_change_24h_bps": metadata.price_change_24h_bps,
+                });
+                output.insert("metadata".to_string(), metadata_json);
+            }
+        }
+
+        Ok(serde_json::to_string_pretty(&output).map_err(|_| PriceHistoryError::ExportError)?)
     }
 
     // ─── Internal Functions ─────────────────────────────────────────────────────
