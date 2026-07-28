@@ -12,6 +12,18 @@
 //! synthetic_governance, synthetic_protocol, token, vault.
 pub mod lending;
 pub mod oracle;
+pub mod oracle_manager;
+pub mod position_manager;
+pub mod price_feed_adapters;
+pub mod price_history;
+pub mod price_oracle;
+pub mod stability_pool;
+pub mod stablecoin;
+pub mod staking;
+pub mod synthetic_governance;
+pub mod synthetic_protocol;
+pub mod token;
+pub mod vault;
 
 pub use lending::LendingProtocol;
 pub use oracle::{PriceOracle, PriceOracleSim};
