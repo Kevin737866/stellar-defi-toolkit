@@ -13,6 +13,18 @@
 //! - Yield optimization algorithm
 //! - Strategy switching logic
 //! - Harvest and reinvest functions
+//!
+//! ## Access Control
+//! - **Admin**: `add_strategy`, `switch_strategy`, `optimize_strategy`,
+//!   `collect_fees`, `pause`, `unpause`, `emergency_exit`, `set_performance_fee`,
+//!   `set_treasury` — `require_admin()` only checks that an admin has been
+//!   configured, not that the caller *is* the admin (the source even flags this:
+//!   `// In production: verify env.invoker() == self.admin`). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `harvest` — open to any caller, rate-limited only by
+//!   `MIN_HARVEST_INTERVAL`, not by auth.
+//! - **User**: `deposit`, `withdraw` — no identity check at all, compounded by the
+//!   lack of a per-user share ledger (only a single aggregate `total_shares`).
 
 use soroban_sdk::{contract, Address, Env, Vec};
 use soroban_sdk::testutils::Address as _;

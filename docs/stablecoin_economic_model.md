@@ -99,6 +99,198 @@ Market-based mechanisms maintain the peg:
 | Single Collateral Concentration | 30% | 50% |
 | Daily Liquidation Volume | 5% of TVL | 15% of TVL |
 
+## Economic Risk Analysis
+
+This section analyses the model above against the behaviour actually implemented
+in [stablecoin.rs](../src/contracts/stablecoin.rs) and
+[stability_pool.rs](../src/contracts/stability_pool.rs). Where the two diverge,
+the contract is authoritative. Cross-module context is in
+[economic_risk_analysis.md](./economic_risk_analysis.md).
+
+### Collateral Ratio Analysis
+
+Constants from [stablecoin.rs:25](../src/contracts/stablecoin.rs#L25):
+
+| Constant | Raw | Value |
+|----------|-----|-------|
+| `MIN_COLLATERAL_RATIO` | `11000` | 110 % |
+| `DEFAULT_COLLATERAL_RATIO` | `15000` | 150 % |
+| `MAX_COLLATERAL_RATIO` | `50000` | 500 % |
+| `LIQUIDATION_PENALTY_BPS` | `1000` | 10 % |
+| `MIN_DEBT` | `100_000_000` | 100 SUSD (7 decimals) |
+| `MAX_DEBT` | `10_000_000_000` | 10 000 SUSD |
+
+#### Capital efficiency
+
+| Collateral ratio | SUSD per $1 collateral | Leverage | Drawdown to 110 % floor |
+|------------------|-----------------------:|---------:|------------------------:|
+| 500 % (max) | $0.200 | 1.25× | 78.0 % |
+| 200 % | $0.500 | 2.00× | 45.0 % |
+| 150 % (default) | $0.667 | 3.00× | 26.7 % |
+| 130 % | $0.769 | 4.33× | 15.4 % |
+| 110 % (floor) | $0.909 | 11.00× | 0.0 % |
+
+Drawdown tolerance is `1 − MCR / CR`. The 150 % default buys a 26.7 % adverse
+move — roughly a 3-σ weekly move for XLM-class collateral. That is a defensible
+default. The 110 % floor buys nothing: a vault sitting at the floor is one tick
+from insolvency, and the `MIN_DEBT` of 100 SUSD is small enough that dust vaults
+at the floor are economically unattractive to liquidate at all once gas and
+slippage are counted.
+
+#### Critical: the penalty equals the floor
+
+`calculate_collateral_ratio` returns `collateral_value × 10000 / debt_amount`,
+and `liquidate` proceeds only when that value is **below**
+`min_collateral_ratio`. It then seizes
+
+```rust
+let penalty_multiplier = 10000 + LIQUIDATION_PENALTY_BPS;      // 11000
+let collateral_to_liquidate = (collateral_value_needed * penalty_multiplier) / 10000;
+```
+
+Let `c` be the vault's collateral ratio and `f` the fraction of debt repaid.
+Post-liquidation:
+
+```
+c' = (c − f·(1 + penalty)) / (1 − f)
+```
+
+`c'` exceeds `c` only when `c > 1 + penalty = 1.10`. But `c > 1.10` is exactly
+the range in which liquidation is rejected. **Within the permitted range
+(`c < 1.10`), every liquidation lowers the vault's collateral ratio further.**
+
+| Ratio at liquidation | `f` = 25 % | `f` = 50 % | `f` = 100 % |
+|----------------------|-----------:|-----------:|------------:|
+| 110 % (boundary) | 110.0 % | 110.0 % | n/a — exactly exhausts collateral |
+| 108 % | 107.3 % | 106.0 % | insolvent |
+| 105 % | 103.3 % | 100.0 % | insolvent |
+| 100 % | 96.7 % | 90.0 % | insolvent |
+
+The mechanism extracts collateral but never repairs the position. **Recommended
+fix:** decouple the parameters — set `MIN_COLLATERAL_RATIO = 13000` (130 %)
+against the existing 10 % penalty, which makes `c' > c` across the whole
+`[1.10, 1.30]` liquidation band and preserves a 13.3 % drawdown buffer from the
+150 % default.
+
+#### No close factor, no partial-liquidation protection
+
+`liquidate` accepts any `stablecoin_amount` the vault's collateral can cover.
+Unlike the lending module (50 % close factor, [lending.rs:59](../src/contracts/lending.rs#L59)),
+a single liquidator can retire an entire vault in one transaction. At the floor
+ratio the owner's residual equity is zero, so the design has no notion of a
+minimally invasive liquidation.
+
+#### Bad-debt boundary
+
+The protocol takes a loss once `c < 1.00`. Starting from a 150 % vault, that
+requires a 33.3 % collateral drawdown; from a 110 % vault, 9.1 %. Because the
+oracle updates at most every 300 s and the circuit breaker halts reads after
+three consecutive ≥5 % moves, a fast crash can traverse the 110 % → 100 % band
+while the oracle is frozen. See
+[economic_risk_analysis.md §5.3](./economic_risk_analysis.md#53-conflict-with-liquidation--the-central-systemic-finding).
+
+### Depegging Scenarios
+
+#### Scenario A — premium, SUSD trades above $1
+
+Arbitrage path: deposit collateral → mint SUSD → sell at premium.
+
+At the 150 % default ratio the trade returns `premium / 1.5` on capital
+committed, less the 0.5 % minting fee:
+
+| Market premium | Gross return on capital | Net of 0.5 % mint fee |
+|----------------|------------------------:|----------------------:|
+| 0.5 % | 0.33 % | −0.17 % |
+| 1.0 % | 0.67 % | 0.17 % |
+| 2.0 % | 1.33 % | 0.83 % |
+| 5.0 % | 3.33 % | 2.83 % |
+
+Below roughly a 0.75 % premium the trade is unprofitable before any collateral
+price risk over the holding period is counted. **Expect premia of 1–2 % to
+persist under demand shocks.** Remedies: lower the minting fee toward 0.1 %,
+or allow arbitrageurs to mint at a reduced collateral ratio when the peg is
+above target so less capital is trapped.
+
+#### Scenario B — discount, SUSD trades below $1
+
+There is no redemption backstop. `redeem`
+([stablecoin.rs:185](../src/contracts/stablecoin.rs#L185)) requires
+`vault.debt_amount >= stablecoin_amount` for the **caller's own vault** — it is
+debt repayment, not the Liquity-style redemption that lets any holder swap SUSD
+for $1 of collateral from the riskiest vault.
+
+Consequences:
+
+- A holder with no vault has no protocol-guaranteed exit at $1. The only bid is
+  the secondary market.
+- The discount is bounded only by vault owners' willingness to buy SUSD cheaply
+  to close their own debt — an incentive that weakens exactly as their vaults
+  approach the floor.
+- **The system has no hard price floor.** This is the largest single peg risk in
+  the design and it is structural, not parametric.
+
+Recommended fix: add a redemption function that lets any holder burn SUSD
+against the lowest-collateral-ratio vault at oracle price minus the redemption
+fee. That converts the fee into the peg's lower bound (`$1 − fee`) and provides
+continuous deleveraging pressure on the riskiest vaults.
+
+#### Scenario C — collateral crash
+
+| Time | Collateral | Median vault CR | System state |
+|------|-----------:|----------------:|--------------|
+| t+0 | 100 | 150 % | Normal |
+| t+5 m | 94 | 141 % | Warning: circuit-breaker deviation 1 |
+| t+10 m | 88 | 132 % | Deviation 2; operators paged |
+| t+15 m | 83 | 124 % | Deviation 3 → **breaker trips, prices frozen** |
+| t+45 m | 68 (true) | 102 % (unseen) | Cooldown ends; oracle still reporting 83 |
+| t+45 m+ | 68 | 102 % | Reset; mass liquidation into a ratio-decreasing mechanism |
+
+The vaults that most need liquidating become visible only after the freeze, by
+which time liquidation lowers rather than raises their collateral ratio. The
+combination of Scenario C with the penalty-equals-floor finding above is the
+protocol's worst realistic path to bad debt.
+
+#### Scenario D — stability pool depletion
+
+`stability_pool.rs` sets `MAX_DEPOSIT_RATIO = 5000` (a single depositor may hold
+at most 50 % of the pool), `BASE_REWARD_RATE_BPS = 500` (5 % APY),
+`EARLY_WITHDRAWAL_PENALTY_BPS = 200` (2 %) and `MIN_DEPOSIT_PERIOD = 7 days`.
+
+A 2 % early-withdrawal penalty against a 5 % APY means a depositor who has held
+for more than about 20 weeks can exit at any time with the penalty fully covered
+by accrued rewards. The penalty therefore does not deter a run by long-standing
+depositors — precisely the cohort holding most of the pool. Sizing the penalty
+against the reward rate (e.g. penalty ≥ 6 months of rewards, or a penalty that
+scales with pool utilisation) would make the deterrent durable.
+
+### Implementation Gaps Affecting These Economics
+
+Both `redeem` and `liquidate` end at placeholder comments:
+
+```rust
+// In production: Burn stablecoins from user
+// In production: Transfer collateral to user
+// In production: Handle liquidation rewards and transfers
+```
+
+No token movement occurs — only accounting state and events are updated. **Actual
+liquidator profit is currently zero**, so none of the incentives modelled in this
+section are live. Every economic conclusion here is conditional on those transfer
+paths being implemented and tested. This is tracked as item 1 in the
+[cross-module risk register](./economic_risk_analysis.md#62-ranked-risk-register)
+and is a mainnet blocker.
+
+### Summary
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| Liquidation transfers unimplemented | Critical | Mainnet blocker |
+| `LIQUIDATION_PENALTY_BPS` equals `MIN_COLLATERAL_RATIO` margin — liquidation never repairs a vault | High | Open |
+| No redemption backstop — no hard peg floor | High | Open (design) |
+| No close factor — full vault seizure permitted | Medium | Open |
+| Mint-side arbitrage unprofitable below ~0.75 % premium | Medium | Tune fee |
+| Early-withdrawal penalty out-earned by rewards after ~20 weeks | Low | Tune |
+
 ## Governance Model
 
 ### Proposal Types
