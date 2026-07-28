@@ -470,3 +470,208 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+    }
+}
+
+fn handle_lend_command(cmd: LendCommands) {
+    use stellar_defi_toolkit::{
+        InterestRateModel, PriceOracleSim, ReserveConfig, LendingProtocol, WAD,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let model = InterestRateModel::default();
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", model);
+
+    let default_config = |asset: &str| ReserveConfig {
+        asset: asset.to_string(),
+        decimals: 7,
+        collateral_factor_bps: 8000,
+        liquidation_threshold_bps: 8500,
+        liquidation_bonus_bps: 500,
+        reserve_factor_bps: 1000,
+        flash_loan_fee_bps: 9,
+        borrow_enabled: true,
+        deposit_enabled: true,
+        flash_loan_enabled: true,
+        supply_cap: 0,
+        borrow_cap: 0,
+        interest_rate_model: None,
+    };
+
+    match cmd {
+        LendCommands::Deposit { user, asset, amount } => {
+            protocol.register_asset("admin", default_config(&asset), now).unwrap();
+
+            println!("💰 Deposit");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("User:    {}", user);
+            println!("Asset:   {}", asset);
+            println!("Amount:  {:.6}", amount as f64 / WAD as f64);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            match protocol.deposit(&user, &asset, amount, now) {
+                Ok(shares) => {
+                    println!("✅ Deposit successful!");
+                    println!("   Deposited: {:.6} {}", amount as f64 / WAD as f64, asset);
+                    println!("   Shares:    {}", shares);
+                }
+                Err(e) => println!("❌ Deposit failed: {:?}", e),
+            }
+        }
+        LendCommands::Withdraw { user, asset, amount } => {
+            protocol.register_asset("admin", default_config(&asset), now).unwrap();
+            protocol.deposit(&user, &asset, amount, now).unwrap();
+
+            let mut oracle = PriceOracleSim::new("oracle-admin");
+            oracle.set_price("oracle-admin", &asset, 1_000_000_000_000_000_000).unwrap();
+
+            println!("💸 Withdraw");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("User:    {}", user);
+            println!("Asset:   {}", asset);
+            println!("Amount:  {:.6}", amount as f64 / WAD as f64);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            match protocol.withdraw(&user, &asset, amount, &oracle, now) {
+                Ok(actual) => {
+                    println!("✅ Withdrawal successful!");
+                    println!("   Withdrew: {:.6} {}", actual as f64 / WAD as f64, asset);
+                }
+                Err(e) => println!("❌ Withdrawal failed: {:?}", e),
+            }
+        }
+        LendCommands::Borrow { user, asset, amount } => {
+            protocol.register_asset("admin", default_config(&asset), now).unwrap();
+            let collateral_config = ReserveConfig {
+                asset: "XLM".to_string(),
+                decimals: 7,
+                collateral_factor_bps: 7500,
+                liquidation_threshold_bps: 8000,
+                liquidation_bonus_bps: 1000,
+                reserve_factor_bps: 1000,
+                flash_loan_fee_bps: 9,
+                borrow_enabled: true,
+                deposit_enabled: true,
+                flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
+            };
+            protocol.register_asset("admin", collateral_config, now).unwrap();
+            let collateral_amount = amount * 3;
+            protocol.deposit(&user, "XLM", collateral_amount, now).unwrap();
+
+            let mut oracle = PriceOracleSim::new("oracle-admin");
+            oracle.set_price("oracle-admin", &asset, 1_000_000_000_000_000_000).unwrap();
+            oracle.set_price("oracle-admin", "XLM", 500_000_000_000_000_000).unwrap();
+
+            println!("📉 Borrow");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("User:    {}", user);
+            println!("Asset:   {}", asset);
+            println!("Amount:  {:.6}", amount as f64 / WAD as f64);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            match protocol.borrow(&user, &asset, amount, &oracle, now) {
+                Ok(shares) => {
+                    println!("✅ Borrow successful!");
+                    println!("   Borrowed: {:.6} {}", amount as f64 / WAD as f64, asset);
+                    println!("   Shares:   {}", shares);
+                }
+                Err(e) => println!("❌ Borrow failed: {:?}", e),
+            }
+        }
+        LendCommands::Repay { user, asset, amount } => {
+            protocol.register_asset("admin", default_config(&asset), now).unwrap();
+            let collateral_config = ReserveConfig {
+                asset: "XLM".to_string(),
+                decimals: 7,
+                collateral_factor_bps: 7500,
+                liquidation_threshold_bps: 8000,
+                liquidation_bonus_bps: 1000,
+                reserve_factor_bps: 1000,
+                flash_loan_fee_bps: 9,
+                borrow_enabled: true,
+                deposit_enabled: true,
+                flash_loan_enabled: true,
+                supply_cap: 0,
+                borrow_cap: 0,
+                interest_rate_model: None,
+            };
+            protocol.register_asset("admin", collateral_config, now).unwrap();
+            let collateral_amount = amount * 3;
+            protocol.deposit(&user, "XLM", collateral_amount, now).unwrap();
+
+            let mut oracle = PriceOracleSim::new("oracle-admin");
+            oracle.set_price("oracle-admin", &asset, 1_000_000_000_000_000_000).unwrap();
+            oracle.set_price("oracle-admin", "XLM", 500_000_000_000_000_000).unwrap();
+
+            protocol.borrow(&user, &asset, amount, &oracle, now).unwrap();
+
+            println!("💳 Repay");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("User:    {}", user);
+            println!("Asset:   {}", asset);
+            println!("Amount:  {:.6}", amount as f64 / WAD as f64);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            match protocol.repay(&user, &user, &asset, amount, now) {
+                Ok(actual) => {
+                    println!("✅ Repayment successful!");
+                    println!("   Repaid: {:.6} {}", actual as f64 / WAD as f64, asset);
+                }
+                Err(e) => println!("❌ Repayment failed: {:?}", e),
+            }
+        }
+        LendCommands::Position { user } => {
+            let mut oracle = PriceOracleSim::new("oracle-admin");
+            oracle.set_price("oracle-admin", "USDC", 1_000_000_000_000_000_000).unwrap();
+            oracle.set_price("oracle-admin", "XLM", 500_000_000_000_000_000).unwrap();
+
+            // Register some default assets so the position query works
+            protocol.register_asset("admin", default_config("USDC"), now).unwrap();
+            protocol.register_asset("admin", default_config("XLM"), now).unwrap();
+
+            println!("📊 Position");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("User:    {}", user);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            match protocol.position(&user, &oracle) {
+                Ok(snapshot) => {
+                    println!("💰 Supplied Assets:");
+                    for (asset, amount) in &snapshot.supplied_amounts {
+                        println!("   {}: {:.6}", asset, *amount as f64 / WAD as f64);
+                    }
+                    println!("\n📉 Debt Assets:");
+                    for (asset, amount) in &snapshot.debt_amounts {
+                        println!("   {}: {:.6}", asset, *amount as f64 / WAD as f64);
+                    }
+                    println!("\n💵 Position Values:");
+                    println!("   Collateral Value:   ${:.2}", snapshot.collateral_value as f64 / WAD as f64);
+                    println!("   Liquidation Value:  ${:.2}", snapshot.liquidation_value as f64 / WAD as f64);
+                    println!("   Debt Value:         ${:.2}", snapshot.debt_value as f64 / WAD as f64);
+                    println!("\n🏥 Health Factor: {:.4}", snapshot.health_factor as f64 / WAD as f64);
+
+                    if snapshot.debt_value == 0 {
+                        println!("\n✅ Status: NO DEBT");
+                    } else if snapshot.health_factor >= WAD {
+                        println!("\n✅ Status: HEALTHY");
+                        let buffer = ((snapshot.health_factor as f64 / WAD as f64) - 1.0) * 100.0;
+                        println!("   Safety Buffer: {:.2}%", buffer);
+                    } else {
+                        println!("\n⚠️  Status: LIQUIDATABLE");
+                        let deficit = (1.0 - (snapshot.health_factor as f64 / WAD as f64)) * 100.0;
+                        println!("   Collateral Deficit: {:.2}%", deficit);
+                    }
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                }
+                Err(e) => println!("❌ Error fetching position: {:?}", e),
+            }
+        }
+    }
+}

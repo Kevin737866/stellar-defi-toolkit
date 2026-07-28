@@ -128,6 +128,37 @@ impl LendingProtocol {
         &self.default_interest_rate_model
     }
 
+    /// Propose an admin action for multisig approval.  The proposer is
+    /// recorded as the first approval.
+    pub fn propose_admin_action(
+        &mut self,
+        caller: &str,
+        action: AdminAction,
+        now: u64,
+    ) -> Result<u64, ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+
+        let id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+
+        let mut approvals = std::collections::BTreeSet::new();
+        approvals.insert(caller.to_string());
+
+        self.proposals.insert(
+            id,
+            AdminProposal {
+                id,
+                action,
+                proposer: caller.to_string(),
+                approvals,
+                status: AdminProposalStatus::Pending,
+                created_at: now,
+            },
+        );
+
+        Ok(id)
+    }
+
     pub fn approve_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
         self.ensure_is_admin_member(caller)?;
         let proposal = self
@@ -1134,6 +1165,11 @@ impl LendingProtocol {
         } else {
             Err(ProtocolError::Unauthorized)
         }
+    }
+
+    /// Alias for `ensure_is_admin_member`, used by single-admin-oriented setters.
+    fn ensure_admin(&self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)
     }
 
     fn ensure_not_paused(&self) -> Result<(), ProtocolError> {
