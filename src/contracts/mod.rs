@@ -15,3 +15,4 @@ pub mod oracle;
 
 pub use lending::LendingProtocol;
 pub use oracle::{PriceOracle, PriceOracleSim};
+pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter};

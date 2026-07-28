@@ -22,12 +22,7 @@ fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
 }
 
 fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
-    let mut protocol = LendingProtocol::new(
-        vec!["admin".to_string()],
-        1,
-        "treasury",
-        InterestRateModel::default(),
-    );
+    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
