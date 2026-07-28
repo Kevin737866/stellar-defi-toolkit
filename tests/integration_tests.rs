@@ -21,18 +21,13 @@ fn reserve(asset: &str, collateral_factor_bps: u32) -> ReserveConfig {
     }
 }
 
-<<<<<<< lakes1
-fn setup_protocol() -> (LendingProtocol, PriceOracle) {
+fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
     let mut protocol = LendingProtocol::new(
         vec!["admin".to_string()],
         1,
         "treasury",
         InterestRateModel::default(),
     );
-=======
-fn setup_protocol() -> (LendingProtocol, PriceOracleSim) {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
->>>>>>> main
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -185,7 +180,6 @@ fn disabling_collateral_is_blocked_if_it_would_break_health_factor() {
     assert_eq!(err, ProtocolError::HealthFactorTooLow);
 }
 
-<<<<<<< lakes1
 #[test]
 fn multisig_proposal_flow_works() {
     use stellar_defi_toolkit::AdminAction;
@@ -211,7 +205,8 @@ fn multisig_proposal_flow_works() {
     let snapshot = protocol.snapshot();
     assert_eq!(snapshot.multisig.threshold, 2);
     assert_eq!(snapshot.multisig.admins.len(), 2);
-=======
+}
+
 // ── Feature: per-asset interest rate models ──────────────────────────────────
 
 #[test]
@@ -231,7 +226,7 @@ fn per_asset_interest_rate_model_overrides_protocol_default() {
         optimal_utilization: 800_000_000,
     };
 
-    let mut protocol = LendingProtocol::new("admin", "treasury", default_model);
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", default_model);
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -283,7 +278,7 @@ fn clearing_per_asset_model_reverts_to_protocol_default() {
         optimal_utilization: 800_000_000,
     };
 
-    let mut protocol = LendingProtocol::new("admin", "treasury", default_model.clone());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", default_model.clone());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -303,7 +298,7 @@ fn clearing_per_asset_model_reverts_to_protocol_default() {
 
 #[test]
 fn non_admin_cannot_set_asset_interest_rate_model() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -318,7 +313,7 @@ fn non_admin_cannot_set_asset_interest_rate_model() {
 
 #[test]
 fn deposit_is_rejected_when_supply_cap_is_reached() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -336,7 +331,7 @@ fn deposit_is_rejected_when_supply_cap_is_reached() {
 
 #[test]
 fn deposit_succeeds_when_supply_cap_is_zero_uncapped() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -350,7 +345,7 @@ fn deposit_succeeds_when_supply_cap_is_zero_uncapped() {
 
 #[test]
 fn non_admin_cannot_set_supply_cap() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -365,7 +360,7 @@ fn non_admin_cannot_set_supply_cap() {
 
 #[test]
 fn borrow_is_rejected_when_borrow_cap_is_reached() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -399,7 +394,7 @@ fn borrow_is_rejected_when_borrow_cap_is_reached() {
 
 #[test]
 fn borrow_succeeds_when_borrow_cap_is_zero_uncapped() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("XLM", 8_000), 0)
         .unwrap();
@@ -425,7 +420,7 @@ fn borrow_succeeds_when_borrow_cap_is_zero_uncapped() {
 
 #[test]
 fn non_admin_cannot_set_borrow_cap() {
-    let mut protocol = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     protocol
         .register_asset("admin", reserve("USDC", 9_000), 0)
         .unwrap();
@@ -454,7 +449,7 @@ fn reserve_factor_update_changes_protocol_fee_accrual() {
     let fees_low_rf = protocol.reserve_state("USDC").unwrap().protocol_fees;
 
     // Reset state by creating a fresh protocol with a 50 % reserve factor.
-    let mut protocol2 = LendingProtocol::new("admin", "treasury", InterestRateModel::default());
+    let mut protocol2 = LendingProtocol::new(vec!["admin".to_string()], 1, "treasury", InterestRateModel::default());
     let mut cfg = reserve("USDC", 9_000);
     cfg.reserve_factor_bps = 5_000; // 50 %
     protocol2.register_asset("admin", cfg, 0).unwrap();
@@ -517,7 +512,6 @@ fn non_admin_cannot_set_reserve_factor() {
         .set_reserve_factor("alice", "USDC", 2_000)
         .unwrap_err();
     assert_eq!(err, ProtocolError::Unauthorized);
->>>>>>> main
 }
 
 // ── Feature: emergency pause ──────────────────────────────────────────────────

@@ -67,6 +67,35 @@ cargo tarpaulin --out Html
 
 # Run integration tests
 cargo test --test integration_tests
+
+# Run the gas/compute-cost benchmark suite (see docs/gas_benchmarks.md)
+cargo bench --bench lending_benchmarks
+```
+
+### Continuous Integration
+
+Every push and pull request against `main` runs `.github/workflows/ci.yml`,
+which gates merges on:
+
+- **`test`** — `cargo test --all-targets` across a matrix of Rust versions
+  (MSRV, stable, beta).
+- **`clippy`** — `cargo clippy --all-targets --all-features -- -D warnings`;
+  any lint fails the build.
+- **`coverage`** — `cargo tarpaulin` with a minimum **80%** line-coverage
+  gate; the HTML/XML report is uploaded as a workflow artifact.
+- **`security-audit`** — `cargo audit` against the advisory database.
+- **`gas-benchmarks`** — runs `benches/lending_benchmarks.rs` in `--test`
+  mode as a correctness smoke test on every PR (it does not itself fail on a
+  performance regression — see `docs/gas_benchmarks.md` for how to compare
+  a branch against a baseline before merging).
+
+Run the same checks locally before opening a PR:
+
+```bash
+cargo fmt && cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets
+cargo tarpaulin --fail-under 80
+cargo audit
 ```
 
 ### Documentation
