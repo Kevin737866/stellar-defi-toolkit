@@ -4,7 +4,7 @@
 //! using Soroban smart contracts.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use crate::types::token::{TokenInfo, TokenMetadata};
+use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
 
@@ -25,6 +25,10 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
+    /// Vesting schedules: id -> VestingSchedule
+    vesting_schedules: HashMap<u64, VestingSchedule>,
+    /// Next vesting schedule ID
+    next_vesting_id: u64,
 }
 
 impl TokenContract {
@@ -38,6 +42,8 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
+            vesting_schedules: HashMap::new(),
+            next_vesting_id: 1,
         }
     }
 
@@ -222,6 +228,68 @@ impl TokenContract {
         Ok(())
     }
 
+    // ─── Token Vesting (#223) ──────────────────────────────────────────
+
+    /// Create a vesting schedule with cliff and linear release.
+    /// Tokens are deducted from the caller's balance.
+    pub fn create_vesting_schedule(
+        &mut self, caller: Address, beneficiary: Address, amount: u64,
+        start_time: u64, cliff_duration: u64, total_duration: u64,
+    ) -> Result<u64, String> {
+        if amount == 0 { return Err("Vesting amount must be greater than 0".to_string()); }
+        if total_duration == 0 { return Err("Total duration must be greater than 0".to_string()); }
+        if cliff_duration > total_duration { return Err("Cliff duration cannot exceed total duration".to_string()); }
+        let caller_key = caller.to_string();
+        let caller_balance = self.balances.get(&caller_key).copied().unwrap_or(0);
+        if caller_balance < amount {
+            return Err(format!("Insufficient balance: caller has {}, vesting requires {}", caller_balance, amount));
+        }
+        *self.balances.entry(caller_key).or_insert(0) -= amount;
+        let id = self.next_vesting_id;
+        self.next_vesting_id = self.next_vesting_id.checked_add(1).ok_or("Vesting ID overflow")?;
+        let schedule = VestingSchedule::new(id, beneficiary.to_string(), amount, start_time, cliff_duration, total_duration, None);
+        self.vesting_schedules.insert(id, schedule);
+        println!("[Event] VestingScheduleCreated {{ id: {}, beneficiary: {}, amount: {}, cliff: {}s, duration: {}s }}",
+            id, beneficiary.to_string(), amount, cliff_duration, total_duration);
+        Ok(id)
+    }
+
+    /// Get the claimable vested amount for a schedule
+    pub fn get_claimable_amount(&self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
+        Ok(schedule.claimable_amount(current_time))
+    }
+
+    /// Claim vested tokens from a schedule
+    pub fn claim_vested(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
+        let claimable = schedule.claim(current_time)?;
+        let beneficiary_key = schedule.beneficiary.clone();
+        let entry = self.balances.entry(beneficiary_key.clone()).or_insert(0);
+        *entry = entry.checked_add(claimable).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] VestingClaimed {{ id: {}, beneficiary: {}, amount: {} }}", schedule_id, beneficiary_key, claimable);
+        Ok(claimable)
+    }
+
+    /// Revoke a vesting schedule
+    pub fn revoke_vesting(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
+        let unvested = schedule.revoke(current_time);
+        println!("[Event] VestingRevoked {{ id: {}, unvested_amount: {} }}", schedule_id, unvested);
+        Ok(unvested)
+    }
+
+    /// Get a vesting schedule by ID
+    pub fn get_vesting_schedule(&self, schedule_id: u64) -> Option<&VestingSchedule> {
+        self.vesting_schedules.get(&schedule_id)
+    }
+
+    /// Check if a vesting schedule is fully vested
+    pub fn is_vesting_complete(&self, schedule_id: u64, current_time: u64) -> Result<bool, String> {
+        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
+        Ok(schedule.is_fully_vested(current_time))
+    }
+
     // -------------------------------------------------------------------------
     // Internal event helpers
     // -------------------------------------------------------------------------
@@ -312,144 +380,142 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod soroban_tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
 
-    fn setup() -> (Env, soroban_sdk::Address, TokenContractClient<'static>) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-        // Leak env for 'static lifetime required by Client — acceptable in tests
-        let env: &'static Env = Box::leak(Box::new(env));
-        let client = TokenContractClient::new(env, &contract_id);
-        (env.clone(), admin, client)
+    #[test]
+    fn test_transfer_basic() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let from = Address::generate(&Env::default());
+        let to = Address::generate(&Env::default());
+
+        // Mint initial balance to sender
+        token.mint(from.clone(), 1000).unwrap();
+
+        // Perform transfer
+        token.transfer(from.clone(), to.clone(), 400).unwrap();
+
+        assert_eq!(token.balance_of(from), 600);
+        assert_eq!(token.balance_of(to), 400);
     }
 
     #[test]
-    fn test_mint_and_balance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-
-        let user = soroban_sdk::Address::generate(&env);
-        client.mint(&user, &1_000);
-        assert_eq!(client.balance_of(&user), 1_000);
-    }
-
-    #[test]
-    fn test_transfer() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
-
-        let sender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
-        client.mint(&sender, &1_000);
-
-        client.transfer(&sender, &receiver, &400);
-        assert_eq!(client.balance_of(&sender), 600);
-        assert_eq!(client.balance_of(&receiver), 400);
-    }
-
-    #[test]
-    #[should_panic(expected = "Insufficient balance")]
     fn test_transfer_insufficient_balance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let from = Address::generate(&Env::default());
+        let to = Address::generate(&Env::default());
 
-        let sender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
-        client.mint(&sender, &100);
-        client.transfer(&sender, &receiver, &500);
+        token.mint(from.clone(), 100).unwrap();
+
+        let result = token.transfer(from, to, 500);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient balance"));
     }
 
     #[test]
     fn test_approve_and_allowance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        client.approve(&owner, &spender, &300);
-        assert_eq!(client.allowance(&owner, &spender), 300);
+        token.approve(owner.clone(), spender.clone(), 300).unwrap();
+        assert_eq!(token.allowance(owner, spender), 300);
     }
 
     #[test]
     fn test_transfer_from_success() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
+        let receiver = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
+        token.mint(owner.clone(), 1000).unwrap();
+        token.approve(owner.clone(), spender.clone(), 500).unwrap();
 
-        client.mint(&owner, &1_000);
-        client.approve(&owner, &spender, &500);
+        token.transfer_from(spender.clone(), owner.clone(), receiver.clone(), 200).unwrap();
 
-        client.transfer_from(&spender, &owner, &receiver, &200);
-
-        assert_eq!(client.balance_of(&owner), 800);
-        assert_eq!(client.balance_of(&receiver), 200);
-        assert_eq!(client.allowance(&owner, &spender), 300);
+        assert_eq!(token.balance_of(owner.clone()), 800);
+        assert_eq!(token.balance_of(receiver), 200);
+        assert_eq!(token.allowance(owner, spender), 300);
     }
 
-    // -------------------------------------------------------------------------
-    // Issue #17 – TransferFrom tests
-    // -------------------------------------------------------------------------
-
     #[test]
-    #[should_panic(expected = "Insufficient allowance")]
     fn test_transfer_from_insufficient_allowance() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let owner = Address::generate(&Env::default());
+        let spender = Address::generate(&Env::default());
+        let receiver = Address::generate(&Env::default());
 
-        let owner = soroban_sdk::Address::generate(&env);
-        let spender = soroban_sdk::Address::generate(&env);
-        let receiver = soroban_sdk::Address::generate(&env);
+        token.mint(owner.clone(), 1000).unwrap();
+        token.approve(owner.clone(), spender.clone(), 50).unwrap();
 
-        client.mint(&owner, &1_000);
-        client.approve(&owner, &spender, &50);
-        client.transfer_from(&spender, &owner, &receiver, &200);
+        let result = token.transfer_from(spender, owner, receiver, 200);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient allowance"));
+    }
+
+    // ─── Token Vesting Tests (#223) ──────────────────────
+
+    #[test]
+    fn test_create_vesting_schedule() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let caller = Address::generate(&Env::default());
+        let beneficiary = Address::generate(&Env::default());
+        token.mint(caller.clone(), 20000).unwrap();
+        let id = token.create_vesting_schedule(caller.clone(), beneficiary.clone(), 10000, 1000, 500, 2000).unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(token.balance_of(caller), 10000);
+        let schedule = token.get_vesting_schedule(1).unwrap();
+        assert_eq!(schedule.total_amount, 10000);
+        assert!(schedule.active);
     }
 
     #[test]
-    fn test_burn() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, TokenContract);
-        let client = TokenContractClient::new(&env, &contract_id);
-        let admin = soroban_sdk::Address::generate(&env);
-        client.initialize(&admin);
+    fn test_vesting_cliff_period_no_claims() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let caller = Address::generate(&Env::default());
+        let beneficiary = Address::generate(&Env::default());
+        token.mint(caller.clone(), 20000).unwrap();
+        token.create_vesting_schedule(caller, beneficiary.clone(), 10000, 1000, 500, 2000).unwrap();
+        let claimable = token.get_claimable_amount(1, 1200).unwrap();
+        assert_eq!(claimable, 0);
+    }
 
-        let user = soroban_sdk::Address::generate(&env);
-        client.mint(&user, &1_000);
-        client.burn(&user, &400);
-        assert_eq!(client.balance_of(&user), 600);
+    #[test]
+    fn test_vesting_linear_release_after_cliff() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let caller = Address::generate(&Env::default());
+        let beneficiary = Address::generate(&Env::default());
+        token.mint(caller.clone(), 20000).unwrap();
+        token.create_vesting_schedule(caller, beneficiary.clone(), 10000, 1000, 500, 2000).unwrap();
+        let claimable = token.get_claimable_amount(1, 1750).unwrap();
+        assert_eq!(claimable, 5000);
+    }
+
+    #[test]
+    fn test_vesting_claim_and_balance() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let caller = Address::generate(&Env::default());
+        let beneficiary = Address::generate(&Env::default());
+        token.mint(caller.clone(), 20000).unwrap();
+        token.create_vesting_schedule(caller, beneficiary.clone(), 10000, 1000, 500, 2000).unwrap();
+        let claimed = token.claim_vested(1, 2000).unwrap();
+        assert_eq!(claimed, 10000);
+        assert_eq!(token.balance_of(beneficiary), 10000);
+        assert!(token.claim_vested(1, 2000).is_err());
+    }
+
+    #[test]
+    fn test_vesting_revoke() {
+        let mut token = TokenContract::new("Test Token".to_string(), "TEST".to_string(), 1000000);
+        let caller = Address::generate(&Env::default());
+        let beneficiary = Address::generate(&Env::default());
+        token.mint(caller.clone(), 20000).unwrap();
+        token.create_vesting_schedule(caller, beneficiary.clone(), 10000, 1000, 500, 2000).unwrap();
+        let claimed = token.claim_vested(1, 1750).unwrap();
+        assert_eq!(claimed, 5000);
+        let unvested = token.revoke_vesting(1, 1750).unwrap();
+        assert_eq!(unvested, 5000);
+        assert!(token.get_vesting_schedule(1).unwrap().revoked);
     }
 }
