@@ -1,4 +1,11 @@
 //! LP token storage tracking user balances in the liquidity pool (issue #23)
+//!
+//! ## Access Control
+//! - **`mint`** has **no auth check at all** — any caller can mint unlimited LP
+//!   tokens to any address. This should be restricted to the owning pool contract.
+//!   See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **User**: `burn` — enforced via `from.require_auth()`.
+//! - **User**: read-only (`balance`, `total_supply`).
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 

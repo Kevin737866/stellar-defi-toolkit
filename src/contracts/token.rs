@@ -2,9 +2,17 @@
 //!
 //! Provides ERC-20-like token functionality on the Stellar blockchain
 //! using Soroban smart contracts.
+//!
+//! ## Access Control
+//! This is a plain in-memory Rust struct, not a deployed Soroban `#[contract]` — there
+//! is no `Env`/`require_auth` capability in this file at all, so `mint`, `burn`,
+//! `transfer`, `approve`, and `transfer_from` have **no access control whatsoever**;
+//! any caller can act on behalf of any address. See `docs/ACCESS_CONTROL_MATRIX.md`
+//! for the full breakdown and the deployable, correctly-authenticated alternative in
+//! `soroban_token_contract.rs`.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use crate::types::token::{TokenInfo, TokenMetadata};
+use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
 
@@ -25,6 +33,10 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
+    /// Vesting schedules: id -> VestingSchedule
+    vesting_schedules: HashMap<u64, VestingSchedule>,
+    /// Next vesting schedule ID
+    next_vesting_id: u64,
 }
 
 impl TokenContract {
@@ -38,6 +50,8 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
+            vesting_schedules: HashMap::new(),
+            next_vesting_id: 1,
         }
     }
 

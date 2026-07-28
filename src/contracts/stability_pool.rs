@@ -10,6 +10,15 @@
 //! - Reward distribution from liquidation gains
 //! - Early withdrawal penalties
 //! - Governance-controlled parameters
+//!
+//! ## Access Control
+//! - **Admin**: `update_params`, `pause`, `unpause`, `update_treasury` — gated by a
+//!   broken `require_admin()` (compares the contract's own address, not the caller).
+//!   See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `process_liquidation` — intended for the lending/vault contract, but
+//!   has no auth check at all.
+//! - **User**: `deposit`, `withdraw`, `claim_rewards` — none call `require_auth()` on
+//!   the `depositor` address; any caller can withdraw/claim on behalf of any depositor.
 
 use crate::types::stablecoin::{
     LiquidationEvent, StabilityPoolDepositEvent, StabilityPoolInfo, StabilityPoolWithdrawalEvent,

@@ -1,6 +1,12 @@
 //! Staking Contract
 //!
 //! Implements staking with lock-up periods and different APY tiers.
+//!
+//! ## Access Control
+//! One of the few contracts in this codebase with fully correct enforcement — see
+//! `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Admin**: `set_tier` — enforced via `admin.require_auth()`.
+//! - **User**: `stake`, `withdraw` — enforced via `user.require_auth()`.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, Symbol};
 
