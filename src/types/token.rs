@@ -114,6 +114,110 @@ pub struct TokenBurn {
     pub timestamp: u64,
 }
 
+/// Token vesting schedule with cliff and linear release
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VestingSchedule {
+    /// Unique schedule identifier
+    pub id: u64,
+    /// Beneficiary address who receives the tokens
+    pub beneficiary: String,
+    /// Total amount of tokens to be vested
+    pub total_amount: u64,
+    /// Amount already claimed
+    pub claimed_amount: u64,
+    /// Unix timestamp when vesting starts
+    pub start_time: u64,
+    /// Duration of the cliff period in seconds (no tokens released)
+    pub cliff_duration: u64,
+    /// Total vesting duration in seconds (after cliff, linear release)
+    pub total_duration: u64,
+    /// Whether the schedule is active
+    pub active: bool,
+    /// Whether the schedule has been revoked
+    pub revoked: bool,
+    /// Admin who created the schedule
+    pub created_by: Option<String>,
+}
+
+impl VestingSchedule {
+    /// Create a new vesting schedule
+    pub fn new(
+        id: u64,
+        beneficiary: String,
+        total_amount: u64,
+        start_time: u64,
+        cliff_duration: u64,
+        total_duration: u64,
+        created_by: Option<String>,
+    ) -> Self {
+        assert!(total_duration > 0, "Total duration must be greater than 0");
+        assert!(cliff_duration <= total_duration, "Cliff duration cannot exceed total duration");
+        
+        Self {
+            id,
+            beneficiary,
+            total_amount,
+            claimed_amount: 0,
+            start_time,
+            cliff_duration,
+            total_duration,
+            active: true,
+            revoked: false,
+            created_by,
+        }
+    }
+
+    /// Calculate the claimable amount at a given timestamp
+    pub fn claimable_amount(&self, current_time: u64) -> u64 {
+        if !self.active || self.revoked {
+            return 0;
+        }
+
+        let elapsed = current_time.saturating_sub(self.start_time);
+
+        // Cliff period: no tokens released
+        if elapsed <= self.cliff_duration {
+            return 0;
+        }
+
+        // After total duration: all tokens are vested
+        if elapsed >= self.total_duration {
+            return self.total_amount.saturating_sub(self.claimed_amount);
+        }
+
+        // Linear release after cliff
+        let vesting_duration = self.total_duration - self.cliff_duration;
+        let elapsed_after_cliff = elapsed - self.cliff_duration;
+        
+        let vested = (self.total_amount as u128 * elapsed_after_cliff as u128 / vesting_duration as u128) as u64;
+        
+        vested.saturating_sub(self.claimed_amount)
+    }
+
+    /// Check if the schedule is fully vested
+    pub fn is_fully_vested(&self, current_time: u64) -> bool {
+        current_time >= self.start_time + self.total_duration
+    }
+
+    /// Mark tokens as claimed
+    pub fn claim(&mut self, current_time: u64) -> Result<u64, String> {
+        let amount = self.claimable_amount(current_time);
+        if amount == 0 {
+            return Err("No tokens available to claim".to_string());
+        }
+        self.claimed_amount = self.claimed_amount.saturating_add(amount);
+        Ok(amount)
+    }
+
+    /// Revoke the schedule (returns unvested tokens)
+    pub fn revoke(&mut self, current_time: u64) -> u64 {
+        self.revoked = true;
+        self.active = false;
+        let vested = self.total_amount.saturating_sub(self.claimed_amount);
+        vested
+    }
+}
+
 impl Default for TokenMetadata {
     fn default() -> Self {
         Self {

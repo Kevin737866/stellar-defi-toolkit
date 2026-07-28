@@ -15,6 +15,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Token contract implementing standard token functionality
 #[contract]
@@ -33,10 +34,12 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
-    /// Vesting schedules: id -> VestingSchedule
-    vesting_schedules: HashMap<u64, VestingSchedule>,
-    /// Next vesting schedule ID
-    next_vesting_id: u64,
+    /// Admin address for admin-only operations
+    admin: Option<String>,
+    /// Recovery requests: (original_owner, tx_hash) -> (amount, request_time)
+    recovery_requests: HashMap<String, (u64, u64)>,
+    /// Recovery delay in seconds
+    recovery_delay: u64,
 }
 
 impl TokenContract {
@@ -50,8 +53,9 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
-            vesting_schedules: HashMap::new(),
-            next_vesting_id: 1,
+            admin: None,
+            recovery_requests: HashMap::new(),
+            recovery_delay: 86400,
         }
     }
 
