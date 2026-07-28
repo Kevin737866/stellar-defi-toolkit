@@ -1,4 +1,13 @@
 //! Pausable transfer mechanism for emergency token lockdown (issue #22)
+//!
+//! ## Access Control
+//! One of the few contracts in this codebase with fully correct enforcement — see
+//! `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Admin**: `pause`, `unpause` — enforced via `require_auth()` plus a stored-admin
+//!   equality check.
+//! - **User**: `transfer` — enforced via `from.require_auth()`.
+//! - Caveat: `initialize` has no re-initialization guard, so it can be called more
+//!   than once to reset the admin/paused state.
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 

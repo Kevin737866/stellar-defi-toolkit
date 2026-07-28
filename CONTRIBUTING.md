@@ -206,6 +206,53 @@ pub async fn deploy(&self, client: &StellarClient) -> Result<String> {
 - Include usage examples
 - Add new features to the features list
 
+## 🔐 Access Control & Permission Documentation
+
+Every contract in `src/contracts/` is documented in
+[`docs/ACCESS_CONTROL_MATRIX.md`](docs/ACCESS_CONTROL_MATRIX.md), which maps
+**Contract × Role × Action** for the whole protocol. The four roles are:
+
+- **Admin** — a single privileged address managing parameters, pausing, and
+  emergency actions for a contract.
+- **Governance** — token-weighted voting participants (proposers, voters, executors).
+- **Keeper** — a permissionless or semi-permissionless automated caller (bot, oracle
+  feeder, liquidator, arbitrageur).
+- **User** — any account interacting with the protocol on its own behalf.
+
+If your change adds, removes, or changes who can call a function:
+
+1. **Update `docs/ACCESS_CONTROL_MATRIX.md`** — add/edit the row for that function in
+   the relevant contract's table, and update the role capability rollup sections if
+   the change is significant.
+2. **Add or update the module-level `## Access Control` doc comment** at the top of
+   the contract file (see any file in `src/contracts/` for the established format —
+   e.g. `staking.rs` or `stability_pool.rs`). This keeps a short, accurate summary next
+   to the code, while the matrix stays the canonical, cross-contract reference.
+3. **State enforcement, not just intent.** Document what the code actually does
+   (e.g. "no `require_auth()` call" or "gated by a broken admin check"), not just what
+   the function name or a stale comment implies. The matrix is only useful if it
+   reflects reality — inaccurate access-control docs are worse than none.
+4. If your change *fixes* a broken or missing auth check, update the corresponding
+   row(s) and the [Enforcement Gap Appendix](docs/ACCESS_CONTROL_MATRIX.md#appendix-enforcement-gaps-found-during-this-audit)
+   to mark the finding resolved.
+
+## 🛡️ Security
+
+Before opening a PR that touches fund-handling logic (minting, burning, transfers,
+collateral, liquidations, oracle prices, or governance execution), review
+[`docs/SECURITY_AUDIT_CHECKLIST.md`](docs/SECURITY_AUDIT_CHECKLIST.md) and the threat
+model it contains. At minimum:
+
+- Walk through the reentrancy, overflow, oracle-manipulation, governance-attack, and
+  flash-loan-attack checklist items relevant to your change.
+- Call out any new external calls, price dependencies, or privileged operations in
+  your PR description.
+- If your change touches an access-control check, cross-reference
+  `docs/ACCESS_CONTROL_MATRIX.md` (see previous section).
+
+To report a security vulnerability, follow the process in
+[`.github/SECURITY.md`](.github/SECURITY.md) rather than opening a public issue.
+
 ## 🔄 Pull Request Process
 
 1. **Create Pull Request**

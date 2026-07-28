@@ -1,4 +1,13 @@
 //! Soroban SDK token contract implementation (issue #20)
+//!
+//! ## Access Control
+//! One of the few contracts in this codebase with fully correct enforcement — see
+//! `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Admin**: `mint` — enforced via `admin.require_auth()` plus a stored-admin
+//!   equality check.
+//! - **User**: `transfer` — enforced via `from.require_auth()`.
+//! - Caveat: `initialize` has no re-initialization guard, so it can be called more
+//!   than once to reset admin/supply state.
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
