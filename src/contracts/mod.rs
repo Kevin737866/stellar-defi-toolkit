@@ -25,4 +25,4 @@ pub use asset_registry::AssetRegistryContract;
 pub use lending::LendingProtocol;
 pub use multi_asset_oracle::MultiAssetOracleContract;
 pub use oracle::{PriceOracle, PriceOracleSim};
-pub use price_feed_adapters::PriceFeedAdaptersContract;
+pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter};
