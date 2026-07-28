@@ -309,14 +309,40 @@ cargo run --example token_deployment
 cargo run --example liquidity_pool
 ```
 
+## 🚢 Deployment
+
+Deploying the contracts to Stellar testnet or mainnet has one prerequisite the
+guide covers up front: the crate is not yet structured as a set of deployable
+Soroban `cdylib` contracts, and a couple of modules (`vault`, `lending`) are not
+wired as on-chain contracts at all. See
+[docs/deployment_guide.md](docs/deployment_guide.md) for what that means and
+how to fix it, followed by the full testnet/mainnet walkthrough.
+
+```bash
+./scripts/build.sh                          # build every contract crate to wasm32
+./scripts/deploy.sh --network testnet        # deploy + initialize in dependency order
+./scripts/verify.sh --network testnet        # existence, hash, admin, pause-state checks
+```
+
+Mainnet deployment requires `--confirm` and a reviewed dry-run plan — see
+[docs/deployment_guide.md §4](docs/deployment_guide.md#4-mainnet-deployment) for
+the security considerations (multisig admin, audit-before-deploy, conservative
+initial caps) before running it for real.
+
+Post-deployment parameter or code changes go through
+[docs/upgrade_governance_process.md](docs/upgrade_governance_process.md), not
+through re-running the deploy scripts.
+
 ## 📚 Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md) - Component diagram, interaction flows, economic model, risk parameters
-- [Access Control Matrix](docs/ACCESS_CONTROL_MATRIX.md) - Contract x Role x Action permission reference
-- [Security Audit Checklist & Threat Model](docs/SECURITY_AUDIT_CHECKLIST.md) - Attack surface inventory and pre-audit checklist
+- [Deployment Guide](docs/deployment_guide.md) - Testnet/mainnet deployment, prerequisites, verification, rollback
+- [Economic Risk Analysis](docs/economic_risk_analysis.md) - Cross-module capital efficiency, liquidation, and systemic risk
 - [Circuit Breaker Guide](docs/circuit_breaker_guide.md) - Price volatility protection
 - [Risk Management Framework](docs/synthetic_protocol_risk_management.md) - Comprehensive risk controls
-- [Stablecoin Economic Model](docs/stablecoin_economic_model.md) - Peg mechanism and parameters
+- [Stablecoin Economic Model](docs/stablecoin_economic_model.md) - Collateral, fees, and peg mechanics
+- [Emergency Response Runbook](docs/emergency_response_runbook.md) - Exploit, oracle failure, and crash response
+- [Upgrade Governance Process](docs/upgrade_governance_process.md) - Proposal, review, voting, timelock, execution
+- [Governance Reference](governance/README.md) - Voting contracts, timelock crate, multisig paths
 - [Soroban Documentation](https://soroban.stellar.org/)
 - [Stellar Documentation](https://developers.stellar.org/)
 - [API Reference](https://docs.rs/stellar-defi-toolkit/)
