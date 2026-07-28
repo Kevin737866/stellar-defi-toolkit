@@ -10,6 +10,14 @@
 //! - Sliding scale rewards based on deviation severity
 //! - Anti-manipulation mechanisms
 //! - Performance tracking for arbitrageurs
+//!
+//! ## Access Control
+//! - **Admin**: `update_params`, `pause`, `unpause` — gated by `require_admin()`, which
+//!   is currently broken (compares the contract's own address, not the caller). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `detect_opportunity` (intended for bots/oracles), `execute_arbitrage`,
+//!   `report_failed_arbitrage` — open to any caller, no auth check on the acting address.
+//! - **User**: none beyond acting as a Keeper (any address may execute an opportunity).
 
 use crate::types::stablecoin::{AlertSeverity, ArbitrageOpportunity, OraclePrice, SystemStats};
 use soroban_sdk::{

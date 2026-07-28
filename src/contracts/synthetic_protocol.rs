@@ -11,6 +11,15 @@
 //! - Fee distribution to stakers
 //! - Governance for asset listing
 //! - Comprehensive risk management
+//!
+//! ## Access Control
+//! - **Admin**: `list_asset`, `pause`, `unpause`, `update_risk_params` — gated by a
+//!   broken `require_admin()` (compares the contract's own address, not the caller).
+//!   See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `liquidate_position`, `update_oracle_price` — no auth check;
+//!   `update_oracle_price` only checks whitelist membership, not caller identity.
+//! - **User**: `mint_synthetic`, `burn_synthetic`, `stake`, `unstake` — none call
+//!   `require_auth()` on the acting `user` address.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{

@@ -5,8 +5,9 @@ use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, 
 
 use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
-    AccountPosition, FlashLoanReceipt, InterestRateModel, LiquidationResult, PositionSnapshot,
-    ProtocolError, ProtocolEvent, ProtocolSnapshot, ReserveConfig, ReserveState,
+    AccountPosition, AdminAction, AdminProposal, AdminProposalStatus, FlashLoanReceipt,
+    InterestRateModel, LiquidationResult, MultiSigConfig, PositionSnapshot, ProtocolError,
+    ProtocolEvent, ProtocolSnapshot, ReserveConfig, ReserveState,
 };
 use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 
@@ -21,6 +22,22 @@ use crate::utils::{bps_mul, mul_div, wad_div, WAD, YEAR_IN_SECONDS};
 ///   emergency.
 /// - **Event log**: every state-changing action appends a `ProtocolEvent` to
 ///   `events`.  Callers can drain the log with `drain_events()`.
+///
+/// # Access Control
+/// This is a plain Rust struct simulation — no Soroban `require_auth` capability
+/// exists in this module. See `docs/ACCESS_CONTROL_MATRIX.md` for the full breakdown.
+/// - **Admin** (multisig `admins`/`threshold`): `pause`, `unpause`,
+///   `set_default_interest_rate_model`, `set_asset_interest_rate_model`,
+///   `set_supply_cap`, `set_borrow_cap`, `set_reserve_factor` call `ensure_admin()`,
+///   which is referenced but **never defined** anywhere in this codebase — a compile
+///   blocker, not just an access-control gap. `register_asset`,
+///   `update_reserve_config`, `set_close_factor`, `collect_protocol_fees` are gated
+///   by `threshold == 1`; with a multisig `threshold > 1` they route through
+///   `approve_admin_proposal`/`execute_admin_proposal`, but no `propose_*` function
+///   ever inserts into `proposals`, so that path is currently unreachable.
+/// - **Keeper**: `liquidate`, `flash_loan` — permissionless by design, no auth check.
+/// - **User**: `deposit`, `withdraw`, `borrow`, `repay`, `set_collateral_enabled` —
+///   caller identity is an unauthenticated `&str` parameter.
 #[derive(Debug, Clone)]
 pub struct LendingProtocol {
     multisig: MultiSigConfig,
@@ -87,7 +104,7 @@ impl LendingProtocol {
     /// `flash_loan` all return `ProtocolError::ProtocolPaused`.  Admin
     /// operations remain available.
     pub fn pause(&mut self, caller: &str) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.paused = true;
         self.emit(ProtocolEvent::Paused {
             admin: caller.to_string(),
@@ -97,7 +114,7 @@ impl LendingProtocol {
 
     /// Unpause the protocol (admin only).
     pub fn unpause(&mut self, caller: &str) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.paused = false;
         self.emit(ProtocolEvent::Unpaused {
             admin: caller.to_string(),
@@ -125,6 +142,37 @@ impl LendingProtocol {
     /// Returns the protocol-level default interest rate model.
     pub fn default_interest_rate_model(&self) -> &InterestRateModel {
         &self.default_interest_rate_model
+    }
+
+    /// Propose an admin action for multisig approval.  The proposer is
+    /// recorded as the first approval.
+    pub fn propose_admin_action(
+        &mut self,
+        caller: &str,
+        action: AdminAction,
+        now: u64,
+    ) -> Result<u64, ProtocolError> {
+        self.ensure_is_admin_member(caller)?;
+
+        let id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+
+        let mut approvals = std::collections::BTreeSet::new();
+        approvals.insert(caller.to_string());
+
+        self.proposals.insert(
+            id,
+            AdminProposal {
+                id,
+                action,
+                proposer: caller.to_string(),
+                approvals,
+                status: AdminProposalStatus::Pending,
+                created_at: now,
+            },
+        );
+
+        Ok(id)
     }
 
     pub fn approve_admin_proposal(&mut self, caller: &str, proposal_id: u64) -> Result<(), ProtocolError> {
@@ -254,7 +302,7 @@ impl LendingProtocol {
         caller: &str,
         model: InterestRateModel,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         self.default_interest_rate_model = model;
         Ok(())
     }
@@ -269,7 +317,7 @@ impl LendingProtocol {
         asset: &str,
         model: Option<InterestRateModel>,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -285,7 +333,7 @@ impl LendingProtocol {
         asset: &str,
         supply_cap: i128,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -301,7 +349,7 @@ impl LendingProtocol {
         asset: &str,
         borrow_cap: i128,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         let config = self
             .reserve_configs
             .get_mut(asset)
@@ -320,7 +368,7 @@ impl LendingProtocol {
         asset: &str,
         reserve_factor_bps: u32,
     ) -> Result<(), ProtocolError> {
-        self.ensure_admin(caller)?;
+        self.ensure_is_admin_member(caller)?;
         if reserve_factor_bps > 10_000 {
             return Err(ProtocolError::InvalidReserveFactor);
         }
@@ -1133,6 +1181,11 @@ impl LendingProtocol {
         } else {
             Err(ProtocolError::Unauthorized)
         }
+    }
+
+    /// Alias for `ensure_is_admin_member`, used by single-admin-oriented setters.
+    fn ensure_admin(&self, caller: &str) -> Result<(), ProtocolError> {
+        self.ensure_is_admin_member(caller)
     }
 
     fn ensure_not_paused(&self) -> Result<(), ProtocolError> {

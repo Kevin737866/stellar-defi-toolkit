@@ -1,5 +1,5 @@
 use crate::utils::StellarClient;
-use crate::api::types::{AccountStats, NetworkStats, AssetVolume};
+use crate::api::types::{AccountStats, NetworkStats, AssetVolume, Portfolio, PositionSummary, RiskSummary, YieldSummary};
 use anyhow::Result;
 use chrono::{Utc, Duration};
 
@@ -50,6 +50,76 @@ impl Aggregator {
             volume: format!("{:.2}", 50000.0 * multiplier),
             transaction_count: (1200.0 * multiplier) as i32,
             timeframe: timeframe.to_string(),
+        })
+    }
+
+    pub async fn aggregate_portfolio(&self, _address: &str) -> Result<Portfolio> {
+        let positions = vec![
+            PositionSummary {
+                module: "lending".to_string(),
+                asset: "USDC".to_string(),
+                amount: "5000.00".to_string(),
+                value_usd: "5000.00".to_string(),
+                apy: Some(5.2),
+            },
+            PositionSummary {
+                module: "staking".to_string(),
+                asset: "XLM".to_string(),
+                amount: "10000.00".to_string(),
+                value_usd: "12000.00".to_string(),
+                apy: Some(8.5),
+            },
+            PositionSummary {
+                module: "liquidity".to_string(),
+                asset: "XLM/USDC".to_string(),
+                amount: "2500.00".to_string(),
+                value_usd: "2600.00".to_string(),
+                apy: Some(12.3),
+            },
+            PositionSummary {
+                module: "vault".to_string(),
+                asset: "yXLM".to_string(),
+                amount: "3000.00".to_string(),
+                value_usd: "3100.00".to_string(),
+                apy: Some(6.7),
+            },
+            PositionSummary {
+                module: "synthetic".to_string(),
+                asset: "sBTC".to_string(),
+                amount: "0.50".to_string(),
+                value_usd: "15000.00".to_string(),
+                apy: None,
+            },
+        ];
+
+        let total: f64 = positions.iter().filter_map(|p| p.value_usd.parse::<f64>().ok()).sum();
+        let apy_values: Vec<f64> = positions.iter().filter_map(|p| p.apy).collect();
+        let avg_apy = if apy_values.is_empty() {
+            0.0
+        } else {
+            apy_values.iter().sum::<f64>() / apy_values.len() as f64
+        };
+
+        let net_worth_by_asset: Vec<f64> = positions.iter()
+            .filter_map(|p| p.value_usd.parse::<f64>().ok())
+            .collect();
+        let max_asset = net_worth_by_asset.iter().cloned().fold(0.0, f64::max);
+        let concentration = if total > 0.0 { max_asset / total } else { 0.0 };
+
+        Ok(Portfolio {
+            total_net_worth: format!("{:.2}", total),
+            positions,
+            risk_summary: RiskSummary {
+                health_factor: 1.8,
+                liquidation_risk: "low".to_string(),
+                concentration_risk: concentration,
+            },
+            yield_summary: YieldSummary {
+                earned_ytd: "1250.45".to_string(),
+                projected_annual: format!("{:.2}", total * avg_apy / 100.0),
+                average_apy: avg_apy,
+            },
+            last_updated: Utc::now(),
         })
     }
 
