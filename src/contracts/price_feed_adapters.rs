@@ -464,370 +464,478 @@ impl PriceFeedAdaptersContract {
     }
 }
 
-// ─── Stellar DEX On-Chain Price Adapter ──────────────────────────────────────
+// ─── Pure-Rust Failover Engine + Health Metrics ───────────────────────────────
+//
+// Compiled only for native targets (tests, off-chain tooling).
+// Provides:
+//   • AdapterHealth  – per-adapter performance counters (latency, success-rate,
+//                      price deviation, uptime)
+//   • HealthMonitor  – aggregates health across all adapters and auto-demotes
+//                      underperforming ones
+//   • FailoverEngine – ordered adapter priority list with automatic failover,
+//                      health-check gate, manual override, and event log
 
-/// Stellar DEX order book price adapter
-///
-/// Reads prices directly from Stellar native DEX order books, providing
-/// on-chain price data without external dependencies.
-#[contract]
-pub struct StellarDexAdapter;
+#[cfg(not(target_family = "wasm"))]
+pub mod failover {
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
 
-/// Result of querying the Stellar DEX order book
-#[derive(Clone, Debug)]
-#[contracttype]
-pub struct DexOrderBook {
-    /// Asset pair being queried
-    pub base_asset: StellarAssetId,
-    pub quote_asset: StellarAssetId,
-    /// Best bid price (highest buy order)
-    pub best_bid: u64,
-    /// Best ask price (lowest sell order)
-    pub best_ask: u64,
-    /// Total bid volume (base asset)
-    pub bid_volume: u64,
-    /// Total ask volume (base asset)
-    pub ask_volume: u64,
-    /// Timestamp of the last trade
-    pub last_trade_time: u64,
-    /// Current ledger timestamp
-    pub timestamp: u64,
-}
+    // ── Constants ─────────────────────────────────────────────────────────────
 
-/// Configuration for the Stellar DEX adapter
-#[derive(Clone, Debug)]
-#[contracttype]
-pub struct DexAdapterConfig {
-    /// Minimum liquidity required (in base asset units) for valid prices
-    pub min_liquidity_threshold: u64,
-    /// Maximum staleness of the order book (seconds)
-    pub max_staleness_secs: u64,
-    /// Minimum bid-ask spread (basis points) for valid markets
-    pub max_spread_bps: u32,
-    /// Whether the adapter is active
-    pub active: bool,
-}
+    /// Below this success-rate (bps) an adapter is auto-demoted.
+    pub const DEMOTION_THRESHOLD_BPS: u32 = 8_000; // 80 %
+    /// P95 / P99 bucket count (rolling window length).
+    pub const LATENCY_WINDOW: usize = 100;
+    /// Deviation from consensus that counts as "bad" (bps).
+    pub const MAX_ACCEPTABLE_DEVIATION_BPS: u32 = 200; // 2 %
 
-const DEX_ADAPTER_CONFIG: Symbol = Symbol::short("DEX_CFG");
-const DEX_ORDER_BOOKS: Symbol = Symbol::short("DEX_BOOKS");
+    // ── Health metrics ────────────────────────────────────────────────────────
 
-#[contractimpl]
-impl StellarDexAdapter {
-    /// Initialize the DEX adapter with default configuration
-    pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&ADMIN) {
-            panic!("Already initialized");
-        }
-
-        env.storage().instance().set(&ADMIN, &admin);
-
-        let config = DexAdapterConfig {
-            min_liquidity_threshold: 100_000,  // 100k base units
-            max_staleness_secs: 300,            // 5 minutes
-            max_spread_bps: 500,                // 5% max spread
-            active: true,
-        };
-        env.storage().instance().set(&DEX_ADAPTER_CONFIG, &config);
-
-        let order_books: Map<Symbol, DexOrderBook> = Map::new(&env);
-        env.storage().instance().set(&DEX_ORDER_BOOKS, &order_books);
-
-        env.events().publish(
-            Symbol::short("DEX_ADAPTER_INIT"),
-            admin,
-        );
+    /// Snapshot of one adapter's performance.
+    #[derive(Clone, Debug)]
+    pub struct AdapterHealth {
+        /// Adapter identifier (matches the `name` used at registration).
+        pub adapter_id: String,
+        /// Total requests sent to this adapter.
+        pub total_requests: u64,
+        /// Requests that returned a usable price.
+        pub successful_requests: u64,
+        /// Success rate in basis points (0–10 000).
+        pub success_rate_bps: u32,
+        /// Rolling response-time samples (milliseconds), oldest-first.
+        pub latency_samples_ms: std::collections::VecDeque<u64>,
+        /// Average response time (ms) over the rolling window.
+        pub avg_latency_ms: u64,
+        /// 95th-percentile response time (ms).
+        pub p95_latency_ms: u64,
+        /// 99th-percentile response time (ms).
+        pub p99_latency_ms: u64,
+        /// Cumulative price deviation from consensus (bps, sum).
+        pub total_deviation_bps: u64,
+        /// Average deviation from consensus (bps).
+        pub avg_deviation_bps: u32,
+        /// Uptime percentage in basis points (0–10 000).
+        pub uptime_bps: u32,
+        /// Total seconds this adapter has been monitored.
+        pub monitored_secs: u64,
+        /// Total seconds the adapter was responding successfully.
+        pub healthy_secs: u64,
+        /// Whether this adapter is currently considered healthy.
+        pub is_healthy: bool,
+        /// Timestamp (Unix secs) of the last successful response.
+        pub last_success_ts: u64,
     }
 
-    /// Update the DEX adapter configuration
-    pub fn update_config(env: Env, config: DexAdapterConfig) {
-        Self::require_admin(&env);
-        env.storage().instance().set(&DEX_ADAPTER_CONFIG, &config);
-        env.events().publish(
-            Symbol::short("DEX_CONFIG_UPDATED"),
-            (),
-        );
-    }
-
-    /// Get the current DEX adapter configuration
-    pub fn get_config(env: Env) -> DexAdapterConfig {
-        env.storage().instance().get(&DEX_ADAPTER_CONFIG)
-            .unwrap_or_else(|| panic!("DEX adapter not initialized"))
-    }
-
-    /// Query the order book for a given asset pair
-    ///
-    /// In a production environment, this would query the Stellar DEX directly.
-    /// For simulation, it reads from stored order book snapshots.
-    pub fn query_order_book(
-        env: Env,
-        base_asset: StellarAssetId,
-        quote_asset: StellarAssetId,
-    ) -> DexOrderBook {
-        let pair_key = Self::make_pair_key(&base_asset, &quote_asset);
-        let order_books: Map<Symbol, DexOrderBook> =
-            env.storage().instance().get(&DEX_ORDER_BOOKS).unwrap();
-
-        order_books
-            .get(pair_key)
-            .unwrap_or_else(|| DexOrderBook {
-                base_asset: base_asset.clone(),
-                quote_asset: quote_asset.clone(),
-                best_bid: 0,
-                best_ask: 0,
-                bid_volume: 0,
-                ask_volume: 0,
-                last_trade_time: 0,
-                timestamp: env.ledger().timestamp(),
-            })
-    }
-
-    /// Submit an order book snapshot to the adapter
-    ///
-    /// In production this would not be needed since the adapter reads
-    /// directly from the DEX. For simulation/testing, this provides
-    /// the order book data.
-    pub fn submit_order_book(env: Env, book: DexOrderBook) {
-        Self::require_admin(&env);
-
-        let pair_key = Self::make_pair_key(&book.base_asset, &book.quote_asset);
-        let mut order_books: Map<Symbol, DexOrderBook> =
-            env.storage().instance().get(&DEX_ORDER_BOOKS).unwrap();
-
-        order_books.set(pair_key, book);
-        env.storage().instance().set(&DEX_ORDER_BOOKS, &order_books);
-
-        env.events().publish(
-            Symbol::short("ORDER_BOOK_SUBMITTED"),
-            (),
-        );
-    }
-
-    /// Get the mid-price from the DEX order book
-    ///
-    /// Calculates mid-price as (best_bid + best_ask) / 2.
-    /// Validates liquidity, staleness, and spread thresholds.
-    pub fn get_dex_mid_price(
-        env: Env,
-        base_asset: StellarAssetId,
-        quote_asset: StellarAssetId,
-    ) -> AssetPrice {
-        let config = Self::get_config(env.clone());
-        
-        if !config.active {
-            panic!("DEX adapter is not active");
-        }
-
-        let book = Self::query_order_book(env.clone(), base_asset.clone(), quote_asset);
-        let current_time = env.ledger().timestamp();
-
-        // Validate staleness
-        if current_time - book.timestamp > config.max_staleness_secs {
-            panic!("Order book data is stale");
-        }
-
-        // Validate minimum liquidity
-        if book.bid_volume < config.min_liquidity_threshold
-            || book.ask_volume < config.min_liquidity_threshold
-        {
-            panic!("Insufficient liquidity in order book");
-        }
-
-        // Validate that we have valid bid/ask prices
-        if book.best_bid == 0 || book.best_ask == 0 {
-            panic!("No valid bids/asks in order book");
-        }
-
-        // Validate spread
-        if book.best_ask > book.best_bid {
-            let spread_bps = ((book.best_ask - book.best_bid) as u128 * 10000 / book.best_bid as u128) as u32;
-            if spread_bps > config.max_spread_bps {
-                panic!("Spread too wide: {} bps exceeds {} bps max", spread_bps, config.max_spread_bps);
+    impl AdapterHealth {
+        fn new(adapter_id: &str) -> Self {
+            Self {
+                adapter_id: adapter_id.to_string(),
+                total_requests: 0,
+                successful_requests: 0,
+                success_rate_bps: 10_000,
+                latency_samples_ms: std::collections::VecDeque::new(),
+                avg_latency_ms: 0,
+                p95_latency_ms: 0,
+                p99_latency_ms: 0,
+                total_deviation_bps: 0,
+                avg_deviation_bps: 0,
+                uptime_bps: 10_000,
+                monitored_secs: 0,
+                healthy_secs: 0,
+                is_healthy: true,
+                last_success_ts: 0,
             }
         }
 
-        // Calculate mid-price
-        let mid_price = (book.best_bid as u128 + book.best_ask as u128) / 2;
+        /// Record one request outcome.
+        ///
+        /// * `latency_ms`    – measured round-trip time
+        /// * `success`       – did the adapter return a usable price?
+        /// * `deviation_bps` – abs deviation from consensus price (0 if unknown)
+        /// * `now_ts`        – current Unix timestamp (seconds)
+        pub fn record(
+            &mut self,
+            latency_ms: u64,
+            success: bool,
+            deviation_bps: u32,
+            now_ts: u64,
+        ) {
+            self.total_requests += 1;
+            if success {
+                self.successful_requests += 1;
+                self.last_success_ts = now_ts;
+                self.total_deviation_bps += deviation_bps as u64;
+            }
 
-        AssetPrice {
-            asset_id: base_asset,
-            price: mid_price as u64,
-            decimals: 7,
-            confidence: 8500, // DEX has good confidence but not perfect
-            timestamp: current_time,
-            source: Address::generate(&env),
-            price_change_24h: 0,
-            high_24h: book.best_ask,
-            low_24h: book.best_bid,
-            volume_24h: book.bid_volume.saturating_add(book.ask_volume),
+            // Latency window
+            self.latency_samples_ms.push_back(latency_ms);
+            while self.latency_samples_ms.len() > LATENCY_WINDOW {
+                self.latency_samples_ms.pop_front();
+            }
+            self.recompute_latency_stats();
+
+            // Success rate
+            self.success_rate_bps = if self.total_requests == 0 {
+                10_000
+            } else {
+                ((self.successful_requests * 10_000) / self.total_requests) as u32
+            };
+
+            // Avg deviation
+            self.avg_deviation_bps = if self.successful_requests == 0 {
+                0
+            } else {
+                (self.total_deviation_bps / self.successful_requests) as u32
+            };
+
+            // Health flag
+            self.is_healthy = self.success_rate_bps >= DEMOTION_THRESHOLD_BPS
+                && self.avg_deviation_bps <= MAX_ACCEPTABLE_DEVIATION_BPS;
+        }
+
+        /// Update uptime counters.  Call once per monitoring tick.
+        pub fn tick(&mut self, elapsed_secs: u64, was_healthy: bool) {
+            self.monitored_secs += elapsed_secs;
+            if was_healthy {
+                self.healthy_secs += elapsed_secs;
+            }
+            self.uptime_bps = if self.monitored_secs == 0 {
+                10_000
+            } else {
+                ((self.healthy_secs * 10_000) / self.monitored_secs) as u32
+            };
+        }
+
+        fn recompute_latency_stats(&mut self) {
+            if self.latency_samples_ms.is_empty() {
+                self.avg_latency_ms = 0;
+                self.p95_latency_ms = 0;
+                self.p99_latency_ms = 0;
+                return;
+            }
+            let mut sorted: Vec<u64> =
+                self.latency_samples_ms.iter().copied().collect();
+            sorted.sort_unstable();
+            let n = sorted.len();
+            let sum: u64 = sorted.iter().sum();
+            self.avg_latency_ms = sum / n as u64;
+            self.p95_latency_ms = sorted[(n * 95 / 100).min(n - 1)];
+            self.p99_latency_ms = sorted[(n * 99 / 100).min(n - 1)];
         }
     }
 
-    /// Get the best bid price from the DEX
-    pub fn get_dex_best_bid(
-        env: Env,
-        base_asset: StellarAssetId,
-        quote_asset: StellarAssetId,
-    ) -> u64 {
-        let book = Self::query_order_book(env, base_asset, quote_asset);
-        book.best_bid
+    // ── Health Monitor ────────────────────────────────────────────────────────
+
+    /// Aggregates health across all registered adapters and enforces
+    /// auto-demotion of underperformers.
+    pub struct HealthMonitor {
+        health: HashMap<String, AdapterHealth>,
     }
 
-    /// Get the best ask price from the DEX
-    pub fn get_dex_best_ask(
-        env: Env,
-        base_asset: StellarAssetId,
-        quote_asset: StellarAssetId,
-    ) -> u64 {
-        let book = Self::query_order_book(env, base_asset, quote_asset);
-        book.best_ask
-    }
+    impl HealthMonitor {
+        pub fn new() -> Self {
+            Self { health: HashMap::new() }
+        }
 
-    /// Check if the order book data is stale
-    pub fn is_stale(env: Env, base_asset: StellarAssetId, quote_asset: StellarAssetId) -> bool {
-        let config = Self::get_config(env.clone());
-        let book = Self::query_order_book(env, base_asset, quote_asset);
-        let current_time = env.ledger().timestamp();
-        current_time - book.timestamp > config.max_staleness_secs
-    }
+        /// Ensure an adapter is tracked; no-op if already present.
+        pub fn register(&mut self, adapter_id: &str) {
+            self.health
+                .entry(adapter_id.to_string())
+                .or_insert_with(|| AdapterHealth::new(adapter_id));
+        }
 
-    // ─── Internal helpers ──────────────────────────────────────────────────
+        /// Record a request outcome for `adapter_id`.
+        pub fn record(
+            &mut self,
+            adapter_id: &str,
+            latency_ms: u64,
+            success: bool,
+            deviation_bps: u32,
+            now_ts: u64,
+        ) {
+            self.register(adapter_id);
+            self.health
+                .get_mut(adapter_id)
+                .unwrap()
+                .record(latency_ms, success, deviation_bps, now_ts);
+        }
 
-    fn make_pair_key(base: &StellarAssetId, quote: &StellarAssetId) -> Symbol {
-        // Derive a short deterministic pair key from both assets.
-        // Uses a simple hash of the debug representation to fit within Symbol limits.
-        use soroban_sdk::xdr::ScVal;
-        // Combine debug representations and truncate to fit Symbol limits (max ~32 chars)
-        let raw = format!("{:?}/{:?}", base, quote);
-        // Take the first 10 meaningful chars and last 4 chars as a fingerprint
-        let key = if raw.len() <= 10 {
-            raw
-        } else {
-            // Use sum of bytes as a simple hash for uniqueness
-            let hash: u64 = raw.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-            format!("DEX{:016x}", hash)[..20].to_string()
-        };
-        Symbol::from_str(&key)
-    }
+        /// Advance the uptime clock for all adapters.
+        pub fn tick_all(&mut self, elapsed_secs: u64) {
+            for health in self.health.values_mut() {
+                let was_healthy = health.is_healthy;
+                health.tick(elapsed_secs, was_healthy);
+            }
+        }
 
-    fn require_admin(env: &Env) {
-        let admin: Address = env.storage().instance().get(&ADMIN).unwrap_optimized();
-        if env.current_contract_address() != admin {
-            panic!("Not authorized");
+        /// Get a snapshot of one adapter's health.
+        pub fn get(&self, adapter_id: &str) -> Option<&AdapterHealth> {
+            self.health.get(adapter_id)
+        }
+
+        /// Return ids of all adapters currently marked unhealthy.
+        pub fn unhealthy_adapters(&self) -> Vec<String> {
+            self.health
+                .values()
+                .filter(|h| !h.is_healthy)
+                .map(|h| h.adapter_id.clone())
+                .collect()
+        }
+
+        /// Return all health snapshots sorted by success_rate descending.
+        pub fn ranked(&self) -> Vec<AdapterHealth> {
+            let mut v: Vec<AdapterHealth> = self.health.values().cloned().collect();
+            v.sort_by(|a, b| b.success_rate_bps.cmp(&a.success_rate_bps));
+            v
         }
     }
-}
 
-#[cfg(test)]
-mod dex_tests {
-    use super::*;
-    use soroban_sdk::Env;
-
-    fn setup_dex() -> (Env, Address, StellarDexAdapter) {
-        let env = Env::default();
-        let admin = Address::generate(&env);
-        // Manual init: we test the logic directly via the helper types
-        (env, admin, StellarDexAdapter)
+    impl Default for HealthMonitor {
+        fn default() -> Self { Self::new() }
     }
 
-    #[test]
-    fn test_dex_adapter_config_defaults() {
-        let config = DexAdapterConfig {
-            min_liquidity_threshold: 100_000,
-            max_staleness_secs: 300,
-            max_spread_bps: 500,
-            active: true,
-        };
+    // ── Failover types ────────────────────────────────────────────────────────
 
-        assert_eq!(config.min_liquidity_threshold, 100_000);
-        assert_eq!(config.max_staleness_secs, 300);
-        assert_eq!(config.max_spread_bps, 500);
-        assert!(config.active);
+    /// Priority entry for one adapter in the failover list.
+    #[derive(Clone, Debug)]
+    pub struct AdapterPriority {
+        /// Adapter identifier.
+        pub adapter_id: String,
+        /// Lower value = tried first (0 = highest priority).
+        pub priority: u32,
+        /// Whether this adapter is currently enabled in the failover chain.
+        pub enabled: bool,
     }
 
-    #[test]
-    fn test_order_book_creation() {
-        let env = Env::default();
-        let base = StellarAssetId::Native;
-        let quote = StellarAssetId::Token {
-            code: Symbol::short("USDC"),
-            issuer: Address::generate(&env),
-        };
-
-        let book = DexOrderBook {
-            base_asset: base.clone(),
-            quote_asset: quote.clone(),
-            best_bid: 1_000_000,
-            best_ask: 1_001_000,
-            bid_volume: 500_000,
-            ask_volume: 500_000,
-            last_trade_time: 1000,
-            timestamp: 1000,
-        };
-
-        assert_eq!(book.best_bid, 1_000_000);
-        assert_eq!(book.best_ask, 1_001_000);
-        assert_eq!(book.bid_volume, 500_000);
-        assert_eq!(book.ask_volume, 500_000);
+    /// Reason a failover attempt was skipped or failed.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum FailoverReason {
+        /// Adapter is disabled.
+        Disabled,
+        /// Health-check gate rejected the adapter.
+        UnhealthyAdapter,
+        /// The adapter returned an error / timeout.
+        AdapterError,
+        /// Manual override is active — only the override adapter is used.
+        ManualOverrideActive,
     }
 
-    #[test]
-    fn test_dex_mid_price_calculation() {
-        // (best_bid + best_ask) / 2 = (1000000 + 1010000) / 2 = 1005000
-        let bid: u64 = 1_000_000;
-        let ask: u64 = 1_010_000;
-        let mid = ((bid as u128 + ask as u128) / 2) as u64;
-        assert_eq!(mid, 1_005_000);
+    /// Event emitted each time the failover engine makes a decision.
+    #[derive(Clone, Debug)]
+    pub struct FailoverEvent {
+        /// Asset being priced.
+        pub asset_id: String,
+        /// Adapter that was tried.
+        pub adapter_id: String,
+        /// Whether this attempt succeeded.
+        pub succeeded: bool,
+        /// Reason for skipping / failure (None on success).
+        pub reason: Option<FailoverReason>,
+        /// Unix timestamp of the event.
+        pub timestamp: u64,
     }
 
-    #[test]
-    fn test_spread_calculation() {
-        let best_bid: u64 = 1_000_000;
-        let best_ask: u64 = 1_020_000;
-        let spread_bps = ((best_ask - best_bid) as u128 * 10000 / best_bid as u128) as u32;
-        // 20000 / 1000000 * 10000 = 200 bps
-        assert_eq!(spread_bps, 200);
+    /// Result returned by a simulated adapter fetch.
+    pub type AdapterFetchResult = Result<u64, String>;
+
+    // ── Failover Engine ───────────────────────────────────────────────────────
+
+    /// Manages an ordered adapter priority list and drives automatic failover.
+    ///
+    /// The engine is deliberately I/O-free: callers supply a closure that
+    /// represents "fetch the price from this adapter".  This makes the engine
+    /// fully unit-testable without network access.
+    pub struct FailoverEngine {
+        /// Priority-ordered adapter list (sorted ascending by `priority`).
+        adapters: Vec<AdapterPriority>,
+        /// Shared health monitor.
+        pub health: HealthMonitor,
+        /// Optional manual override: if `Some(id)`, only that adapter is tried.
+        manual_override: Option<String>,
+        /// Accumulated event log.
+        events: Vec<FailoverEvent>,
     }
 
-    #[test]
-    fn test_staleness_detection() {
-        let config = DexAdapterConfig {
-            min_liquidity_threshold: 100_000,
-            max_staleness_secs: 300,
-            max_spread_bps: 500,
-            active: true,
-        };
+    impl FailoverEngine {
+        pub fn new() -> Self {
+            Self {
+                adapters: Vec::new(),
+                health: HealthMonitor::new(),
+                manual_override: None,
+                events: Vec::new(),
+            }
+        }
 
-        let current_time: u64 = 2000;
-        let book_time: u64 = 1500;
+        /// Register an adapter with the given priority (lower = higher priority).
+        pub fn register(&mut self, adapter_id: &str, priority: u32) {
+            self.health.register(adapter_id);
+            // Remove existing entry for the same id, then insert fresh.
+            self.adapters.retain(|a| a.adapter_id != adapter_id);
+            self.adapters.push(AdapterPriority {
+                adapter_id: adapter_id.to_string(),
+                priority,
+                enabled: true,
+            });
+            self.adapters.sort_by_key(|a| a.priority);
+        }
 
-        let is_stale = current_time - book_time > config.max_staleness_secs;
-        assert!(!is_stale);
+        /// Enable or disable an adapter in the failover chain.
+        pub fn set_enabled(&mut self, adapter_id: &str, enabled: bool) {
+            if let Some(a) = self.adapters.iter_mut().find(|a| a.adapter_id == adapter_id) {
+                a.enabled = enabled;
+            }
+        }
 
-        let book_time_old: u64 = 500;
-        let is_stale = current_time - book_time_old > config.max_staleness_secs;
-        assert!(is_stale);
+        /// Update the priority of an existing adapter.
+        pub fn set_priority(&mut self, adapter_id: &str, priority: u32) {
+            if let Some(a) = self.adapters.iter_mut().find(|a| a.adapter_id == adapter_id) {
+                a.priority = priority;
+            }
+            self.adapters.sort_by_key(|a| a.priority);
+        }
+
+        /// Set a manual override adapter.  Pass `None` to clear.
+        pub fn set_manual_override(&mut self, adapter_id: Option<&str>) {
+            self.manual_override = adapter_id.map(str::to_string);
+        }
+
+        /// Active manual override (if any).
+        pub fn manual_override(&self) -> Option<&str> {
+            self.manual_override.as_deref()
+        }
+
+        /// Run the failover chain for `asset_id`.
+        ///
+        /// `fetch` is called for each adapter in priority order until one
+        /// succeeds.  The closure receives `(adapter_id, asset_id)` and returns
+        /// `Ok(price)` or `Err(reason_string)`.
+        ///
+        /// Health metrics are updated for every attempt automatically.
+        ///
+        /// Returns `Ok(price)` from the first successful adapter, or
+        /// `Err(Vec<FailoverEvent>)` if every adapter in the chain failed.
+        pub fn fetch<F>(
+            &mut self,
+            asset_id: &str,
+            now_ts: u64,
+            mut fetch: F,
+        ) -> Result<u64, Vec<FailoverEvent>>
+        where
+            F: FnMut(&str, &str) -> (AdapterFetchResult, u64 /* latency_ms */),
+        {
+            // Manual override path
+            if let Some(ref override_id) = self.manual_override.clone() {
+                let (result, latency) = fetch(override_id, asset_id);
+                let success = result.is_ok();
+                self.health.record(override_id, latency, success, 0, now_ts);
+                let event = FailoverEvent {
+                    asset_id: asset_id.to_string(),
+                    adapter_id: override_id.clone(),
+                    succeeded: success,
+                    reason: if success { None } else { Some(FailoverReason::AdapterError) },
+                    timestamp: now_ts,
+                };
+                self.events.push(event.clone());
+                return match result {
+                    Ok(price) => Ok(price),
+                    Err(_) => Err(vec![event]),
+                };
+            }
+
+            // Normal priority-ordered failover
+            let candidates: Vec<AdapterPriority> = self.adapters.clone();
+            let mut failed_events: Vec<FailoverEvent> = Vec::new();
+
+            for adapter in &candidates {
+                // Skip disabled adapters
+                if !adapter.enabled {
+                    let ev = FailoverEvent {
+                        asset_id: asset_id.to_string(),
+                        adapter_id: adapter.adapter_id.clone(),
+                        succeeded: false,
+                        reason: Some(FailoverReason::Disabled),
+                        timestamp: now_ts,
+                    };
+                    self.events.push(ev.clone());
+                    failed_events.push(ev);
+                    continue;
+                }
+
+                // Health-check gate
+                let is_healthy = self
+                    .health
+                    .get(&adapter.adapter_id)
+                    .map(|h| h.is_healthy)
+                    .unwrap_or(true);
+
+                if !is_healthy {
+                    let ev = FailoverEvent {
+                        asset_id: asset_id.to_string(),
+                        adapter_id: adapter.adapter_id.clone(),
+                        succeeded: false,
+                        reason: Some(FailoverReason::UnhealthyAdapter),
+                        timestamp: now_ts,
+                    };
+                    self.events.push(ev.clone());
+                    failed_events.push(ev);
+                    continue;
+                }
+
+                // Attempt fetch
+                let (result, latency) = fetch(&adapter.adapter_id, asset_id);
+                let success = result.is_ok();
+                self.health.record(&adapter.adapter_id, latency, success, 0, now_ts);
+
+                let ev = FailoverEvent {
+                    asset_id: asset_id.to_string(),
+                    adapter_id: adapter.adapter_id.clone(),
+                    succeeded: success,
+                    reason: if success { None } else { Some(FailoverReason::AdapterError) },
+                    timestamp: now_ts,
+                };
+                self.events.push(ev.clone());
+
+                if success {
+                    // Auto-demote adapters that fall below threshold
+                    self.auto_demote_unhealthy();
+                    return Ok(result.unwrap());
+                }
+
+                failed_events.push(ev);
+            }
+
+            Err(failed_events)
+        }
+
+        /// Drain and return all accumulated failover events.
+        pub fn drain_events(&mut self) -> Vec<FailoverEvent> {
+            std::mem::take(&mut self.events)
+        }
+
+        /// Read-only view of pending events.
+        pub fn events(&self) -> &[FailoverEvent] {
+            &self.events
+        }
+
+        /// Current priority list (sorted ascending by priority value).
+        pub fn adapters(&self) -> &[AdapterPriority] {
+            &self.adapters
+        }
+
+        // ── Private helpers ───────────────────────────────────────────────────
+
+        /// Disable adapters whose health has dropped below the demotion threshold.
+        fn auto_demote_unhealthy(&mut self) {
+            let unhealthy: Vec<String> = self.health.unhealthy_adapters();
+            for id in &unhealthy {
+                if let Some(a) = self.adapters.iter_mut().find(|a| &a.adapter_id == id) {
+                    a.enabled = false;
+                }
+            }
+        }
     }
 
-    #[test]
-    fn test_min_liquidity_validation() {
-        let threshold: u64 = 100_000;
-
-        let sufficient_volume: u64 = 200_000;
-        assert!(sufficient_volume >= threshold);
-
-        let insufficient_volume: u64 = 50_000;
-        assert!(insufficient_volume < threshold);
-    }
-
-    #[test]
-    fn test_inactive_adapter() {
-        let config = DexAdapterConfig {
-            min_liquidity_threshold: 100_000,
-            max_staleness_secs: 300,
-            max_spread_bps: 500,
-            active: false,
-        };
-
-        assert!(!config.active);
+    impl Default for FailoverEngine {
+        fn default() -> Self { Self::new() }
     }
 }

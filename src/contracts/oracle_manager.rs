@@ -597,3 +597,437 @@ impl OracleManagerContract {
         }
     }
 }
+
+// ─── Pure-Rust Failover Coordination + Health Integration ────────────────────
+//
+// Compiled only for native targets (tests, off-chain tooling).
+// Re-exports and extends the failover / health primitives from
+// `price_feed_adapters::failover` with oracle-manager–specific coordination:
+//
+//   • OracleFailoverCoordinator – wraps FailoverEngine with oracle-aware
+//     consensus logic (deviation gating, minimum-oracle quorum, event routing)
+//   • ConsensusResult           – structured result of a coordinated price fetch
+//   • CoordinatorConfig         – tunable parameters
+
+#[cfg(not(target_family = "wasm"))]
+pub mod oracle_failover {
+    use crate::contracts::price_feed_adapters::failover::{
+        AdapterFetchResult, FailoverEngine, FailoverEvent, FailoverReason,
+        HealthMonitor, DEMOTION_THRESHOLD_BPS, MAX_ACCEPTABLE_DEVIATION_BPS,
+    };
+
+    // ── Configuration ─────────────────────────────────────────────────────────
+
+    /// Tunable parameters for the coordinator.
+    #[derive(Clone, Debug)]
+    pub struct CoordinatorConfig {
+        /// Minimum number of oracle responses required to form a consensus.
+        pub min_quorum: usize,
+        /// Maximum allowed deviation (bps) from the median before a response
+        /// is excluded from consensus.
+        pub max_deviation_bps: u32,
+        /// If `true`, exclude unhealthy oracles even if quorum would be lost.
+        pub strict_health_gate: bool,
+        /// Milliseconds before an oracle attempt is considered timed-out.
+        pub timeout_ms: u64,
+    }
+
+    impl Default for CoordinatorConfig {
+        fn default() -> Self {
+            Self {
+                min_quorum: 2,
+                max_deviation_bps: MAX_ACCEPTABLE_DEVIATION_BPS,
+                strict_health_gate: false,
+                timeout_ms: 3_000,
+            }
+        }
+    }
+
+    // ── Result types ──────────────────────────────────────────────────────────
+
+    /// Outcome of one oracle's contribution to a consensus round.
+    #[derive(Clone, Debug)]
+    pub struct OracleContribution {
+        pub oracle_id: String,
+        /// Price returned by this oracle (`None` if it failed or was excluded).
+        pub price: Option<u64>,
+        /// Whether it was included in the final consensus calculation.
+        pub included: bool,
+        /// Deviation from the consensus median (bps); 0 when not included.
+        pub deviation_bps: u32,
+        /// Round-trip latency (ms).
+        pub latency_ms: u64,
+    }
+
+    /// The aggregated result of a coordinated multi-oracle price fetch.
+    #[derive(Clone, Debug)]
+    pub struct ConsensusResult {
+        /// Asset that was priced.
+        pub asset_id: String,
+        /// Median consensus price (`None` if quorum was not met).
+        pub consensus_price: Option<u64>,
+        /// Individual oracle contributions.
+        pub contributions: Vec<OracleContribution>,
+        /// How many oracles contributed valid prices.
+        pub quorum_reached: bool,
+        /// Number of oracles that responded successfully.
+        pub responses: usize,
+        /// Number of oracles that were excluded (deviation too high).
+        pub excluded: usize,
+        /// Unix timestamp of this consensus round.
+        pub timestamp: u64,
+    }
+
+    /// Error returned when coordination fails entirely.
+    #[derive(Clone, Debug)]
+    pub enum CoordinatorError {
+        /// Fewer than `min_quorum` oracles responded successfully.
+        QuorumNotMet { responses: usize, required: usize },
+        /// No oracles are registered.
+        NoOracles,
+    }
+
+    impl std::fmt::Display for CoordinatorError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                CoordinatorError::QuorumNotMet { responses, required } => write!(
+                    f,
+                    "quorum not met: got {} responses, need {}",
+                    responses, required
+                ),
+                CoordinatorError::NoOracles => write!(f, "no oracles registered"),
+            }
+        }
+    }
+
+    impl std::error::Error for CoordinatorError {}
+
+    // ── Coordinator ───────────────────────────────────────────────────────────
+
+    /// Coordinates multi-oracle price fetching with failover and health gating.
+    ///
+    /// Unlike `FailoverEngine` (which stops at the first success), the
+    /// coordinator collects responses from **all** healthy oracles in priority
+    /// order and derives a median consensus price, excluding outliers.
+    pub struct OracleFailoverCoordinator {
+        pub engine: FailoverEngine,
+        config: CoordinatorConfig,
+        /// Accumulated coordination events (separate from engine events).
+        events: Vec<CoordinationEvent>,
+    }
+
+    /// High-level coordination event for monitoring.
+    #[derive(Clone, Debug)]
+    pub struct CoordinationEvent {
+        pub asset_id: String,
+        pub event_type: CoordinationEventType,
+        pub timestamp: u64,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum CoordinationEventType {
+        ConsensusReached,
+        QuorumFailed,
+        OracleExcluded { oracle_id: String, deviation_bps: u32 },
+        OracleFailedOver { from: String, to: String },
+        ManualOverrideApplied { oracle_id: String },
+    }
+
+    impl OracleFailoverCoordinator {
+        pub fn new() -> Self {
+            Self::with_config(CoordinatorConfig::default())
+        }
+
+        pub fn with_config(config: CoordinatorConfig) -> Self {
+            Self {
+                engine: FailoverEngine::new(),
+                config,
+                events: Vec::new(),
+            }
+        }
+
+        /// Register an oracle with the given priority (lower = higher priority).
+        pub fn register_oracle(&mut self, oracle_id: &str, priority: u32) {
+            self.engine.register(oracle_id, priority);
+        }
+
+        /// Enable / disable an oracle in the failover chain.
+        pub fn set_oracle_enabled(&mut self, oracle_id: &str, enabled: bool) {
+            self.engine.set_enabled(oracle_id, enabled);
+        }
+
+        /// Set a manual override — only this oracle will be used until cleared.
+        pub fn set_manual_override(&mut self, oracle_id: Option<&str>) {
+            self.engine.set_manual_override(oracle_id);
+            if let Some(id) = oracle_id {
+                self.events.push(CoordinationEvent {
+                    asset_id: String::new(),
+                    event_type: CoordinationEventType::ManualOverrideApplied {
+                        oracle_id: id.to_string(),
+                    },
+                    timestamp: unix_now(),
+                });
+            }
+        }
+
+        /// Run a full consensus round for `asset_id`.
+        ///
+        /// `fetch` is called once per healthy oracle in priority order.
+        /// The closure receives `(oracle_id, asset_id)` and returns
+        /// `(Ok(price) | Err(msg), latency_ms)`.
+        ///
+        /// Returns `ConsensusResult` on success or `CoordinatorError` if
+        /// quorum cannot be met.
+        pub fn fetch_consensus<F>(
+            &mut self,
+            asset_id: &str,
+            now_ts: u64,
+            mut fetch: F,
+        ) -> Result<ConsensusResult, CoordinatorError>
+        where
+            F: FnMut(&str, &str) -> (AdapterFetchResult, u64),
+        {
+            let oracle_ids: Vec<(String, u32, bool)> = self
+                .engine
+                .adapters()
+                .iter()
+                .map(|a| (a.adapter_id.clone(), a.priority, a.enabled))
+                .collect();
+
+            if oracle_ids.is_empty() {
+                return Err(CoordinatorError::NoOracles);
+            }
+
+            // Manual override — single-oracle path
+            if let Some(override_id) = self.engine.manual_override().map(str::to_string) {
+                let (result, latency) = fetch(&override_id, asset_id);
+                let success = result.is_ok();
+                self.engine.health.record(&override_id, latency, success, 0, now_ts);
+                let price = result.ok();
+                let contributions = vec![OracleContribution {
+                    oracle_id: override_id.clone(),
+                    price,
+                    included: price.is_some(),
+                    deviation_bps: 0,
+                    latency_ms: latency,
+                }];
+                let quorum = price.is_some();
+                let ev_type = if quorum {
+                    CoordinationEventType::ConsensusReached
+                } else {
+                    CoordinationEventType::QuorumFailed
+                };
+                self.events.push(CoordinationEvent {
+                    asset_id: asset_id.to_string(),
+                    event_type: ev_type,
+                    timestamp: now_ts,
+                });
+                return if quorum {
+                    Ok(ConsensusResult {
+                        asset_id: asset_id.to_string(),
+                        consensus_price: price,
+                        contributions,
+                        quorum_reached: true,
+                        responses: 1,
+                        excluded: 0,
+                        timestamp: now_ts,
+                    })
+                } else {
+                    Err(CoordinatorError::QuorumNotMet { responses: 0, required: 1 })
+                };
+            }
+
+            // Multi-oracle path: collect all responses
+            let mut contributions: Vec<OracleContribution> = Vec::new();
+            let mut valid_prices: Vec<u64> = Vec::new();
+
+            for (oracle_id, _priority, enabled) in &oracle_ids {
+                if !enabled {
+                    contributions.push(OracleContribution {
+                        oracle_id: oracle_id.clone(),
+                        price: None,
+                        included: false,
+                        deviation_bps: 0,
+                        latency_ms: 0,
+                    });
+                    continue;
+                }
+
+                // Health gate
+                let is_healthy = self
+                    .engine
+                    .health
+                    .get(oracle_id)
+                    .map(|h| h.is_healthy)
+                    .unwrap_or(true);
+
+                if !is_healthy && self.config.strict_health_gate {
+                    contributions.push(OracleContribution {
+                        oracle_id: oracle_id.clone(),
+                        price: None,
+                        included: false,
+                        deviation_bps: 0,
+                        latency_ms: 0,
+                    });
+                    continue;
+                }
+
+                let (result, latency) = fetch(oracle_id, asset_id);
+                let success = result.is_ok();
+                self.engine.health.record(oracle_id, latency, success, 0, now_ts);
+
+                let price = result.ok();
+                if let Some(p) = price {
+                    valid_prices.push(p);
+                }
+                contributions.push(OracleContribution {
+                    oracle_id: oracle_id.clone(),
+                    price,
+                    included: price.is_some(), // updated below after deviation check
+                    deviation_bps: 0,
+                    latency_ms: latency,
+                });
+            }
+
+            let responses = valid_prices.len();
+            if responses < self.config.min_quorum {
+                self.events.push(CoordinationEvent {
+                    asset_id: asset_id.to_string(),
+                    event_type: CoordinationEventType::QuorumFailed,
+                    timestamp: now_ts,
+                });
+                return Err(CoordinatorError::QuorumNotMet {
+                    responses,
+                    required: self.config.min_quorum,
+                });
+            }
+
+            // Compute median of valid prices
+            let mut sorted = valid_prices.clone();
+            sorted.sort_unstable();
+            let median = sorted[sorted.len() / 2];
+
+            // Deviation filtering: exclude outliers
+            let mut included_prices: Vec<u64> = Vec::new();
+            let mut excluded = 0usize;
+
+            for contrib in contributions.iter_mut() {
+                if let Some(p) = contrib.price {
+                    let dev = abs_deviation_bps(p, median);
+                    contrib.deviation_bps = dev;
+                    if dev <= self.config.max_deviation_bps {
+                        contrib.included = true;
+                        included_prices.push(p);
+                    } else {
+                        contrib.included = false;
+                        excluded += 1;
+                        self.events.push(CoordinationEvent {
+                            asset_id: asset_id.to_string(),
+                            event_type: CoordinationEventType::OracleExcluded {
+                                oracle_id: contrib.oracle_id.clone(),
+                                deviation_bps: dev,
+                            },
+                            timestamp: now_ts,
+                        });
+                        // Update health with bad deviation
+                        self.engine.health.record(
+                            &contrib.oracle_id,
+                            contrib.latency_ms,
+                            true,
+                            dev,
+                            now_ts,
+                        );
+                    }
+                }
+            }
+
+            // Final consensus = median of included prices
+            let consensus_price = if included_prices.is_empty() {
+                None
+            } else {
+                let mut sp = included_prices.clone();
+                sp.sort_unstable();
+                Some(sp[sp.len() / 2])
+            };
+
+            let quorum_reached =
+                included_prices.len() >= self.config.min_quorum;
+
+            self.events.push(CoordinationEvent {
+                asset_id: asset_id.to_string(),
+                event_type: if quorum_reached {
+                    CoordinationEventType::ConsensusReached
+                } else {
+                    CoordinationEventType::QuorumFailed
+                },
+                timestamp: now_ts,
+            });
+
+            if quorum_reached {
+                Ok(ConsensusResult {
+                    asset_id: asset_id.to_string(),
+                    consensus_price,
+                    contributions,
+                    quorum_reached: true,
+                    responses,
+                    excluded,
+                    timestamp: now_ts,
+                })
+            } else {
+                Err(CoordinatorError::QuorumNotMet {
+                    responses: included_prices.len(),
+                    required: self.config.min_quorum,
+                })
+            }
+        }
+
+        /// Drain accumulated coordination events.
+        pub fn drain_events(&mut self) -> Vec<CoordinationEvent> {
+            let engine_evs = self.engine.drain_events();
+            // Convert engine events into coordination events for unified log
+            let mut coord_evs: Vec<CoordinationEvent> = engine_evs
+                .into_iter()
+                .map(|ev| CoordinationEvent {
+                    asset_id: ev.asset_id,
+                    event_type: if ev.succeeded {
+                        CoordinationEventType::ConsensusReached
+                    } else {
+                        CoordinationEventType::QuorumFailed
+                    },
+                    timestamp: ev.timestamp,
+                })
+                .collect();
+            coord_evs.extend(std::mem::take(&mut self.events));
+            coord_evs
+        }
+
+        /// Read-only view of the health monitor.
+        pub fn health(&self) -> &HealthMonitor {
+            &self.engine.health
+        }
+
+        /// Current coordinator configuration.
+        pub fn config(&self) -> &CoordinatorConfig {
+            &self.config
+        }
+    }
+
+    impl Default for OracleFailoverCoordinator {
+        fn default() -> Self { Self::new() }
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    fn abs_deviation_bps(a: u64, b: u64) -> u32 {
+        if b == 0 { return 0; }
+        let diff = if a >= b { a - b } else { b - a };
+        ((diff as u128 * 10_000) / b as u128) as u32
+    }
+
+    fn unix_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+}

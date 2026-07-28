@@ -746,3 +746,202 @@ impl CircuitBreakerContract {
         admin.require_auth();
     }
 }
+
+// ─── Pure-Rust Anomaly Integration ───────────────────────────────────────────
+//
+// This companion module is compiled only for native targets (tests, CLI tools).
+// It wires the `AnomalyDetector` from `price_history` into a lightweight
+// circuit-breaker guard that can be used off-chain before submitting a price
+// update to the on-chain contract.
+//
+// Usage pattern:
+//   1. Maintain a `NativeCircuitBreakerGuard` alongside your price feed loop.
+//   2. Call `check_price` before every on-chain `check_price_update` call.
+//   3. If `check_price` returns `Err(GuardDecision::Blocked)`, skip the update.
+//   4. Emit the included `GuardEvent` to your monitoring pipeline.
+
+#[cfg(not(target_family = "wasm"))]
+pub mod anomaly_integration {
+    use crate::contracts::price_history::{
+        AnomalyConfig, AnomalyDetector, AnomalyResult,
+    };
+
+    // ── Constants ────────────────────────────────────────────────────────────
+
+    /// Default rolling window fed to the anomaly detector (24 h of 1-min data).
+    pub const DEFAULT_ANOMALY_WINDOW: usize = 1_440;
+
+    // ── Public types ─────────────────────────────────────────────────────────
+
+    /// Decision taken by the guard for a single price submission.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum GuardDecision {
+        /// Price looks normal — safe to submit on-chain.
+        Allowed,
+        /// Low-confidence anomaly — warn but allow through.
+        Warned,
+        /// High-confidence anomaly — block the on-chain submission.
+        Blocked,
+    }
+
+    /// Monitoring event emitted for every price check.
+    #[derive(Clone, Debug)]
+    pub struct GuardEvent {
+        /// Asset that was checked.
+        pub asset_id: String,
+        /// Candidate price that was tested.
+        pub price: u64,
+        /// Unix timestamp of the check.
+        pub timestamp: u64,
+        /// Final guard decision.
+        pub decision: GuardDecision,
+        /// Underlying anomaly analysis.
+        pub anomaly: AnomalyResult,
+    }
+
+    /// Configuration for the native circuit-breaker guard.
+    #[derive(Clone, Debug)]
+    pub struct GuardConfig {
+        /// Anomaly detector thresholds.
+        pub anomaly_config: AnomalyConfig,
+        /// Block (rather than just warn) on high-confidence anomalies.
+        pub block_on_high_confidence: bool,
+        /// Warn (emit event) on low-confidence anomalies but still allow.
+        pub warn_on_low_confidence: bool,
+        /// Maximum price window kept per asset.
+        pub max_window_size: usize,
+    }
+
+    impl Default for GuardConfig {
+        fn default() -> Self {
+            Self {
+                anomaly_config: AnomalyConfig::default(),
+                block_on_high_confidence: true,
+                warn_on_low_confidence: true,
+                max_window_size: DEFAULT_ANOMALY_WINDOW,
+            }
+        }
+    }
+
+    /// Stateful guard that maintains a rolling price window per asset and
+    /// uses the `AnomalyDetector` to screen new prices before they are
+    /// forwarded to the on-chain circuit breaker.
+    pub struct NativeCircuitBreakerGuard {
+        config: GuardConfig,
+        /// Per-asset rolling price windows (oldest-first).
+        windows: std::collections::HashMap<String, std::collections::VecDeque<u64>>,
+        /// All events emitted since last drain.
+        events: Vec<GuardEvent>,
+    }
+
+    impl NativeCircuitBreakerGuard {
+        /// Create a guard with default configuration.
+        pub fn new() -> Self {
+            Self::with_config(GuardConfig::default())
+        }
+
+        /// Create a guard with custom configuration.
+        pub fn with_config(config: GuardConfig) -> Self {
+            Self {
+                config,
+                windows: std::collections::HashMap::new(),
+                events: Vec::new(),
+            }
+        }
+
+        /// Screen a price update.
+        ///
+        /// Returns `Ok(GuardDecision)` in all non-blocking cases.  
+        /// Returns `Err(GuardDecision::Blocked)` when the price should be
+        /// suppressed (only possible when `block_on_high_confidence = true`).
+        ///
+        /// In every case a `GuardEvent` is appended to the internal event log
+        /// (retrieve with `drain_events`).
+        pub fn check_price(
+            &mut self,
+            asset_id: &str,
+            price: u64,
+            timestamp: u64,
+        ) -> Result<GuardDecision, GuardDecision> {
+            let detector = AnomalyDetector::with_config(self.config.anomaly_config.clone());
+
+            // Snapshot the window before mutating it
+            let window_snapshot: Vec<u64> = self
+                .windows
+                .get(asset_id)
+                .map(|dq| dq.iter().copied().collect())
+                .unwrap_or_default();
+
+            let anomaly = detector.detect(asset_id, price, timestamp, &window_snapshot);
+
+            // Determine decision
+            let decision = if anomaly.is_anomaly {
+                use crate::contracts::price_history::AnomalyConfidence;
+                match anomaly.confidence {
+                    Some(AnomalyConfidence::High) if self.config.block_on_high_confidence => {
+                        GuardDecision::Blocked
+                    }
+                    _ if self.config.warn_on_low_confidence => GuardDecision::Warned,
+                    _ => GuardDecision::Allowed,
+                }
+            } else {
+                GuardDecision::Allowed
+            };
+
+            // Record event
+            self.events.push(GuardEvent {
+                asset_id: asset_id.to_string(),
+                price,
+                timestamp,
+                decision: decision.clone(),
+                anomaly,
+            });
+
+            // Update rolling window (only for non-blocked prices)
+            if decision != GuardDecision::Blocked {
+                let window = self.windows.entry(asset_id.to_string()).or_default();
+                window.push_back(price);
+                while window.len() > self.config.max_window_size {
+                    window.pop_front();
+                }
+            }
+
+            if decision == GuardDecision::Blocked {
+                Err(GuardDecision::Blocked)
+            } else {
+                Ok(decision)
+            }
+        }
+
+        /// Drain and return all accumulated guard events.
+        pub fn drain_events(&mut self) -> Vec<GuardEvent> {
+            std::mem::take(&mut self.events)
+        }
+
+        /// Peek at pending events without consuming them.
+        pub fn events(&self) -> &[GuardEvent] {
+            &self.events
+        }
+
+        /// Current window depth for an asset (number of retained price points).
+        pub fn window_depth(&self, asset_id: &str) -> usize {
+            self.windows.get(asset_id).map(|w| w.len()).unwrap_or(0)
+        }
+
+        /// Remove all state for an asset (e.g. after an asset is delisted).
+        pub fn evict_asset(&mut self, asset_id: &str) {
+            self.windows.remove(asset_id);
+        }
+
+        /// Expose the current guard configuration.
+        pub fn config(&self) -> &GuardConfig {
+            &self.config
+        }
+    }
+
+    impl Default for NativeCircuitBreakerGuard {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+}
