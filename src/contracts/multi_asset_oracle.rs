@@ -2,6 +2,13 @@
 //!
 //! Enhanced price oracle that supports a wide range of Stellar assets
 //! with type-specific configurations and price feed routing.
+//!
+//! ## Access Control
+//! - **Admin**: `clear_deviation_alerts`, `pause`, `unpause`, `update_asset_registry` —
+//!   gated by a broken `require_admin()` (compares the contract's own address, not the
+//!   caller). See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `submit_price` — no auth check on the reporting address.
+//! - **User**: read-only (price/TWAP/history/alert lookups).
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{

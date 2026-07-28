@@ -1,0 +1,145 @@
+name: Security Incident Report
+description: Report an active or suspected protocol emergency — exploit, oracle failure, market crash, or governance attack.
+title: "[INCIDENT] "
+labels: ["incident", "security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If funds are actively at risk, do not wait to finish this form.**
+        Page the on-call engineer / multisig signers first using the contact
+        list in [docs/emergency_response_runbook.md](../../docs/emergency_response_runbook.md#10-contact-list-and-escalation-path),
+        then fill this in as the incident log starts.
+
+        If this is a responsible disclosure of an unexploited vulnerability
+        rather than an active incident, consider using the private security
+        intake contact in the runbook instead of a public issue.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: See docs/emergency_response_runbook.md#1-severity-classification
+      options:
+        - "SEV1 — Active loss (funds being drained now, or confirmed unpatched exploit)"
+        - "SEV2 — Imminent risk (exploit found but not exercised; bad oracle prices; insolvency-adjacent)"
+        - "SEV3 — Degraded (circuit breaker tripped on real volatility; one oracle source down)"
+        - "SEV4 — Anomaly (metrics off, no evidence of harm)"
+        - "Unsure — treat as SEV2 until triaged"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which runbook section applies?
+      options:
+        - "Exploit (docs/emergency_response_runbook.md#3-exploit-response)"
+        - "Oracle failure (docs/emergency_response_runbook.md#4-oracle-failure-response)"
+        - "Market crash / circuit breaker (docs/emergency_response_runbook.md#5-market-crash-response)"
+        - "Governance attack (docs/emergency_response_runbook.md#6-governance-attack-response)"
+        - "Other / unclassified"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: modules
+    attributes:
+      label: Affected module(s)
+      multiple: true
+      options:
+        - Lending
+        - Stablecoin
+        - Synthetic protocol
+        - Vault
+        - Circuit breaker
+        - Price oracle / oracle manager
+        - Governance
+        - Stability pool
+        - Flash loan
+        - Liquidity pool
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: input
+    id: detected_at
+    attributes:
+      label: Detected at (UTC)
+      placeholder: "2026-07-28 14:32 UTC"
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: Factual observation only — no speculation about cause yet.
+      placeholder: |
+        e.g. "Vault share price dropped 8% in a single block with no
+        corresponding harvest event. TVL in the affected vault is $X."
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Transaction hashes, event logs, ledger sequence numbers, external price references — anything that lets someone else independently verify this.
+      placeholder: |
+        - Transaction: <hash>
+        - Ledger sequence: <n>
+        - Relevant event: <event name and data>
+        - External reference: <link>
+    validations:
+      required: true
+
+  - type: textarea
+    id: actions_taken
+    attributes:
+      label: Actions already taken
+      description: Timestamped, in UTC. Include who took each action.
+      placeholder: |
+        - 14:35 UTC — <name> called pause() on <module>
+        - 14:40 UTC — <name> paged second multisig signer
+    validations:
+      required: false
+
+  - type: dropdown
+    id: paused
+    attributes:
+      label: Has the affected module been paused?
+      options:
+        - "Yes"
+        - "No — not yet, escalating now"
+        - "No — assessed as not necessary"
+        - "N/A"
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact (quantify if known)
+      placeholder: "Funds at risk / lost, number of users/positions affected, or 'still being quantified'"
+    validations:
+      required: false
+
+  - type: input
+    id: reporter_contact
+    attributes:
+      label: Your contact info
+      description: For follow-up. Use the private security intake instead of this form if you'd prefer not to disclose publicly yet.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        Next steps for responders: classify severity, follow the matching
+        section of [docs/emergency_response_runbook.md](../../docs/emergency_response_runbook.md),
+        and keep this issue updated as the incident log. Public disclosure and
+        governance ratification requirements are in the runbook §8–§9 and in
+        [docs/upgrade_governance_process.md §9](../../docs/upgrade_governance_process.md#9-emergency-changes-c1).

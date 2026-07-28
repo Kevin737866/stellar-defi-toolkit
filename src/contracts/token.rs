@@ -2,9 +2,17 @@
 //!
 //! Provides ERC-20-like token functionality on the Stellar blockchain
 //! using Soroban smart contracts.
+//!
+//! ## Access Control
+//! This is a plain in-memory Rust struct, not a deployed Soroban `#[contract]` — there
+//! is no `Env`/`require_auth` capability in this file at all, so `mint`, `burn`,
+//! `transfer`, `approve`, and `transfer_from` have **no access control whatsoever**;
+//! any caller can act on behalf of any address. See `docs/ACCESS_CONTROL_MATRIX.md`
+//! for the full breakdown and the deployable, correctly-authenticated alternative in
+//! `soroban_token_contract.rs`.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use crate::types::token::{TokenInfo, TokenMetadata};
+use crate::types::token::{TokenInfo, TokenMetadata, VestingSchedule};
 use crate::utils::StellarClient;
 use std::collections::HashMap;
 
@@ -25,6 +33,10 @@ pub struct TokenContract {
     balances: HashMap<String, u64>,
     /// Allowances: owner -> spender -> amount
     allowances: HashMap<String, HashMap<String, u64>>,
+    /// Vesting schedules: id -> VestingSchedule
+    vesting_schedules: HashMap<u64, VestingSchedule>,
+    /// Next vesting schedule ID
+    next_vesting_id: u64,
 }
 
 impl TokenContract {
@@ -38,6 +50,8 @@ impl TokenContract {
             address: None,
             balances: HashMap::new(),
             allowances: HashMap::new(),
+            vesting_schedules: HashMap::new(),
+            next_vesting_id: 1,
         }
     }
 
@@ -220,6 +234,68 @@ impl TokenContract {
         }
 
         Ok(())
+    }
+
+    // ─── Token Vesting (#223) ──────────────────────────────────────────
+
+    /// Create a vesting schedule with cliff and linear release.
+    /// Tokens are deducted from the caller's balance.
+    pub fn create_vesting_schedule(
+        &mut self, caller: Address, beneficiary: Address, amount: u64,
+        start_time: u64, cliff_duration: u64, total_duration: u64,
+    ) -> Result<u64, String> {
+        if amount == 0 { return Err("Vesting amount must be greater than 0".to_string()); }
+        if total_duration == 0 { return Err("Total duration must be greater than 0".to_string()); }
+        if cliff_duration > total_duration { return Err("Cliff duration cannot exceed total duration".to_string()); }
+        let caller_key = caller.to_string();
+        let caller_balance = self.balances.get(&caller_key).copied().unwrap_or(0);
+        if caller_balance < amount {
+            return Err(format!("Insufficient balance: caller has {}, vesting requires {}", caller_balance, amount));
+        }
+        *self.balances.entry(caller_key).or_insert(0) -= amount;
+        let id = self.next_vesting_id;
+        self.next_vesting_id = self.next_vesting_id.checked_add(1).ok_or("Vesting ID overflow")?;
+        let schedule = VestingSchedule::new(id, beneficiary.to_string(), amount, start_time, cliff_duration, total_duration, None);
+        self.vesting_schedules.insert(id, schedule);
+        println!("[Event] VestingScheduleCreated {{ id: {}, beneficiary: {}, amount: {}, cliff: {}s, duration: {}s }}",
+            id, beneficiary.to_string(), amount, cliff_duration, total_duration);
+        Ok(id)
+    }
+
+    /// Get the claimable vested amount for a schedule
+    pub fn get_claimable_amount(&self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
+        Ok(schedule.claimable_amount(current_time))
+    }
+
+    /// Claim vested tokens from a schedule
+    pub fn claim_vested(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
+        let claimable = schedule.claim(current_time)?;
+        let beneficiary_key = schedule.beneficiary.clone();
+        let entry = self.balances.entry(beneficiary_key.clone()).or_insert(0);
+        *entry = entry.checked_add(claimable).ok_or("Overflow: balance exceeded u64::MAX")?;
+        println!("[Event] VestingClaimed {{ id: {}, beneficiary: {}, amount: {} }}", schedule_id, beneficiary_key, claimable);
+        Ok(claimable)
+    }
+
+    /// Revoke a vesting schedule
+    pub fn revoke_vesting(&mut self, schedule_id: u64, current_time: u64) -> Result<u64, String> {
+        let schedule = self.vesting_schedules.get_mut(&schedule_id).ok_or("Vesting schedule not found")?;
+        let unvested = schedule.revoke(current_time);
+        println!("[Event] VestingRevoked {{ id: {}, unvested_amount: {} }}", schedule_id, unvested);
+        Ok(unvested)
+    }
+
+    /// Get a vesting schedule by ID
+    pub fn get_vesting_schedule(&self, schedule_id: u64) -> Option<&VestingSchedule> {
+        self.vesting_schedules.get(&schedule_id)
+    }
+
+    /// Check if a vesting schedule is fully vested
+    pub fn is_vesting_complete(&self, schedule_id: u64, current_time: u64) -> Result<bool, String> {
+        let schedule = self.vesting_schedules.get(&schedule_id).ok_or("Vesting schedule not found")?;
+        Ok(schedule.is_fully_vested(current_time))
     }
 
     // -------------------------------------------------------------------------

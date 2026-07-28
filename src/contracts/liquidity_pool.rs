@@ -2,6 +2,15 @@
 //!
 //! Provides automated market maker (AMM) functionality for creating
 //! liquidity pools between different tokens on the Stellar blockchain.
+//!
+//! ## Access Control
+//! The on-chain `LiquidityPool` contract has no admin/governance concept — it is
+//! fully permissionless by design. **User**: `add_liquidity`, `remove_liquidity`,
+//! `swap`, `swap_a_for_b`, `swap_b_for_a`, `claim_fees` all correctly call
+//! `require_auth()` on the acting `provider`/`user` address. All other functions are
+//! read-only. This file also contains a separate, never-deployed simulation struct
+//! (`LiquidityPoolContract`) used only in tests, whose admin/emergency-mode setters
+//! have no auth checks — see `docs/ACCESS_CONTROL_MATRIX.md`.
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
 use crate::types::pool::{PoolInfo, LiquidityPosition, SwapParams};

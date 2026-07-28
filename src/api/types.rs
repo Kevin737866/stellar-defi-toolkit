@@ -70,3 +70,35 @@ pub struct AssetVolume {
     pub transaction_count: i32,
     pub timeframe: String,
 }
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct Portfolio {
+    pub total_net_worth: String,
+    pub positions: Vec<PositionSummary>,
+    pub risk_summary: RiskSummary,
+    pub yield_summary: YieldSummary,
+    pub last_updated: DateTime<Utc>,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct PositionSummary {
+    pub module: String,
+    pub asset: String,
+    pub amount: String,
+    pub value_usd: String,
+    pub apy: Option<f64>,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct RiskSummary {
+    pub health_factor: f64,
+    pub liquidation_risk: String,
+    pub concentration_risk: f64,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct YieldSummary {
+    pub earned_ytd: String,
+    pub projected_annual: String,
+    pub average_apy: f64,
+}

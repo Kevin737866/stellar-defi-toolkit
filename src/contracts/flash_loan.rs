@@ -2,6 +2,13 @@
 //!
 //! Provides flash loan functionality allowing users to borrow assets
 //! without collateral as long as they are returned within the same transaction.
+//!
+//! ## Access Control
+//! - **Admin**: `set_fee`, `pause`, `resume` — `require_admin()` is a documented no-op
+//!   (`// In production: env.invoker().require_auth();`), so these are callable by
+//!   anyone once an admin has been configured. See `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper/User**: `flash_loan`, `liquidate_with_flash_loan` — open to any caller
+//!   (loans/transfers are simulated, not real token movements).
 
 use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Symbol, Bytes, log};
 use crate::types::flash_loan::{FlashLoanInfo, LoanTakenEvent, LoanRepaidEvent, LiquidationParams};
