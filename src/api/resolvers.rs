@@ -1,5 +1,5 @@
 use async_graphql::{Object, Result, Context};
-use crate::api::types::{Ledger, Transaction, Operation, Account, NetworkStats, AccountStats, AssetVolume};
+use crate::api::types::{Ledger, Transaction, Operation, Account, NetworkStats, AccountStats, AssetVolume, Portfolio};
 use crate::utils::StellarClient;
 use crate::api::aggregations::Aggregator;
 use crate::contracts::price_history::{PriceHistoryManager, PriceQueryResult};
@@ -60,6 +60,19 @@ impl QueryRoot {
     async fn account(&self, ctx: &Context<'_>, address: String) -> Result<Account> {
         let client = ctx.data::<StellarClient>()?;
         Ok(client.get_account_details(&address).await?)
+    }
+
+    /// Get aggregated portfolio for a user address, with caching
+    async fn portfolio(&self, ctx: &Context<'_>, address: String) -> Result<Portfolio> {
+        let cache = ctx.data::<PortfolioCache>()?;
+        if let Some(cached) = cache.get(&address) {
+            return Ok(cached);
+        }
+        let client = ctx.data::<StellarClient>()?;
+        let aggregator = Aggregator::new(client.clone());
+        let portfolio = aggregator.aggregate_portfolio(&address).await?;
+        cache.set(address, portfolio.clone());
+        Ok(portfolio)
     }
 
     /// Get daily aggregated statistics
