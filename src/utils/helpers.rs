@@ -131,6 +131,72 @@ pub fn is_same_token(token_a: &str, token_b: &str) -> bool {
     token_a.to_lowercase() == token_b.to_lowercase()
 }
 
+// ─── Issue #222: Permit Signature Helper ─────────────────────────────────────
+
+/// Compute a 32-byte permit hash used by the EIP-2612-style permit system.
+///
+/// This is a pure-Rust, `std`-only implementation suitable for the
+/// in-memory `TokenContract` in this codebase.  The hash is constructed by
+/// canonically encoding the permit parameters and mixing them into a 32-byte
+/// state using a Fowler-Noll-Vo-inspired accumulator.
+///
+/// # Arguments
+/// * `owner`    – String representation of the owner address.
+/// * `spender`  – String representation of the spender address.
+/// * `value`    – Allowance amount.
+/// * `deadline` – Permit deadline (UNIX timestamp).
+/// * `nonce`    – Current nonce for the owner (prevents replay).
+///
+/// # Returns
+/// A `[u8; 32]` digest that the permit call must supply as the `signature`
+/// parameter.
+pub fn compute_permit_hash(
+    owner: &str,
+    spender: &str,
+    value: u64,
+    deadline: u64,
+    nonce: u64,
+) -> [u8; 32] {
+    // Canonical message — all fields separated so concatenation cannot collide.
+    let message = format!(
+        "PERMIT:{}:{}:{}:{}:{}",
+        owner, spender, value, deadline, nonce
+    );
+    let bytes = message.as_bytes();
+
+    // FNV-like mixing primes.
+    let primes: [u64; 8] = [
+        0x9e37_79b9_7f4a_7c15,
+        0x6c62_272e_07bb_0142,
+        0x94d0_49bb_1331_97f4,
+        0xbf58_476d_1ce4_e5b9,
+        0x94d0_49bb_1331_97f5,
+        0x6c62_272e_07bb_0143,
+        0x9e37_79b9_7f4a_7c17,
+        0xbf58_476d_1ce4_e5bb,
+    ];
+
+    let mut state: [u64; 4] = [primes[0], primes[1], primes[2], primes[3]];
+
+    for (i, &b) in bytes.iter().enumerate() {
+        let lane = i % 4;
+        state[lane] = state[lane]
+            .wrapping_add(b as u64)
+            .wrapping_mul(primes[lane]);
+        state[lane] ^= state[lane] >> 33;
+        state[lane] = state[lane].wrapping_mul(primes[lane + 4]);
+        state[lane] ^= state[lane] >> 29;
+    }
+
+    // Fold 4 × u64 into 32 bytes.
+    let mut hash = [0u8; 32];
+    for (i, &s) in state.iter().enumerate() {
+        let offset = i * 8;
+        hash[offset..offset + 8].copy_from_slice(&s.to_le_bytes());
+    }
+    hash
+}
+
 /// Sort token pair for consistent ordering
 pub fn sort_token_pair(token_a: &str, token_b: &str) -> (String, String) {
     if token_a.to_lowercase() <= token_b.to_lowercase() {

@@ -54,6 +54,26 @@ const PARAMS: Symbol = Symbol::short("PARAMS");
 const MIGRATION_VERSION: Symbol = Symbol::short("MIGVER");
 const MIGRATION_EVENTS: Symbol = Symbol::short("MIGEVENTS");
 
+// Issue #202: Withdrawal queue
+const WITHDRAWAL_QUEUE: Symbol = Symbol::short("WITHQ");
+const DAILY_WITHDRAWN: Symbol = Symbol::short("DAILYW");
+const LAST_DAY_TIMESTAMP: Symbol = Symbol::short("LASTDAY");
+
+// Issue #203: Liquidation distribution
+const PENDING_DISTRIBUTIONS: Symbol = Symbol::short("PENDIST");
+const DISTRIBUTION_HISTORY: Symbol = Symbol::short("DISTHIST");
+
+// Issue #204: Pool cap management
+const POOL_CAP: Symbol = Symbol::short("POOLCAP");
+const CAP_HISTORY: Symbol = Symbol::short("CAPHIST");
+const OVERRIDE_CAP: Symbol = Symbol::short("OVRCAP");
+
+// Issue #205: Multi-token support
+const TOKEN_CONFIGS: Symbol = Symbol::short("TOKCONF");
+const USER_TOKEN_DEPOSITS: Symbol = Symbol::short("USRTKDEP");
+const TOTAL_TOKEN_DEPOSITS: Symbol = Symbol::short("TOTTOKDEP");
+const ORACLE_RATES: Symbol = Symbol::short("ORACLERATES");
+
 // ─── User Deposit Information ─────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -66,6 +86,98 @@ pub struct UserDeposit {
     /// Deposit timestamp
     pub deposit_timestamp: u64,
     /// Whether user has claimed rewards
+    pub rewards_claimed: u64,
+}
+
+// Issue #202: Withdrawal queue entry
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct WithdrawalQueueEntry {
+    /// User requesting withdrawal
+    pub user: Address,
+    /// Amount requested
+    pub amount: u64,
+    /// Queue position
+    pub position: u64,
+    /// Request timestamp
+    pub requested_at: u64,
+    /// Estimated processing time
+    pub estimated_completion: u64,
+    /// Whether this is an emergency withdrawal
+    pub emergency: bool,
+    /// Token address (for multi-token support)
+    pub token: Address,
+}
+
+// Issue #203: Distribution record
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct DistributionRecord {
+    /// Distribution ID
+    pub distribution_id: u64,
+    /// Liquidation event ID
+    pub liquidation_id: u64,
+    /// Total amount distributed
+    pub total_amount: u64,
+    /// Number of recipients
+    pub recipients: u64,
+    /// Distribution timestamp
+    pub timestamp: u64,
+    /// Reward index after distribution
+    pub reward_index_after: u64,
+}
+
+// Issue #204: Pool cap parameters
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct PoolCapParams {
+    /// Current dynamic cap
+    pub current_cap: u64,
+    /// Minimum cap
+    pub min_cap: u64,
+    /// Maximum cap
+    pub max_cap: u64,
+    /// Cap adjustment sensitivity (basis points)
+    pub adjustment_sensitivity_bps: u32,
+    /// Last cap adjustment timestamp
+    pub last_adjustment: u64,
+    /// Manual override cap (0 if not set)
+    pub manual_override: u64,
+    /// Reason for last cap change
+    pub last_change_rationale: Symbol,
+}
+
+// Issue #205: Multi-token configuration
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct TokenConfig {
+    /// Token address
+    pub token: Address,
+    /// Token symbol
+    pub symbol: Symbol,
+    /// Current cap for this token
+    pub cap: u64,
+    /// Current balance in pool
+    pub balance: u64,
+    /// Oracle rate to base token (scaled by 1e6)
+    pub oracle_rate: u64,
+    /// Whether token is enabled
+    pub enabled: bool,
+    /// Decimals
+    pub decimals: u32,
+}
+
+// Issue #205: Multi-token user deposit
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct UserTokenDeposit {
+    /// Amount deposited for this token
+    pub amount: u64,
+    /// Reward index at time of deposit
+    pub reward_index: u64,
+    /// Deposit timestamp
+    pub deposit_timestamp: u64,
+    /// Rewards claimed
     pub rewards_claimed: u64,
 }
 
@@ -393,6 +505,426 @@ impl StabilityPoolContract {
     /// Get current parameters
     pub fn get_params(env: Env) -> StabilityPoolParams {
         Self::get_params(&env)
+    }
+
+    // ─── Issue #202: Withdrawal Queue Management ───────────────────────────────
+
+    /// Request a withdrawal - large withdrawals enter queue
+    ///
+    /// # Arguments
+    /// * `user` - Address requesting withdrawal
+    /// * `amount` - Amount to withdraw
+    pub fn request_withdrawal(env: Env, user: Address, amount: u64, token: Address) {
+        Self::require_not_paused(&env);
+
+        if amount == 0 {
+            panic!("Amount must be greater than 0");
+        }
+
+        let pool_info = Self::get_pool_info(&env);
+        let withdrawal_threshold_bps = 500; // 5% of pool triggers queue
+        let large_withdrawal = (amount * 10000) / pool_info.total_deposits > withdrawal_threshold_bps;
+
+        if !large_withdrawal {
+            // Small withdrawal - process immediately
+            Self::withdraw(env.clone(), user.clone(), amount);
+            return;
+        }
+
+        // Check daily limit
+        let current_time = env.ledger().timestamp();
+        let mut last_day = env.storage().instance().get(&LAST_DAY_TIMESTAMP).unwrap_or(0u64);
+        let mut daily_withdrawn = env.storage().instance().get(&DAILY_WITHDRAWN).unwrap_or(0u64);
+
+        // Reset daily counter if new day
+        if current_time - last_day >= 24 * 3600 {
+            last_day = current_time;
+            daily_withdrawn = 0;
+            env.storage().instance().set(&LAST_DAY_TIMESTAMP, &last_day);
+        }
+
+        let daily_limit = Self::get_daily_withdrawal_limit(&env);
+        if daily_withdrawn + amount > daily_limit {
+            panic!("Daily withdrawal limit exceeded");
+        }
+
+        // Add to queue
+        let mut queue = Self::get_withdrawal_queue(&env);
+        let position = queue.len() as u64 + 1;
+        let estimated_completion = current_time + (position * 3600); // 1 hour per position
+
+        let entry = WithdrawalQueueEntry {
+            user: user.clone(),
+            amount,
+            position,
+            requested_at: current_time,
+            estimated_completion,
+            emergency: false,
+            token,
+        };
+
+        queue.push_back(entry);
+        env.storage().instance().set(&WITHDRAWAL_QUEUE, &queue);
+
+        env.events().publish(
+            (Symbol::short("WITHDRAWAL_QUEUED"), user),
+            (amount, position, estimated_completion),
+        );
+    }
+
+    /// Process withdrawal queue (FIFO)
+    pub fn process_withdrawal_queue(env: Env) {
+        Self::require_admin(&env);
+
+        let mut queue = Self::get_withdrawal_queue(&env);
+        let mut daily_withdrawn = env.storage().instance().get(&DAILY_WITHDRAWN).unwrap_or(0u64);
+        let daily_limit = Self::get_daily_withdrawal_limit(&env);
+        let current_time = env.ledger().timestamp();
+
+        let mut processed = Vec::new(&env);
+
+        for i in 0..queue.len() {
+            let entry = queue.get(i).unwrap();
+            if entry.estimated_completion > current_time {
+                continue;
+            }
+
+            if daily_withdrawn + entry.amount > daily_limit {
+                break;
+            }
+
+            // Process withdrawal
+            Self::withdraw(env.clone(), entry.user.clone(), entry.amount);
+            daily_withdrawn += entry.amount;
+            processed.push_back(entry.position);
+        }
+
+        // Remove processed entries
+        let mut new_queue = Vec::new(&env);
+        for i in 0..queue.len() {
+            let entry = queue.get(i).unwrap();
+            if !processed.contains(&entry.position) {
+                new_queue.push_back(entry);
+            }
+        }
+
+        env.storage().instance().set(&WITHDRAWAL_QUEUE, &new_queue);
+        env.storage().instance().set(&DAILY_WITHDRAWN, &daily_withdrawn);
+
+        env.events().publish(
+            Symbol::short("QUEUE_PROCESSED"),
+            processed.len(),
+        );
+    }
+
+    /// Emergency withdrawal with penalty - bypasses queue
+    ///
+    /// # Arguments
+    /// * `user` - Address requesting emergency withdrawal
+    /// * `amount` - Amount to withdraw
+    pub fn emergency_withdraw(env: Env, user: Address, amount: u64) {
+        Self::require_not_paused(&env);
+
+        if amount == 0 {
+            panic!("Amount must be greater than 0");
+        }
+
+        // Apply emergency penalty (10%)
+        let penalty = (amount * 1000) / 10000;
+        let withdrawal_amount = amount - penalty;
+
+        // Process immediately regardless of queue
+        Self::withdraw(env.clone(), user.clone(), withdrawal_amount);
+
+        // Send penalty to treasury
+        let treasury = env.storage().instance().get(&TREASURY).unwrap();
+        env.events()
+            .publish((Symbol::short("EMERGENCY_WITHDRAWAL"), user), (withdrawal_amount, penalty));
+    }
+
+    /// Get withdrawal queue status
+    pub fn get_withdrawal_queue_status(env: Env) -> Vec<WithdrawalQueueEntry> {
+        Self::get_withdrawal_queue(&env)
+    }
+
+    /// Get user's queue position
+    pub fn get_user_queue_position(env: Env, user: Address) -> u64 {
+        let queue = Self::get_withdrawal_queue(&env);
+        for i in 0..queue.len() {
+            let entry = queue.get(i).unwrap();
+            if entry.user == user {
+                return entry.position;
+            }
+        }
+        0
+    }
+
+    // ─── Issue #203: Liquidation Distribution Automation ───────────────────────
+
+    /// Process liquidation with automatic distribution
+    ///
+    /// # Arguments
+    /// * `liquidation_event` - Details of the liquidation
+    pub fn process_liquidation_auto_distribute(env: Env, liquidation_event: LiquidationEvent) {
+        Self::require_not_paused(&env);
+
+        let params = Self::get_params(&env);
+        let pool_info = Self::get_pool_info(&env);
+
+        if pool_info.total_deposits == 0 {
+            return;
+        }
+
+        // Calculate reward for stability pool
+        let stability_reward =
+            (liquidation_event.penalty_amount * params.liquidation_reward_share_bps as u64) / 10000;
+
+        if stability_reward == 0 {
+            return;
+        }
+
+        // Update reward index atomically
+        let mut reward_index = env.storage().instance().get(&REWARD_INDEX).unwrap();
+        let reward_per_share = (stability_reward * 1000000) / pool_info.total_deposits;
+        reward_index += reward_per_share;
+        env.storage().instance().set(&REWARD_INDEX, &reward_index);
+
+        // Record distribution
+        let distribution_id = env.ledger().seq_num();
+        let distribution = DistributionRecord {
+            distribution_id,
+            liquidation_id: distribution_id,
+            total_amount: stability_reward,
+            recipients: Self::get_depositor_count(&env),
+            timestamp: env.ledger().timestamp(),
+            reward_index_after: reward_index,
+        };
+
+        let mut history = Self::get_distribution_history(&env);
+        history.push_back(distribution);
+        env.storage().instance().set(&DISTRIBUTION_HISTORY, &history);
+
+        env.events().publish(
+            (Symbol::short("LIQUIDATION_DISTRIBUTED"), liquidation_event.vault_owner),
+            (stability_reward, reward_index, distribution_id),
+        );
+    }
+
+    /// Get distribution history
+    pub fn get_distribution_history(env: Env) -> Vec<DistributionRecord> {
+        env.storage()
+            .instance()
+            .get(&DISTRIBUTION_HISTORY)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ─── Issue #204: Pool Cap Management ──────────────────────────────────────
+
+    /// Get current pool cap (dynamic or manual override)
+    pub fn get_current_cap(env: Env) -> u64 {
+        let cap_params = Self::get_pool_cap_params(&env);
+        if cap_params.manual_override > 0 {
+            return cap_params.manual_override;
+        }
+
+        // Dynamic cap based on stablecoin supply and collateral health
+        let stablecoin_supply = Self::get_stablecoin_supply(&env);
+        let collateral_health = Self::get_collateral_health(&env);
+
+        // Base cap is percentage of stablecoin supply
+        let params = Self::get_params(&env);
+        let supply_based_cap = (stablecoin_supply * params.max_deposit_ratio as u64) / 10000;
+
+        // Adjust based on collateral health (healthier = higher cap)
+        let health_adjustment = (collateral_health * cap_params.adjustment_sensitivity_bps as u64) / 10000;
+        let adjusted_cap = supply_based_cap + (supply_based_cap * health_adjustment) / 10000;
+
+        adjusted_cap.min(cap_params.max_cap).max(cap_params.min_cap)
+    }
+
+    /// Update pool cap (admin only, with rationale)
+    ///
+    /// # Arguments
+    /// * `new_cap` - New cap value (0 for auto)
+    /// * `rationale` - Reason for cap change
+    pub fn update_pool_cap(env: Env, new_cap: u64, rationale: Symbol) {
+        Self::require_admin(&env);
+
+        let mut cap_params = Self::get_pool_cap_params(&env);
+        cap_params.manual_override = new_cap;
+        cap_params.last_adjustment = env.ledger().timestamp();
+        cap_params.last_change_rationale = rationale;
+
+        env.storage().instance().set(&POOL_CAP, &cap_params);
+
+        // Record cap change
+        env.storage().instance().set(&CAP_HISTORY, &cap_params);
+
+        env.events().publish(
+            (Symbol::short("CAP_UPDATED"), rationale),
+            (new_cap, cap_params.current_cap),
+        );
+    }
+
+    /// Dynamically adjust cap based on market conditions
+    pub fn adjust_cap_dynamically(env: Env) {
+        Self::require_admin(&env);
+
+        let new_cap = Self::get_current_cap(env.clone());
+        let mut cap_params = Self::get_pool_cap_params(&env);
+        cap_params.current_cap = new_cap;
+        cap_params.last_adjustment = env.ledger().timestamp();
+        cap_params.last_change_rationale = Symbol::short("Dynamic adjustment");
+
+        env.storage().instance().set(&POOL_CAP, &cap_params);
+
+        env.events().publish(
+            Symbol::short("CAP_ADJUSTED"),
+            new_cap,
+        );
+    }
+
+    /// Get pool cap parameters
+    pub fn get_pool_cap_params(env: Env) -> PoolCapParams {
+        env.storage()
+            .instance()
+            .get(&POOL_CAP)
+            .unwrap_or_else(|| PoolCapParams {
+                current_cap: 0,
+                min_cap: 1_000_000_000,
+                max_cap: 100_000_000_000_000,
+                adjustment_sensitivity_bps: 500,
+                last_adjustment: 0,
+                manual_override: 0,
+                last_change_rationale: Symbol::short("Initial"),
+            })
+    }
+
+    // ─── Issue #205: Multi-Token Support ───────────────────────────────────────
+
+    /// Add token to stability pool
+    ///
+    /// # Arguments
+    /// * `token` - Token address
+    /// * `symbol` - Token symbol
+    /// * `oracle_rate` - Exchange rate to base token
+    /// * `cap` - Token-specific cap
+    pub fn add_pool_token(env: Env, token: Address, symbol: Symbol, oracle_rate: u64, cap: u64, decimals: u32) {
+        Self::require_admin(&env);
+
+        let config = TokenConfig {
+            token: token.clone(),
+            symbol,
+            cap,
+            balance: 0,
+            oracle_rate,
+            enabled: true,
+            decimals,
+        };
+
+        let mut tokens = Self::get_token_configs(&env);
+        tokens.set(token, config);
+        env.storage().instance().set(&TOKEN_CONFIGS, &tokens);
+
+        env.events().publish(
+            Symbol::short("TOKEN_ADDED"),
+            (token, oracle_rate, cap),
+        );
+    }
+
+    /// Deposit multi-token stablecoins
+    ///
+    /// # Arguments
+    /// * `user` - Address making deposit
+    /// * `token` - Token address
+    /// * `amount` - Amount to deposit
+    pub fn deposit_token(env: Env, user: Address, token: Address, amount: u64) {
+        Self::require_not_paused(&env);
+
+        if amount == 0 {
+            panic!("Amount must be greater than 0");
+        }
+
+        // Check token config
+        let tokens = Self::get_token_configs(&env);
+        let token_config = tokens.get(token.clone()).unwrap_or_else(|| panic!("Token not supported"));
+
+        if !token_config.enabled {
+            panic!("Token not enabled");
+        }
+
+        // Check token-specific cap
+        if token_config.balance + amount > token_config.cap {
+            panic!("Token cap exceeded");
+        }
+
+        // Check global cap
+        let current_cap = Self::get_current_cap(env.clone());
+        let pool_info = Self::get_pool_info(&env);
+        if pool_info.total_deposits + amount > current_cap {
+            panic!("Pool cap exceeded");
+        }
+
+        // Update token balance
+        let mut updated_token_config = token_config;
+        updated_token_config.balance += amount;
+        let mut updated_tokens = tokens;
+        updated_tokens.set(token.clone(), updated_token_config);
+        env.storage().instance().set(&TOKEN_CONFIGS, &updated_tokens);
+
+        // Update user token deposit
+        let mut user_deposits = Self::get_user_token_deposits(&env);
+        let mut user_deposit = user_deposits.get(user.clone()).unwrap_or_else(|| Vec::new(&env));
+
+        let mut found = false;
+        for i in 0..user_deposit.len() {
+            let mut entry = user_deposit.get(i).unwrap();
+            if entry.token == token {
+                entry.amount += amount;
+                user_deposit.set(i, entry);
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            let new_entry = UserTokenDeposit {
+                amount,
+                reward_index: 0,
+                deposit_timestamp: env.ledger().timestamp(),
+                rewards_claimed: 0,
+            };
+            user_deposit.push_back(new_entry);
+        }
+
+        user_deposits.set(user.clone(), user_deposit);
+        env.storage().instance().set(&USER_TOKEN_DEPOSITS, &user_deposits);
+
+        // Update pool info
+        let mut pool_info = Self::get_pool_info(&env);
+        pool_info.total_deposits += amount;
+        env.storage().instance().set(&POOL_INFO, &pool_info);
+
+        env.events().publish(
+            (Symbol::short("TOKEN_DEPOSIT"), user),
+            (token, amount, pool_info.total_deposits),
+        );
+    }
+
+    /// Get supported tokens
+    pub fn get_supported_tokens(env: Env) -> Vec<TokenConfig> {
+        let tokens = Self::get_token_configs(&env);
+        let mut result = Vec::new(&env);
+        for i in 0..tokens.len() {
+            result.push_back(tokens.get(i).unwrap());
+        }
+        result
+    }
+
+    /// Get user token deposits
+    pub fn get_user_token_deposits(env: Env, user: Address) -> Vec<UserTokenDeposit> {
+        let user_deposits = Self::get_user_token_deposits(&env);
+        user_deposits.get(user).unwrap_or_else(|| Vec::new(&env))
     }
 
     // ─── Admin Functions ───────────────────────────────────────────────────────

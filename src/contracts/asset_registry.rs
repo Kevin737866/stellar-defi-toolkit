@@ -14,7 +14,7 @@
 //!   **no membership or auth check at all**, the most severe gap in this file.
 //! - **User**: read-only (asset/price/whitelist lookups).
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{
     StellarAssetId, AssetCategory, AssetMetadata, PriceFeedConfig, AssetPrice,
     PriceSource, PriceSourceType, AssetRegistryEntry, WhitelistEntry, CrossChainAsset,
@@ -46,6 +46,44 @@ const WHITELIST: Symbol = Symbol::short("WHITELIST");
 const CROSS_CHAIN_ASSETS: Symbol = Symbol::short("XCHAIN");
 const DEVIATION_ALERTS: Symbol = Symbol::short("DEV_ALERT");
 const ASSET_STATS: Symbol = Symbol::short("ASSET_STATS");
+/// Storage key for pending / active delistings (issue #219).
+const DELISTINGS: Symbol = Symbol::short("DELIST");
+
+// ─── Issue #219: Delisting Record ─────────────────────────────────────────────
+
+/// Status of an asset delisting procedure.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub enum DelistingStatus {
+    /// Notice period active — new positions disabled, existing ones closeable.
+    Pending,
+    /// Notice period expired — remaining positions being force-closed.
+    ForcingClose,
+    /// Delisting complete — asset fully removed.
+    Completed,
+    /// Delisting cancelled before notice period ended.
+    Cancelled,
+}
+
+/// Record of an ongoing or completed asset delisting.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct DelistingRecord {
+    /// Asset being delisted.
+    pub asset_id: StellarAssetId,
+    /// Human-readable reason.
+    pub reason: Symbol,
+    /// UNIX timestamp when the notice period began.
+    pub notice_start: u64,
+    /// Notice period duration in seconds (default: 7 days).
+    pub notice_period: u64,
+    /// UNIX timestamp after which remaining positions can be force-closed.
+    pub delist_at: u64,
+    /// Current delisting status.
+    pub status: DelistingStatus,
+    /// Address that initiated the delisting.
+    pub initiated_by: Address,
+}
 
 // ─── Asset Registry Contract ───────────────────────────────────────────────────
 
@@ -85,6 +123,10 @@ impl AssetRegistryContract {
 
         let asset_stats: Map<StellarAssetId, AssetStats> = Map::new(&env);
         env.storage().instance().set(&ASSET_STATS, &asset_stats);
+
+        // Issue #219: initialise empty delistings map.
+        let delistings: Map<StellarAssetId, DelistingRecord> = Map::new(&env);
+        env.storage().instance().set(&DELISTINGS, &delistings);
 
         env.events().publish(
             Symbol::short("REGISTRY_INITIALIZED"),
@@ -631,6 +673,153 @@ impl AssetRegistryContract {
             .unwrap_or_else(|| panic!("Asset stats not found"))
     }
 
+    // ─── Issue #219: Asset Delisting Procedure ────────────────────────────────
+
+    /// Initiate the delisting procedure for an asset (admin only).
+    ///
+    /// Immediately disables new positions for this asset and starts the notice
+    /// period during which existing positions can be closed voluntarily.
+    ///
+    /// # Arguments
+    /// * `asset_id`      – Asset to be delisted.
+    /// * `reason`        – Human-readable reason for delisting.
+    /// * `notice_period` – Notice period in seconds (0 → default 7 days).
+    pub fn initiate_delisting(
+        env: Env,
+        asset_id: StellarAssetId,
+        reason: Symbol,
+        notice_period: u64,
+    ) {
+        Self::require_admin(&env);
+        Self::require_not_paused(&env);
+
+        let mut asset_registry = Self::get_asset_registry(&env);
+
+        let mut entry = asset_registry
+            .get(asset_id.clone())
+            .unwrap_or_else(|| panic!("Asset not registered"));
+
+        // Prevent double-delisting.
+        let mut delistings = Self::load_delistings(&env);
+        if delistings.contains_key(&asset_id) {
+            let existing = delistings.get(asset_id.clone()).unwrap();
+            if matches!(existing.status, DelistingStatus::Pending | DelistingStatus::ForcingClose) {
+                panic!("Delisting already in progress");
+            }
+        }
+
+        let effective_notice = if notice_period == 0 { 604_800 } else { notice_period };
+        let now = env.ledger().timestamp();
+        let delist_at = now + effective_notice;
+
+        // Disable new positions immediately by deactivating the asset.
+        entry.metadata.active = false;
+        asset_registry.set(asset_id.clone(), entry);
+        env.storage().instance().set(&ASSET_REGISTRY, &asset_registry);
+
+        let record = DelistingRecord {
+            asset_id: asset_id.clone(),
+            reason,
+            notice_start: now,
+            notice_period: effective_notice,
+            delist_at,
+            status: DelistingStatus::Pending,
+            initiated_by: Self::get_admin(&env),
+        };
+
+        delistings.set(asset_id.clone(), record);
+        env.storage().instance().set(&DELISTINGS, &delistings);
+
+        env.events().publish(
+            (Symbol::short("DELIST_STR"),),
+            (asset_id, effective_notice, delist_at),
+        );
+    }
+
+    /// Execute force-close of remaining positions after the notice period expires.
+    ///
+    /// Can be called by anyone once `delist_at` has passed.
+    pub fn execute_delisting(env: Env, asset_id: StellarAssetId) {
+        let mut delistings = Self::load_delistings(&env);
+
+        let mut record = delistings
+            .get(asset_id.clone())
+            .unwrap_or_else(|| panic!("No delisting record found"));
+
+        if !matches!(record.status, DelistingStatus::Pending) {
+            panic!("Delisting is not in pending state");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < record.delist_at {
+            panic!("Notice period has not expired yet");
+        }
+
+        record.status = DelistingStatus::ForcingClose;
+        delistings.set(asset_id.clone(), record);
+        env.storage().instance().set(&DELISTINGS, &delistings);
+
+        env.events().publish((Symbol::short("DELIST_FRC"),), asset_id);
+    }
+
+    /// Complete the delisting after all positions have been force-closed (admin only).
+    pub fn complete_delisting(env: Env, asset_id: StellarAssetId) {
+        Self::require_admin(&env);
+
+        let mut delistings = Self::load_delistings(&env);
+
+        let mut record = delistings
+            .get(asset_id.clone())
+            .unwrap_or_else(|| panic!("No delisting record found"));
+
+        if !matches!(record.status, DelistingStatus::ForcingClose) {
+            panic!("Delisting is not in force-close state");
+        }
+
+        record.status = DelistingStatus::Completed;
+        delistings.set(asset_id.clone(), record);
+        env.storage().instance().set(&DELISTINGS, &delistings);
+
+        env.events().publish((Symbol::short("DELIST_DON"),), asset_id);
+    }
+
+    /// Cancel a pending delisting and re-activate the asset (admin only).
+    pub fn cancel_delisting(env: Env, asset_id: StellarAssetId) {
+        Self::require_admin(&env);
+
+        let mut delistings = Self::load_delistings(&env);
+
+        let mut record = delistings
+            .get(asset_id.clone())
+            .unwrap_or_else(|| panic!("No delisting record found"));
+
+        if !matches!(record.status, DelistingStatus::Pending) {
+            panic!("Can only cancel a pending delisting");
+        }
+
+        record.status = DelistingStatus::Cancelled;
+        delistings.set(asset_id.clone(), record);
+        env.storage().instance().set(&DELISTINGS, &delistings);
+
+        // Re-activate the asset.
+        let mut asset_registry = Self::get_asset_registry(&env);
+        let mut entry = asset_registry
+            .get(asset_id.clone())
+            .unwrap_or_else(|| panic!("Asset not registered"));
+        entry.metadata.active = true;
+        asset_registry.set(asset_id.clone(), entry);
+        env.storage().instance().set(&ASSET_REGISTRY, &asset_registry);
+
+        env.events().publish((Symbol::short("DELIST_CAN"),), asset_id);
+    }
+
+    /// Get the delisting record for an asset.
+    pub fn get_delisting(env: Env, asset_id: StellarAssetId) -> DelistingRecord {
+        Self::load_delistings(&env)
+            .get(asset_id)
+            .unwrap_or_else(|| panic!("No delisting record found"))
+    }
+
     // ─── Internal Helpers ─────────────────────────────────────────────────────
 
     fn update_asset_stats(env: &Env, asset_id: StellarAssetId, price: &AssetPrice) {
@@ -687,6 +876,14 @@ impl AssetRegistryContract {
 
     fn get_asset_stats(env: &Env) -> Map<StellarAssetId, AssetStats> {
         env.storage().instance().get(&ASSET_STATS).unwrap()
+    }
+
+    /// Load the delistings map (issue #219).
+    fn load_delistings(env: &Env) -> Map<StellarAssetId, DelistingRecord> {
+        env.storage()
+            .instance()
+            .get(&DELISTINGS)
+            .unwrap_or_else(|| Map::new(env))
     }
 
     fn get_admin(env: &Env) -> Address {

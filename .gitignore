@@ -3,6 +3,12 @@
 **/*.rs.bk
 Cargo.lock
 
+# Test snapshots and artifacts
+test_snapshots/
+**/__snapshots__/
+**/*.snap
+coverage/
+
 # IDE
 .vscode/
 .idea/
@@ -42,10 +48,6 @@ yarn-error.log*
 /dist/
 /build/
 
-# Coverage reports
-/coverage/
-*.lcov
-
 # Backup files
 *.bak
 *.backup
@@ -79,3 +81,23 @@ clippy.toml
 .local/
 local/
 AGENTS.md
+
+# Test snapshots — generated artefacts, not source
+test_snapshots/
+**/__snapshots__/
+*.snap
+
+# Pull request / implementation summaries (auto-generated)
+PULL_REQUEST_SUMMARY.md
+IMPLEMENTATION_SUMMARY.md
+CIRCUIT_BREAKER_ENHANCEMENTS.md
+
+# Compiled WASM output
+*.wasm
+
+# Profiling and flamegraph data
+perf.data
+perf.data.old
+flamegraph.svg
+*.profraw
+*.profdata

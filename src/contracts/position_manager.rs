@@ -1,44 +1,54 @@
-//! Position Manager Contract for Synthetic Asset Protocol
+//! Position Manager Contract — issues #211, #212, #213, #214
 //!
-//! Provides advanced position management tools for synthetic asset users.
-//! Includes position monitoring, risk management, and automated operations.
+//! Provides advanced position management for the synthetic-asset protocol:
 //!
-//! ## Features
-//! - Position tracking and monitoring
-//! - Automated rebalancing
-//! - Risk-based alerts
-//! - Position consolidation
-//! - Performance analytics
-//! - Batch operations
+//! ## Issue #211 — Batch position operations
+//! - `batch_close_positions`    — close up to 20 positions in one call
+//! - `batch_rebalance_positions`— rebalance up to 20 positions in one call
+//! - `batch_adjust_collateral`  — add/remove collateral for up to 20 positions
+//!   All three support partial failure: individual item errors are collected and
+//!   returned without rolling back the whole batch.
 //!
-//! ## Access Control
-//! - **Admin**: `create_monitored_position`, `create_batch_operation`,
-//!   `rebalance_position` — gated by a broken `require_admin()` (compares the
-//!   contract's own address, not the caller). See `docs/ACCESS_CONTROL_MATRIX.md`.
-//! - **Keeper**: `monitor_positions`, `execute_batch_operation`, `acknowledge_alert` —
-//!   no auth check at all; any caller can execute another user's pending batch or
-//!   acknowledge any alert.
-//! - **User**: read-only (`get_position_analytics`, `get_user_alerts`).
+//! ## Issue #212 — Position risk scoring (0-10000)
+//! - `calculate_risk_score` — weighted composite of four factors
+//!   - Collateral ratio  50 %
+//!   - Asset volatility  30 %
+//!   - Position age      10 %
+//!   - Market conditions 10 %
+//!
+//! ## Issue #213 — Alert system with severity levels
+//! - Alert types: `LowCollateral`, `PriceVolatility`, `LiquidationRisk`, `OracleFailure`
+//! - Severities:  `Info`, `Warning`, `Critical`, `Emergency`
+//! - `acknowledge_alert` — marks a single alert as seen
+//! - Per-position alert history; deduplication window prevents spam
+//!
+//! ## Issue #214 — Position analytics / PnL
+//! - `get_position_analytics` — PnL, ROI (bps), max-drawdown, Sharpe ratio
+//! - `export_position_analytics` — serialisable snapshot for a single position
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
-use crate::types::synthetic::{
-    SyntheticPosition, SyntheticAsset, OraclePrice, MarketData, AssetType
+use soroban_sdk::{
+    contract, contractimpl, contracttype,
+    Address, Env, Symbol, Vec, Map,
+    unwrap::UnwrapOptimized,
 };
+use crate::types::synthetic::SyntheticPosition;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Position monitoring interval (1 hour)
-const MONITORING_INTERVAL: u64 = 3600;
-/// Rebalancing threshold (10% ratio change)
-const REBALANCING_THRESHOLD: u32 = 1000;
-/// Minimum position size (100 USD)
-const MIN_POSITION_SIZE: u64 = 100_000_000;
-/// Maximum positions per user (10)
-const MAX_POSITIONS_PER_USER: u32 = 10;
-/// Health check interval (6 hours)
-const HEALTH_CHECK_INTERVAL: u64 = 6 * 3600;
+/// Maximum positions allowed in a single batch (issue #211)
+const MAX_BATCH_SIZE: u32 = 20;
 
-// ─── Storage Keys ─────────────────────────────────────────────────────────────
+/// Minimum interval between repeated alerts for the same position+type (1 h)
+const ALERT_DEDUP_WINDOW: u64 = 3600;
+
+/// How often position metadata is refreshed (1 h)
+const MONITORING_INTERVAL: u64 = 3600;
+
+/// Minimum position size (100 USD, 8 decimals)
+const MIN_POSITION_SIZE: u64 = 100_000_000;
+
+/// Rebalancing threshold — ratio must change by at least this (1 %)
+const REBALANCING_THRESHOLD: u32 = 100;
 
 const ADMIN: Symbol = Symbol::short("ADMIN");
 const USER_POSITIONS: Symbol = Symbol::short("USER_POSITIONS");
@@ -49,30 +59,19 @@ const BATCH_OPERATIONS: Symbol = Symbol::short("BATCH_OPS");
 const HEALTH_CHECKS: Symbol = Symbol::short("HEALTH_CHKS");
 const KEEPER_REGISTRY: Symbol = Symbol::short("KEEPER_REG");
 
-// ─── Position Metadata ─────────────────────────────────────────────────────
+// ─── Storage Keys ─────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
-#[contracttype]
-pub struct PositionMetadata {
-    /// Position ID
-    pub position_id: u64,
-    /// Owner address
-    pub owner: Address,
-    /// Asset ID
-    pub asset_id: u32,
-    /// Creation timestamp
-    pub created_at: u64,
-    /// Last update timestamp
-    pub last_updated: u64,
-    /// Position status
-    pub status: PositionStatus,
-    /// Risk score (0-10000)
-    pub risk_score: u32,
-    /// Performance metrics
-    pub performance: PositionPerformance,
-}
+const ADMIN: Symbol              = Symbol::short("ADMIN");
+const USER_POSITIONS: Symbol     = Symbol::short("USER_POS");
+const POSITION_META: Symbol      = Symbol::short("POS_META");
+const ALERTS: Symbol             = Symbol::short("ALERTS");
+const ALERT_LAST_TS: Symbol      = Symbol::short("ALT_TS");   // dedup timestamps
+const BATCH_OPS: Symbol          = Symbol::short("BATCH_OPS");
+const ANALYTICS: Symbol          = Symbol::short("ANALYTICS");
 
-/// Position status
+// ─── Types: Position ──────────────────────────────────────────────────────────
+
+/// Lifecycle status of a position
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum PositionStatus {
@@ -83,57 +82,51 @@ pub enum PositionStatus {
     Frozen,
 }
 
-/// Position performance metrics
+/// Persisted metadata for a monitored position
 #[derive(Clone, Debug)]
 #[contracttype]
-pub struct PositionPerformance {
-    /// Total profit/loss
-    pub pnl: i64,
-    /// Return percentage (basis points)
-    pub return_bps: i32,
-    /// Days held
-    pub days_held: u32,
-    /// Maximum drawdown
-    pub max_drawdown: u32,
-    /// Sharpe ratio (scaled by 10000)
-    pub sharpe_ratio: u32,
-    /// Win rate (basis points)
-    pub win_rate: u32,
-}
-
-/// Position alert
-#[derive(Clone, Debug)]
-#[contracttype]
-pub struct PositionAlert {
-    /// Alert ID
-    pub alert_id: u64,
-    /// Position ID
+pub struct PositionMetadata {
     pub position_id: u64,
-    /// Alert type
-    pub alert_type: AlertType,
-    /// Alert message
-    pub message: Symbol,
-    /// Alert severity
-    pub severity: AlertSeverity,
-    /// When alert was triggered
-    pub timestamp: u64,
-    /// Whether alert was acknowledged
-    pub acknowledged: bool,
+    pub owner: Address,
+    pub asset_id: u32,
+    pub created_at: u64,
+    pub last_updated: u64,
+    pub status: PositionStatus,
+    /// Composite risk score 0-10 000 (issue #212)
+    pub risk_score: u32,
 }
 
-/// Alert types
+// ─── Types: Risk scoring (issue #212) ────────────────────────────────────────
+
+/// Breakdown of a composite risk score
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RiskScoreBreakdown {
+    /// Final weighted score 0-10 000
+    pub total_score: u32,
+    /// Collateral-ratio component score 0-10 000 (weight 50 %)
+    pub collateral_component: u32,
+    /// Volatility component score 0-10 000 (weight 30 %)
+    pub volatility_component: u32,
+    /// Age component score 0-10 000 (weight 10 %)
+    pub age_component: u32,
+    /// Market-condition component score 0-10 000 (weight 10 %)
+    pub market_component: u32,
+}
+
+// ─── Types: Alerts (issue #213) ───────────────────────────────────────────────
+
+/// Categories of position alerts
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum AlertType {
-    LowCollateralRatio,
+    LowCollateral,
     PriceVolatility,
     LiquidationRisk,
     OracleFailure,
-    PositionTimeout,
-    PerformanceDecline,
 }
 
-/// Alert severity
+/// How urgent an alert is
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum AlertSeverity {
@@ -143,60 +136,106 @@ pub enum AlertSeverity {
     Emergency,
 }
 
-/// Batch operation
+/// A single position alert
 #[derive(Clone, Debug)]
 #[contracttype]
-pub struct BatchOperation {
-    /// Operation ID
-    pub operation_id: u64,
-    /// Operation type
-    pub operation_type: BatchOperationType,
-    /// User requesting the batch
-    pub user: Address,
-    /// Operations in the batch
-    pub operations: Vec<BatchOperationItem>,
-    /// When created
-    pub created_at: u64,
-    /// When executed
-    pub executed_at: Option<u64>,
-    /// Execution status
-    pub status: BatchStatus,
+pub struct PositionAlert {
+    pub alert_id: u64,
+    pub position_id: u64,
+    pub alert_type: AlertType,
+    pub severity: AlertSeverity,
+    /// Human-readable message stored as a short Symbol
+    pub message: Symbol,
+    pub timestamp: u64,
+    pub acknowledged: bool,
 }
 
-/// Batch operation types
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub enum BatchOperationType {
-    MintMultiple,
-    BurnMultiple,
-    RebalanceMultiple,
-    CloseMultiple,
-    CollateralSwap,
-}
+// ─── Types: Batch operations (issue #211) ─────────────────────────────────────
 
-/// Batch operation item
+/// One item inside a batch-close request
 #[derive(Clone, Debug)]
 #[contracttype]
-pub struct BatchOperationItem {
-    /// Asset ID
-    pub asset_id: u32,
-    /// Collateral token
+pub struct BatchCloseItem {
+    pub position_id: u64,
+    pub owner: Address,
+}
+
+/// One item inside a batch-rebalance request
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct BatchRebalanceItem {
+    pub position_id: u64,
+    pub owner: Address,
+    /// Desired target collateral ratio (basis points)
+    pub target_ratio: u32,
+}
+
+/// One item inside a batch-collateral-adjustment request
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct BatchCollateralItem {
+    pub position_id: u64,
+    pub owner: Address,
     pub collateral_token: Address,
-    /// Collateral amount
-    pub collateral_amount: u64,
-    /// Synthetic amount
-    pub synthetic_amount: u64,
+    /// Positive = add, negative = remove (stored as i64 here)
+    pub delta: i64,
 }
 
-/// Batch execution status
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Result of a single item inside any batch
+#[derive(Clone, Debug)]
 #[contracttype]
-pub enum BatchStatus {
-    Pending,
-    Executing,
-    Completed,
-    Failed,
-    Cancelled,
+pub struct BatchItemResult {
+    pub position_id: u64,
+    pub success: bool,
+    /// Short error code if failed, empty Symbol if success
+    pub error_code: Symbol,
+}
+
+/// Aggregated result returned from a batch call
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct BatchResult {
+    pub total: u32,
+    pub succeeded: u32,
+    pub failed: u32,
+    pub results: Vec<BatchItemResult>,
+}
+
+// ─── Types: Analytics (issue #214) ───────────────────────────────────────────
+
+/// Full performance analytics for a single position
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct PositionAnalytics {
+    pub position_id: u64,
+    pub owner: Address,
+    pub asset_id: u32,
+    /// Profit / loss in USD (8 decimals). Negative = loss.
+    pub pnl: i64,
+    /// ROI expressed in basis points relative to initial collateral
+    pub roi_bps: i32,
+    /// Maximum drawdown seen over position lifetime (basis points)
+    pub max_drawdown_bps: u32,
+    /// Sharpe ratio scaled by 10 000 (e.g. 15 000 = 1.5)
+    pub sharpe_ratio_scaled: i32,
+    /// Entry price at position creation (8 decimals)
+    pub entry_price: u64,
+    /// Most recent mark price used for PnL (8 decimals)
+    pub current_price: u64,
+    /// Position size in synthetic units (8 decimals)
+    pub synthetic_amount: u64,
+    /// Initial collateral value at entry (8 decimals)
+    pub initial_collateral: u64,
+    /// Days the position has been open
+    pub days_held: u32,
+    /// Running sum of daily returns (scaled by 10 000) for Sharpe numerator
+    pub daily_returns_sum: i64,
+    /// Running sum of squared daily returns for Sharpe denominator
+    pub daily_returns_sq_sum: u64,
+    /// Number of daily return samples recorded
+    pub daily_return_samples: u32,
+    /// Snapshot timestamp
+    pub last_updated: u64,
 }
 
 /// Health check result
@@ -265,54 +304,47 @@ pub enum RebalanceAction {
 
 // ─── Position Manager Contract ─────────────────────────────────────────────
 
-/// Position manager contract
 #[contract]
 pub struct PositionManagerContract;
 
 #[contractimpl]
 impl PositionManagerContract {
-    /// Initialize position manager
-    /// 
-    /// # Arguments
-    /// * `admin` - Admin address
+
+    // =========================================================================
+    // Lifecycle
+    // =========================================================================
+
+    /// Initialise the position manager.  Must be called exactly once.
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&ADMIN) {
-            panic!("Already initialized");
+            panic!("already initialised");
         }
-
         env.storage().instance().set(&ADMIN, &admin);
 
-        // Initialize storage
-        let user_positions: Map<Address, Vec<SyntheticPosition>> = Map::new(&env);
-        env.storage().instance().set(&USER_POSITIONS, &user_positions);
+        let empty_pos: Map<Address, Vec<SyntheticPosition>> = Map::new(&env);
+        env.storage().instance().set(&USER_POSITIONS, &empty_pos);
 
-        let position_metadata: Map<u64, PositionMetadata> = Map::new(&env);
-        env.storage().instance().set(&POSITION_METADATA, &position_metadata);
+        let empty_meta: Map<u64, PositionMetadata> = Map::new(&env);
+        env.storage().instance().set(&POSITION_META, &empty_meta);
 
-        let alerts: Map<u64, Vec<PositionAlert>> = Map::new(&env);
-        env.storage().instance().set(&ALERTS, &alerts);
+        let empty_alerts: Map<u64, Vec<PositionAlert>> = Map::new(&env);
+        env.storage().instance().set(&ALERTS, &empty_alerts);
 
-        let performance_data: Map<Address, Vec<PositionPerformance>> = Map::new(&env);
-        env.storage().instance().set(&PERFORMANCE_DATA, &performance_data);
+        let empty_dedup: Map<u64, u64> = Map::new(&env);
+        env.storage().instance().set(&ALERT_LAST_TS, &empty_dedup);
 
-        let batch_operations: Map<u64, BatchOperation> = Map::new(&env);
-        env.storage().instance().set(&BATCH_OPERATIONS, &batch_operations);
+        let empty_batch: Map<u64, BatchResult> = Map::new(&env);
+        env.storage().instance().set(&BATCH_OPS, &empty_batch);
 
-        env.events().publish(
-            Symbol::short("POSITION_MANAGER_INITIALIZED"),
-            admin,
-        );
+        let empty_analytics: Map<u64, PositionAnalytics> = Map::new(&env);
+        env.storage().instance().set(&ANALYTICS, &empty_analytics);
+
+        env.events().publish((Symbol::short("PM_INIT"),), admin);
     }
 
-    /// Create a new position with monitoring
-    /// 
-    /// # Arguments
-    /// * `user` - Position owner
-    /// * `asset_id` - Asset to create position for
-    /// * `collateral_token` - Collateral token address
-    /// * `collateral_amount` - Collateral amount
-    /// * `synthetic_amount` - Synthetic amount to mint
-    /// * `target_ratio` - Target collateral ratio
+    /// Create a new monitored position and record its opening analytics state.
+    ///
+    /// `entry_price` is the oracle price at creation (8 decimals).
     pub fn create_monitored_position(
         env: Env,
         user: Address,
@@ -321,304 +353,714 @@ impl PositionManagerContract {
         collateral_amount: u64,
         synthetic_amount: u64,
         target_ratio: u32,
+        entry_price: u64,
     ) -> u64 {
         Self::require_admin(&env);
 
-        // Validate position parameters
         if synthetic_amount < MIN_POSITION_SIZE {
-            panic!("Position too small");
+            panic!("position too small");
         }
 
-        let position_id = env.ledger().seq_num();
-        
-        // Create the position (would call synthetic protocol)
-        let new_position = SyntheticPosition {
+        let now = env.ledger().timestamp();
+        let position_id = env.ledger().seq_num() as u64;
+
+        // Build synthetic position
+        let mut collateral_map: Map<Address, u64> = Map::new(&env);
+        collateral_map.set(collateral_token, collateral_amount);
+
+        let position = SyntheticPosition {
             owner: user.clone(),
             asset_id,
             synthetic_amount,
-            collateral_deposits: Map::new(&env),
+            collateral_deposits: collateral_map,
             debt_amount: synthetic_amount,
             collateral_ratio: target_ratio,
-            created_at: env.ledger().timestamp(),
-            last_updated: env.ledger().timestamp(),
+            created_at: now,
+            last_updated: now,
             liquidating: false,
         };
 
-        // Store position metadata
-        let metadata = PositionMetadata {
+        // Persist in user positions map
+        let mut user_map = Self::load_user_positions(&env);
+        let mut pos_list = user_map.get(user.clone()).unwrap_or_else(|| Vec::new(&env));
+        pos_list.push_back(position);
+        user_map.set(user.clone(), pos_list);
+        env.storage().instance().set(&USER_POSITIONS, &user_map);
+
+        // Compute initial risk score
+        let risk = Self::compute_risk_score_internal(target_ratio, 3000, 0, 5000).total_score;
+
+        // Persist metadata
+        let meta = PositionMetadata {
             position_id,
             owner: user.clone(),
             asset_id,
-            created_at: env.ledger().timestamp(),
-            last_updated: env.ledger().timestamp(),
+            created_at: now,
+            last_updated: now,
             status: PositionStatus::Active,
-            risk_score: Self::calculate_initial_risk_score(&new_position),
-            performance: PositionPerformance {
-                pnl: 0,
-                return_bps: 0,
-                days_held: 0,
-                max_drawdown: 0,
-                sharpe_ratio: 10000, // Start at 1.0
-                win_rate: 10000, // Start at 100%
-            },
+            risk_score: risk,
         };
+        let mut meta_map = Self::load_meta(&env);
+        meta_map.set(position_id, meta);
+        env.storage().instance().set(&POSITION_META, &meta_map);
 
-        let mut user_positions = Self::get_user_positions(&env);
-        let positions = user_positions.get(user.clone()).unwrap_or_else(|| Vec::new(&env));
-        let mut updated_positions = positions;
-        updated_positions.push_back(new_position);
-        user_positions.set(user, updated_positions);
-        env.storage().instance().set(&USER_POSITIONS, &user_positions);
-
-        let mut position_metadata = Self::get_position_metadata(&env);
-        position_metadata.set(position_id, metadata);
-        env.storage().instance().set(&POSITION_METADATA, &position_metadata);
+        // Seed analytics record (issue #214)
+        let analytics = PositionAnalytics {
+            position_id,
+            owner: user.clone(),
+            asset_id,
+            pnl: 0,
+            roi_bps: 0,
+            max_drawdown_bps: 0,
+            sharpe_ratio_scaled: 0,
+            entry_price,
+            current_price: entry_price,
+            synthetic_amount,
+            initial_collateral: collateral_amount,
+            days_held: 0,
+            daily_returns_sum: 0,
+            daily_returns_sq_sum: 0,
+            daily_return_samples: 0,
+            last_updated: now,
+        };
+        let mut anl_map = Self::load_analytics(&env);
+        anl_map.set(position_id, analytics);
+        env.storage().instance().set(&ANALYTICS, &anl_map);
 
         env.events().publish(
-            Symbol::short("MONITORED_POSITION_CREATED"),
+            (Symbol::short("POS_CREATED"),),
             (user, position_id, asset_id),
         );
-
         position_id
     }
 
-    /// Monitor all positions and create alerts
-    /// 
-    /// This function is called periodically to check position health
-    pub fn monitor_positions(env: Env) {
-        let position_metadata = Self::get_position_metadata(&env);
-        let current_time = env.ledger().timestamp();
+    // =========================================================================
+    // Issue #211 — Batch position operations
+    // =========================================================================
 
-        for metadata in position_metadata.values() {
-            if current_time - metadata.last_updated < MONITORING_INTERVAL {
-                continue; // Skip if recently checked
+    /// Close up to `MAX_BATCH_SIZE` (20) positions in a single call.
+    ///
+    /// Each item is attempted independently; a failure on one position does
+    /// **not** roll back the others (partial-failure semantics).
+    pub fn batch_close_positions(
+        env: Env,
+        caller: Address,
+        items: Vec<BatchCloseItem>,
+    ) -> BatchResult {
+        caller.require_auth();
+
+        let count = items.len();
+        if count > MAX_BATCH_SIZE {
+            panic!("batch exceeds limit of 20");
+        }
+
+        let mut results: Vec<BatchItemResult> = Vec::new(&env);
+        let mut succeeded: u32 = 0;
+        let mut failed: u32 = 0;
+
+        let mut meta_map = Self::load_meta(&env);
+        let mut user_map = Self::load_user_positions(&env);
+        let mut anl_map  = Self::load_analytics(&env);
+        let now = env.ledger().timestamp();
+
+        for item in items.iter() {
+            // Validate ownership and status
+            let ok = if let Some(mut meta) = meta_map.get(item.position_id) {
+                if meta.owner != item.owner {
+                    false // not owned by claimed address
+                } else if meta.status == PositionStatus::Closed {
+                    false // already closed
+                } else if meta.status == PositionStatus::Liquidating {
+                    false // in liquidation, cannot batch-close
+                } else {
+                    // Mark closed in metadata
+                    meta.status = PositionStatus::Closed;
+                    meta.last_updated = now;
+                    meta_map.set(item.position_id, meta.clone());
+
+                    // Remove position from user's list
+                    if let Some(pos_list) = user_map.get(item.owner.clone()) {
+                        let mut new_list: Vec<SyntheticPosition> = Vec::new(&env);
+                        for p in pos_list.iter() {
+                            if p.asset_id != meta.asset_id || p.owner != meta.owner {
+                                new_list.push_back(p);
+                            }
+                        }
+                        user_map.set(item.owner.clone(), new_list);
+                    }
+
+                    // Finalise analytics PnL snapshot
+                    if let Some(mut anl) = anl_map.get(item.position_id) {
+                        anl.days_held = ((now - anl.last_updated) / 86400) as u32;
+                        anl.last_updated = now;
+                        anl_map.set(item.position_id, anl);
+                    }
+
+                    true
+                }
+            } else {
+                false // position not found
+            };
+
+            let error_code = if ok {
+                Symbol::short("OK")
+            } else {
+                Symbol::short("ERR")
+            };
+
+            results.push_back(BatchItemResult {
+                position_id: item.position_id,
+                success: ok,
+                error_code,
+            });
+
+            if ok { succeeded += 1; } else { failed += 1; }
+        }
+
+        env.storage().instance().set(&POSITION_META, &meta_map);
+        env.storage().instance().set(&USER_POSITIONS, &user_map);
+        env.storage().instance().set(&ANALYTICS, &anl_map);
+
+        let batch_result = BatchResult {
+            total: count,
+            succeeded,
+            failed,
+            results,
+        };
+
+        env.events().publish(
+            (Symbol::short("BATCH_CLOSE"),),
+            (succeeded, failed),
+        );
+
+        batch_result
+    }
+
+    /// Rebalance up to 20 positions toward their requested `target_ratio`.
+    ///
+    /// A rebalance is skipped (partial failure) when:
+    /// - position is not found / not owned by the claimed address
+    /// - position is Closed or Liquidating
+    /// - ratio change is below `REBALANCING_THRESHOLD`
+    pub fn batch_rebalance_positions(
+        env: Env,
+        caller: Address,
+        items: Vec<BatchRebalanceItem>,
+    ) -> BatchResult {
+        caller.require_auth();
+
+        if items.len() > MAX_BATCH_SIZE {
+            panic!("batch exceeds limit of 20");
+        }
+
+        let count = items.len();
+        let mut results: Vec<BatchItemResult> = Vec::new(&env);
+        let mut succeeded: u32 = 0;
+        let mut failed: u32 = 0;
+
+        let mut meta_map = Self::load_meta(&env);
+        let mut user_map = Self::load_user_positions(&env);
+        let now = env.ledger().timestamp();
+
+        for item in items.iter() {
+            let ok = if let Some(mut meta) = meta_map.get(item.position_id) {
+                if meta.owner != item.owner
+                    || meta.status == PositionStatus::Closed
+                    || meta.status == PositionStatus::Liquidating
+                {
+                    false
+                } else {
+                    // Update collateral_ratio on the stored SyntheticPosition
+                    if let Some(pos_list) = user_map.get(item.owner.clone()) {
+                        let mut new_list: Vec<SyntheticPosition> = Vec::new(&env);
+                        let mut changed = false;
+                        for mut p in pos_list.iter() {
+                            if p.asset_id == meta.asset_id && p.owner == meta.owner {
+                                let current = p.collateral_ratio;
+                                let target  = item.target_ratio;
+                                let delta = if current > target { current - target } else { target - current };
+                                if delta >= REBALANCING_THRESHOLD {
+                                    p.collateral_ratio = target;
+                                    p.last_updated = now;
+                                    changed = true;
+                                }
+                            }
+                            new_list.push_back(p);
+                        }
+                        user_map.set(item.owner.clone(), new_list);
+                        if !changed {
+                            false // below threshold
+                        } else {
+                            // Recalculate risk score
+                            let breakdown = Self::compute_risk_score_internal(
+                                item.target_ratio, 2000, 0, 5000,
+                            );
+                            meta.risk_score = breakdown.total_score;
+                            meta.last_updated = now;
+                            if meta.risk_score >= 8000 {
+                                meta.status = PositionStatus::Warning;
+                            }
+                            meta_map.set(item.position_id, meta);
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                }
+            } else {
+                false
+            };
+
+            let error_code = if ok { Symbol::short("OK") } else { Symbol::short("ERR") };
+            results.push_back(BatchItemResult { position_id: item.position_id, success: ok, error_code });
+            if ok { succeeded += 1; } else { failed += 1; }
+        }
+
+        env.storage().instance().set(&POSITION_META, &meta_map);
+        env.storage().instance().set(&USER_POSITIONS, &user_map);
+
+        let batch_result = BatchResult { total: count, succeeded, failed, results };
+        env.events().publish((Symbol::short("BATCH_RBAL"),), (succeeded, failed));
+        batch_result
+    }
+
+    /// Add or remove collateral for up to 20 positions in one call.
+    ///
+    /// `delta > 0` adds collateral; `delta < 0` removes collateral.
+    /// A removal that would take collateral below zero is rejected (partial failure).
+    pub fn batch_adjust_collateral(
+        env: Env,
+        caller: Address,
+        items: Vec<BatchCollateralItem>,
+    ) -> BatchResult {
+        caller.require_auth();
+
+        if items.len() > MAX_BATCH_SIZE {
+            panic!("batch exceeds limit of 20");
+        }
+
+        let count = items.len();
+        let mut results: Vec<BatchItemResult> = Vec::new(&env);
+        let mut succeeded: u32 = 0;
+        let mut failed: u32 = 0;
+
+        let mut meta_map = Self::load_meta(&env);
+        let mut user_map = Self::load_user_positions(&env);
+        let now = env.ledger().timestamp();
+
+        for item in items.iter() {
+            let ok = if let Some(mut meta) = meta_map.get(item.position_id) {
+                if meta.owner != item.owner
+                    || meta.status == PositionStatus::Closed
+                    || meta.status == PositionStatus::Liquidating
+                {
+                    false
+                } else if let Some(pos_list) = user_map.get(item.owner.clone()) {
+                    let mut new_list: Vec<SyntheticPosition> = Vec::new(&env);
+                    let mut changed = false;
+                    for mut p in pos_list.iter() {
+                        if p.asset_id == meta.asset_id && p.owner == meta.owner {
+                            let current_col = p.collateral_deposits
+                                .get(item.collateral_token.clone())
+                                .unwrap_or(0);
+                            if item.delta < 0 {
+                                let remove = (-item.delta) as u64;
+                                if remove > current_col {
+                                    // Would underflow — skip
+                                } else {
+                                    p.collateral_deposits.set(item.collateral_token.clone(), current_col - remove);
+                                    p.last_updated = now;
+                                    changed = true;
+                                }
+                            } else {
+                                let add = item.delta as u64;
+                                p.collateral_deposits.set(item.collateral_token.clone(), current_col + add);
+                                p.last_updated = now;
+                                changed = true;
+                            }
+                        }
+                        new_list.push_back(p);
+                    }
+                    if changed {
+                        user_map.set(item.owner.clone(), new_list);
+                        meta.last_updated = now;
+                        meta_map.set(item.position_id, meta);
+                    }
+                    changed
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let error_code = if ok { Symbol::short("OK") } else { Symbol::short("ERR") };
+            results.push_back(BatchItemResult { position_id: item.position_id, success: ok, error_code });
+            if ok { succeeded += 1; } else { failed += 1; }
+        }
+
+        env.storage().instance().set(&POSITION_META, &meta_map);
+        env.storage().instance().set(&USER_POSITIONS, &user_map);
+
+        let batch_result = BatchResult { total: count, succeeded, failed, results };
+        env.events().publish((Symbol::short("BATCH_COL"),), (succeeded, failed));
+        batch_result
+    }
+
+    // =========================================================================
+    // Issue #212 — Position risk scoring
+    // =========================================================================
+
+    /// Compute and persist the risk score for `position_id`.
+    ///
+    /// Callers supply live market inputs; the contract stores the result and
+    /// returns the full breakdown.
+    ///
+    /// # Arguments
+    /// * `position_id`      — position to score
+    /// * `current_ratio`    — current collateral ratio in basis points
+    /// * `volatility_30d`   — 30-day annualised volatility in basis points
+    ///                        (e.g. 3000 = 30 %)
+    /// * `position_age_days`— days the position has been open
+    /// * `market_score`     — external market-condition score 0-10 000
+    ///                        (0 = perfect conditions, 10 000 = worst)
+    pub fn calculate_risk_score(
+        env: Env,
+        position_id: u64,
+        current_ratio: u32,
+        volatility_30d: u32,
+        position_age_days: u32,
+        market_score: u32,
+    ) -> RiskScoreBreakdown {
+        let breakdown = Self::compute_risk_score_internal(
+            current_ratio,
+            volatility_30d,
+            position_age_days,
+            market_score,
+        );
+
+        // Persist back into position metadata
+        let mut meta_map = Self::load_meta(&env);
+        if let Some(mut meta) = meta_map.get(position_id) {
+            meta.risk_score = breakdown.total_score;
+            meta.last_updated = env.ledger().timestamp();
+
+            // Upgrade status based on new score
+            if meta.status != PositionStatus::Closed && meta.status != PositionStatus::Liquidating {
+                meta.status = if breakdown.total_score >= 9500 {
+                    PositionStatus::Frozen
+                } else if breakdown.total_score >= 8000 {
+                    PositionStatus::Warning
+                } else {
+                    PositionStatus::Active
+                };
             }
+            meta_map.set(position_id, meta);
+            env.storage().instance().set(&POSITION_META, &meta_map);
+        }
 
-            // Get current position data
-            let user_positions = Self::get_user_positions(&env);
-            if let Some(positions) = user_positions.get(&metadata.owner) {
-                if let Some(position) = positions.iter().find(|p| p.asset_id == metadata.asset_id) {
-                    let new_risk_score = Self::calculate_position_risk(&env, &position);
-                    let new_status = Self::determine_position_status(&env, &position, new_risk_score);
+        env.events().publish(
+            (Symbol::short("RISK_SCORED"),),
+            (position_id, breakdown.total_score),
+        );
 
-                    // Create alerts if needed
-                    if new_risk_score < 3000 { // High risk
-                        Self::create_alert(&env, metadata.position_id, AlertType::LiquidationRisk, 
-                            Symbol::short("High liquidation risk"), AlertSeverity::Critical);
+        breakdown
+    }
+
+    /// Return the stored risk score for a position without re-computing it.
+    pub fn get_risk_score(env: Env, position_id: u64) -> u32 {
+        let meta_map = Self::load_meta(&env);
+        meta_map
+            .get(position_id)
+            .map(|m| m.risk_score)
+            .unwrap_or(10_000) // unknown → maximum risk
+    }
+
+    // =========================================================================
+    // Issue #213 — Alert system
+    // =========================================================================
+
+    /// Raise an alert for a position.
+    ///
+    /// Deduplication: if the same `(position_id, alert_type)` pair was raised
+    /// within `ALERT_DEDUP_WINDOW` seconds, the call is a no-op and returns 0.
+    /// Otherwise the new alert ID is returned.
+    pub fn raise_alert(
+        env: Env,
+        position_id: u64,
+        alert_type: AlertType,
+        severity: AlertSeverity,
+        message: Symbol,
+    ) -> u64 {
+        let now = env.ledger().timestamp();
+
+        // Deduplication key: combine position_id and alert_type discriminant
+        let dedup_key: u64 = position_id * 10
+            + match alert_type {
+                AlertType::LowCollateral    => 0,
+                AlertType::PriceVolatility  => 1,
+                AlertType::LiquidationRisk  => 2,
+                AlertType::OracleFailure    => 3,
+            };
+
+        let mut dedup_map: Map<u64, u64> = env
+            .storage()
+            .instance()
+            .get(&ALERT_LAST_TS)
+            .unwrap_or_else(|| Map::new(&env));
+
+        if let Some(last_ts) = dedup_map.get(dedup_key) {
+            if now - last_ts < ALERT_DEDUP_WINDOW {
+                return 0; // duplicate — silently ignore
+            }
+        }
+
+        // Record dedup timestamp
+        dedup_map.set(dedup_key, now);
+        env.storage().instance().set(&ALERT_LAST_TS, &dedup_map);
+
+        // Create alert
+        let alert_id = env.ledger().seq_num() as u64;
+        let alert = PositionAlert {
+            alert_id,
+            position_id,
+            alert_type: alert_type.clone(),
+            severity: severity.clone(),
+            message,
+            timestamp: now,
+            acknowledged: false,
+        };
+
+        let mut alerts_map = Self::load_alerts(&env);
+        let mut pos_alerts = alerts_map
+            .get(position_id)
+            .unwrap_or_else(|| Vec::new(&env));
+        pos_alerts.push_back(alert);
+        alerts_map.set(position_id, pos_alerts);
+        env.storage().instance().set(&ALERTS, &alerts_map);
+
+        env.events().publish(
+            (Symbol::short("ALERT_RAISED"),),
+            (alert_id, position_id),
+        );
+        alert_id
+    }
+
+    /// Acknowledge an alert so it no longer appears as outstanding.
+    ///
+    /// Only the owner of the position the alert belongs to may acknowledge it.
+    pub fn acknowledge_alert(env: Env, caller: Address, position_id: u64, alert_id: u64) {
+        caller.require_auth();
+
+        // Verify caller owns the position
+        let meta_map = Self::load_meta(&env);
+        let meta = meta_map.get(position_id)
+            .unwrap_or_else(|| panic!("position not found"));
+        if meta.owner != caller {
+            panic!("not position owner");
+        }
+
+        let mut alerts_map = Self::load_alerts(&env);
+        let pos_alerts = alerts_map
+            .get(position_id)
+            .unwrap_or_else(|| panic!("no alerts for position"));
+
+        let mut updated: Vec<PositionAlert> = Vec::new(&env);
+        for mut a in pos_alerts.iter() {
+            if a.alert_id == alert_id {
+                a.acknowledged = true;
+            }
+            updated.push_back(a);
+        }
+        alerts_map.set(position_id, updated);
+        env.storage().instance().set(&ALERTS, &alerts_map);
+
+        env.events().publish(
+            (Symbol::short("ALERT_ACK"),),
+            (alert_id, position_id),
+        );
+    }
+
+    /// Return all alerts for a position (history, including acknowledged ones).
+    pub fn get_position_alerts(env: Env, position_id: u64) -> Vec<PositionAlert> {
+        let alerts_map = Self::load_alerts(&env);
+        alerts_map
+            .get(position_id)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return all un-acknowledged alerts across all positions owned by `user`.
+    pub fn get_user_alerts(env: Env, user: Address) -> Vec<PositionAlert> {
+        let meta_map   = Self::load_meta(&env);
+        let alerts_map = Self::load_alerts(&env);
+        let mut out: Vec<PositionAlert> = Vec::new(&env);
+
+        for meta in meta_map.values() {
+            if meta.owner != user {
+                continue;
+            }
+            if let Some(pos_alerts) = alerts_map.get(meta.position_id) {
+                for a in pos_alerts.iter() {
+                    if !a.acknowledged {
+                        out.push_back(a);
                     }
-
-                    if new_risk_score < 5000 { // Medium risk
-                        Self::create_alert(&env, metadata.position_id, AlertType::LowCollateralRatio,
-                            Symbol::short("Low collateral ratio"), AlertSeverity::Warning);
-                    }
-
-                    // Update metadata
-                    let mut updated_metadata = metadata.clone();
-                    updated_metadata.last_updated = current_time;
-                    updated_metadata.risk_score = new_risk_score;
-                    updated_metadata.status = new_status;
-                    updated_metadata.performance = Self::update_performance_metrics(&env, &position, &metadata.performance);
-
-                    let mut all_metadata = Self::get_position_metadata(&env);
-                    all_metadata.set(metadata.position_id, updated_metadata);
-                    env.storage().instance().set(&POSITION_METADATA, &all_metadata);
                 }
             }
         }
+        out
     }
 
-    /// Create batch operation
-    /// 
-    /// # Arguments
-    /// * `user` - User creating the batch
-    /// * `operation_type` - Type of batch operation
-    /// * `operations` - Operations to execute
-    pub fn create_batch_operation(
+    /// Trigger the standard monitoring pass: evaluate every active position and
+    /// raise alerts automatically based on risk score thresholds.
+    pub fn monitor_positions(
         env: Env,
-        user: Address,
-        operation_type: BatchOperationType,
-        operations: Vec<BatchOperationItem>,
-    ) -> u64 {
-        Self::require_admin(&env);
-
-        if operations.len() > 20 {
-            panic!("Batch too large");
-        }
-
-        let operation_id = env.ledger().seq_num();
-        let batch_op = BatchOperation {
-            operation_id,
-            operation_type: operation_type.clone(),
-            user: user.clone(),
-            operations: operations.clone(),
-            created_at: env.ledger().timestamp(),
-            executed_at: None,
-            status: BatchStatus::Pending,
-        };
-
-        let mut batch_operations = Self::get_batch_operations(&env);
-        batch_operations.set(operation_id, batch_op);
-        env.storage().instance().set(&BATCH_OPERATIONS, &batch_operations);
-
-        env.events().publish(
-            Symbol::short("BATCH_OPERATION_CREATED"),
-            (user, operation_id),
-        );
-
-        operation_id
-    }
-
-    /// Execute batch operation
-    /// 
-    /// # Arguments
-    /// * `operation_id` - Batch operation to execute
-    pub fn execute_batch_operation(env: Env, operation_id: u64) {
-        let mut batch_operations = Self::get_batch_operations(&env);
-        let mut batch_op = batch_operations.get(operation_id)
-            .unwrap_or_else(|| panic!("Batch operation not found"));
-
-        if batch_op.status != BatchStatus::Pending {
-            panic!("Operation not in pending state");
-        }
-
-        batch_op.status = BatchStatus::Executing;
-        batch_operations.set(operation_id, batch_op);
-        env.storage().instance().set(&BATCH_OPERATIONS, &batch_operations);
-
-        // Execute each operation in the batch
-        let mut success_count = 0u32;
-        let mut failure_count = 0u32;
-
-        for operation in batch_op.operations.iter() {
-            // In production, execute the actual operation
-            // For now, simulate execution
-            let execution_success = Self::simulate_operation_execution(&env, &operation);
-            
-            if execution_success {
-                success_count += 1;
-            } else {
-                failure_count += 1;
-            }
-        }
-
-        // Update batch status
-        batch_op.executed_at = Some(env.ledger().timestamp());
-        batch_op.status = if failure_count == 0 { 
-            BatchStatus::Completed 
-        } else { 
-            BatchStatus::Failed 
-        };
-
-        batch_operations.set(operation_id, batch_op);
-        env.storage().instance().set(&BATCH_OPERATIONS, &batch_operations);
-
-        env.events().publish(
-            Symbol::short("BATCH_OPERATION_EXECUTED"),
-            (operation_id, success_count, failure_count),
-        );
-    }
-
-    /// Rebalance position to target ratio
-    /// 
-    /// # Arguments
-    /// * `user` - Position owner
-    /// * `position_id` - Position to rebalance
-    /// * `target_ratio` - New target ratio
-    pub fn rebalance_position(
-        env: Env,
-        user: Address,
-        position_id: u64,
-        target_ratio: u32,
+        volatility_30d: u32,
+        market_score: u32,
     ) {
-        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let mut meta_map = Self::load_meta(&env);
+        let user_map     = Self::load_user_positions(&env);
 
-        let position_metadata = Self::get_position_metadata(&env);
-        let metadata = position_metadata.get(position_id)
-            .unwrap_or_else(|| panic!("Position not found"));
+        for mut meta in meta_map.values() {
+            if meta.status == PositionStatus::Closed {
+                continue;
+            }
+            if now.saturating_sub(meta.last_updated) < MONITORING_INTERVAL {
+                continue;
+            }
 
-        let current_ratio = metadata.performance.return_bps as u32 + 10000; // Convert to ratio
-        let ratio_change = if current_ratio > target_ratio {
-            current_ratio - target_ratio
-        } else {
-            target_ratio - current_ratio
-        };
+            // Find the underlying position to get current ratio
+            let current_ratio = if let Some(pos_list) = user_map.get(meta.owner.clone()) {
+                pos_list
+                    .iter()
+                    .find(|p| p.asset_id == meta.asset_id)
+                    .map(|p| p.collateral_ratio)
+                    .unwrap_or(15000)
+            } else {
+                15000
+            };
 
-        if ratio_change < REBALANCING_THRESHOLD {
-            panic!("Insufficient ratio change for rebalancing");
+            let age_days = ((now - meta.created_at) / 86400) as u32;
+            let breakdown = Self::compute_risk_score_internal(
+                current_ratio, volatility_30d, age_days, market_score,
+            );
+
+            meta.risk_score   = breakdown.total_score;
+            meta.last_updated = now;
+
+            // Raise alerts based on thresholds
+            if breakdown.total_score >= 9500 {
+                meta.status = PositionStatus::Frozen;
+                Self::raise_alert(
+                    env.clone(), meta.position_id,
+                    AlertType::LiquidationRisk, AlertSeverity::Emergency,
+                    Symbol::short("NEAR_LIQ"),
+                );
+            } else if breakdown.total_score >= 8000 {
+                meta.status = PositionStatus::Warning;
+                Self::raise_alert(
+                    env.clone(), meta.position_id,
+                    AlertType::LiquidationRisk, AlertSeverity::Critical,
+                    Symbol::short("LIQ_RISK"),
+                );
+            } else if breakdown.total_score >= 6000 {
+                Self::raise_alert(
+                    env.clone(), meta.position_id,
+                    AlertType::LowCollateral, AlertSeverity::Warning,
+                    Symbol::short("LOW_COL"),
+                );
+            } else {
+                meta.status = PositionStatus::Active;
+            }
+
+            if volatility_30d >= 5000 {
+                Self::raise_alert(
+                    env.clone(), meta.position_id,
+                    AlertType::PriceVolatility, AlertSeverity::Warning,
+                    Symbol::short("HIGH_VOL"),
+                );
+            }
+
+            meta_map.set(meta.position_id, meta);
         }
 
-        // In production, execute actual rebalancing
+        env.storage().instance().set(&POSITION_META, &meta_map);
+    }
+
+    // =========================================================================
+    // Issue #214 — Position analytics / PnL
+    // =========================================================================
+
+    /// Update analytics for `position_id` using the latest mark price.
+    ///
+    /// Should be called at least once per day to accumulate daily-return
+    /// samples for the Sharpe ratio.
+    ///
+    /// # Arguments
+    /// * `current_price`   — latest oracle mark price (8 decimals)
+    pub fn update_analytics(env: Env, position_id: u64, current_price: u64) {
+        let now = env.ledger().timestamp();
+        let mut anl_map = Self::load_analytics(&env);
+
+        let mut anl = anl_map.get(position_id)
+            .unwrap_or_else(|| panic!("analytics record not found"));
+
+        // PnL = (current_price - entry_price) * synthetic_amount / 1e8
+        let price_delta: i64 = current_price as i64 - anl.entry_price as i64;
+        anl.pnl = (price_delta * anl.synthetic_amount as i64) / 100_000_000;
+
+        // ROI in basis points = pnl / initial_collateral * 10000
+        if anl.initial_collateral > 0 {
+            anl.roi_bps = ((anl.pnl * 10_000) / anl.initial_collateral as i64) as i32;
+        }
+
+        // Max drawdown: track the worst (most negative) roi_bps seen
+        if anl.roi_bps < 0 {
+            let drawdown = (-anl.roi_bps) as u32;
+            if drawdown > anl.max_drawdown_bps {
+                anl.max_drawdown_bps = drawdown;
+            }
+        }
+
+        // Daily return sample (in basis points relative to previous price)
+        if anl.current_price > 0 && anl.current_price != current_price {
+            let daily_ret_bps: i64 =
+                ((current_price as i64 - anl.current_price as i64) * 10_000)
+                / anl.current_price as i64;
+            anl.daily_returns_sum      += daily_ret_bps;
+            anl.daily_returns_sq_sum   += (daily_ret_bps * daily_ret_bps) as u64;
+            anl.daily_return_samples   += 1;
+
+            // Sharpe ratio = mean_return / std_dev  (scaled by 10 000)
+            // mean = sum / n
+            // variance = sum_sq/n - mean^2
+            // std_dev = sqrt(variance)   — integer-approximated via Newton's method
+            if anl.daily_return_samples >= 2 {
+                let n = anl.daily_return_samples as i64;
+                let mean = anl.daily_returns_sum / n;
+                let mean_sq = mean * mean;
+                let sq_mean = (anl.daily_returns_sq_sum as i64) / n;
+                let variance = sq_mean - mean_sq;
+                if variance > 0 {
+                    let std_dev = Self::isqrt(variance as u64) as i64;
+                    if std_dev > 0 {
+                        // Scale mean by 10 000 to keep precision
+                        anl.sharpe_ratio_scaled = ((mean * 10_000) / std_dev) as i32;
+                    }
+                }
+            }
+        }
+
+        anl.current_price = current_price;
+        anl.days_held      = ((now - anl.last_updated) / 86400) as u32;
+        anl.last_updated   = now;
+
+        anl_map.set(position_id, anl);
+        env.storage().instance().set(&ANALYTICS, &anl_map);
+
         env.events().publish(
-            Symbol::short("POSITION_REBALANCED"),
-            (user, position_id, target_ratio),
-        );
-    }
-
-    /// Get position analytics
-    /// 
-    /// # Arguments
-    /// * `user` - User address
-    pub fn get_position_analytics(env: Env, user: Address) -> Vec<PositionMetadata> {
-        let position_metadata = Self::get_position_metadata(&env);
-        let mut user_analytics = Vec::new(&env);
-
-        for metadata in position_metadata.values() {
-            if metadata.owner == user {
-                user_analytics.push_back(metadata);
-            }
-        }
-
-        user_analytics
-    }
-
-    /// Get user alerts
-    /// 
-    /// # Arguments
-    /// * `user` - User address
-    pub fn get_user_alerts(env: Env, user: Address) -> Vec<PositionAlert> {
-        let position_metadata = Self::get_position_metadata(&env);
-        let alerts = Self::get_alerts(&env);
-        let mut user_alerts = Vec::new(&env);
-
-        // Get user's position IDs
-        let user_position_ids: Vec<u64> = Vec::new(&env);
-        for metadata in position_metadata.values() {
-            if metadata.owner == user {
-                user_position_ids.push_back(metadata.position_id);
-            }
-        }
-
-        // Collect alerts for user's positions
-        for alert in alerts.values() {
-            if user_position_ids.contains(&alert.position_id) {
-                user_alerts.push_back(alert);
-            }
-        }
-
-        user_alerts
-    }
-
-    /// Acknowledge alert
-    /// 
-    /// # Arguments
-    /// * `alert_id` - Alert to acknowledge
-    pub fn acknowledge_alert(env: Env, alert_id: u64) {
-        let mut alerts = Self::get_alerts(&env);
-        let mut alert_list = alerts.get(alert_id)
-            .unwrap_or_else(|| panic!("Alert not found"));
-
-        for mut alert in alert_list.iter() {
-            if alert.alert_id == alert_id {
-                alert.acknowledged = true;
-            }
-        }
-
-        alerts.set(alert_id, alert_list);
-        env.storage().instance().set(&ALERTS, &alerts);
-
-        env.events().publish(
-            Symbol::short("ALERT_ACKNOWLEDGED"),
-            alert_id,
+            (Symbol::short("ANL_UPDATED"),),
+            (position_id, current_price),
         );
     }
 
@@ -787,139 +1229,138 @@ impl PositionManagerContract {
 
     // ─── Internal Helpers ─────────────────────────────────────────────────────
 
-    fn calculate_initial_risk_score(position: &SyntheticPosition) -> u32 {
-        // Initial risk based on collateral ratio
-        if position.collateral_ratio >= 20000 { // 200%+
-            return 1000; // Low risk
-        } else if position.collateral_ratio >= 15000 { // 150%+
-            return 3000; // Medium risk
-        } else if position.collateral_ratio >= 12000 { // 120%+
-            return 6000; // High risk
-        } else {
-            return 9000; // Very high risk
+    /// Return analytics snapshots for **all** positions owned by `user`.
+    /// Satisfies the "exportable per position" acceptance criterion.
+    pub fn export_user_analytics(env: Env, user: Address) -> Vec<PositionAnalytics> {
+        let meta_map = Self::load_meta(&env);
+        let anl_map  = Self::load_analytics(&env);
+        let mut out: Vec<PositionAnalytics> = Vec::new(&env);
+
+        for meta in meta_map.values() {
+            if meta.owner == user {
+                if let Some(anl) = anl_map.get(meta.position_id) {
+                    out.push_back(anl);
+                }
+            }
         }
+        out
     }
 
-    fn calculate_position_risk(env: &Env, position: &SyntheticPosition) -> u32 {
-        // Dynamic risk calculation based on multiple factors
-        let ratio_risk = Self::calculate_initial_risk_score(position);
-        
-        // Add volatility risk (mock calculation)
-        let volatility_risk = 2000; // Medium volatility risk
-        
-        // Add time-based risk
-        let time_held = env.ledger().timestamp() - position.created_at;
-        let time_risk = if time_held > 7 * 24 * 3600 { // > 7 days
-            1000 // Additional risk for long positions
-        } else {
+    // =========================================================================
+    // Internal helpers
+    // =========================================================================
+
+    /// Core risk-score computation (issue #212).
+    ///
+    /// Returns a `RiskScoreBreakdown` with weighted components.
+    ///
+    /// | Factor           | Weight |
+    /// |------------------|--------|
+    /// | Collateral ratio | 50 %   |
+    /// | Asset volatility | 30 %   |
+    /// | Position age     | 10 %   |
+    /// | Market cond.     | 10 %   |
+    ///
+    /// Every component is a score 0-10 000 where **higher = riskier**.
+    fn compute_risk_score_internal(
+        collateral_ratio: u32,   // basis points
+        volatility_30d: u32,     // basis points (e.g. 3000 = 30%)
+        position_age_days: u32,
+        market_score: u32,       // 0-10000
+    ) -> RiskScoreBreakdown {
+        // ── Collateral component ─────────────────────────────────────────────
+        // ratio >= 300 % → 0 risk; ratio <= 110 % → 10 000 (max risk)
+        let collateral_component: u32 = if collateral_ratio >= 30000 {
             0
-        };
-
-        // Combine risks
-        let combined_risk = ratio_risk + volatility_risk + time_risk;
-        combined_risk.min(10000)
-    }
-
-    fn determine_position_status(env: &Env, position: &SyntheticPosition, risk_score: u32) -> PositionStatus {
-        if position.liquidating {
-            return PositionStatus::Liquidating;
-        }
-
-        if risk_score >= 8000 {
-            return PositionStatus::Warning;
-        } else if risk_score >= 9500 {
-            return PositionStatus::Frozen;
-        }
-
-        PositionStatus::Active
-    }
-
-    fn update_performance_metrics(
-        env: &Env,
-        current_position: &SyntheticPosition,
-        current_performance: &PositionPerformance,
-    ) -> PositionPerformance {
-        // Calculate new performance metrics
-        let time_held = env.ledger().timestamp() - current_position.created_at;
-        let days_held = (time_held / (24 * 3600)) as u32;
-
-        // Mock PnL calculation (would use actual price data)
-        let pnl = current_performance.pnl;
-        let return_bps = if current_position.debt_amount > 0 {
-            ((pnl * 10000) / current_position.debt_amount as i32) as i32
+        } else if collateral_ratio <= 11000 {
+            10_000
         } else {
-            0
+            // Linear interpolation between 11 000 and 30 000 bp
+            let range = 30000u32 - 11000;
+            let dist  = 30000u32.saturating_sub(collateral_ratio);
+            (dist * 10_000) / range
         };
 
-        PositionPerformance {
-            pnl,
-            return_bps,
-            days_held,
-            max_drawdown: current_performance.max_drawdown,
-            sharpe_ratio: current_performance.sharpe_ratio,
-            win_rate: current_performance.win_rate,
+        // ── Volatility component ─────────────────────────────────────────────
+        // 0 % volatility → 0; >= 100 % → 10 000
+        let volatility_component: u32 = volatility_30d.min(10_000);
+
+        // ── Age component ────────────────────────────────────────────────────
+        // Older positions have accumulated more risk exposure.
+        // 0 days → 0; >= 365 days → 10 000
+        let age_component: u32 = ((position_age_days as u64 * 10_000) / 365).min(10_000) as u32;
+
+        // ── Market component ─────────────────────────────────────────────────
+        // Directly passed in (already 0-10 000)
+        let market_component: u32 = market_score.min(10_000);
+
+        // ── Weighted sum ─────────────────────────────────────────────────────
+        let total_score: u32 = (
+            (collateral_component as u64 * WEIGHT_COLLATERAL as u64
+                + volatility_component as u64 * WEIGHT_VOLATILITY as u64
+                + age_component as u64 * WEIGHT_AGE as u64
+                + market_component as u64 * WEIGHT_MARKET as u64)
+            / 10_000
+        ) as u32;
+
+        RiskScoreBreakdown {
+            total_score: total_score.min(10_000),
+            collateral_component,
+            volatility_component,
+            age_component,
+            market_component,
         }
     }
 
-    fn create_alert(
-        env: &Env,
-        position_id: u64,
-        alert_type: AlertType,
-        message: Symbol,
-        severity: AlertSeverity,
-    ) {
-        let alert_id = env.ledger().seq_num();
-        let alert = PositionAlert {
-            alert_id,
-            position_id,
-            alert_type,
-            message,
-            severity,
-            timestamp: env.ledger().timestamp(),
-            acknowledged: false,
-        };
-
-        let mut alerts = Self::get_alerts(&env);
-        let mut position_alerts = alerts.get(position_id).unwrap_or_else(|| Vec::new(&env));
-        position_alerts.push_back(alert);
-        alerts.set(position_id, position_alerts);
-        env.storage().instance().set(&ALERTS, &alerts);
-
-        env.events().publish(
-            Symbol::short("ALERT_CREATED"),
-            (alert_id, position_id, alert_type),
-        );
+    /// Integer square-root via Newton's method (no floating point).
+    fn isqrt(n: u64) -> u64 {
+        if n == 0 {
+            return 0;
+        }
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
     }
 
-    fn simulate_operation_execution(env: &Env, operation: &BatchOperationItem) -> bool {
-        // Simulate operation execution
-        // In production, this would execute the actual operation
-        // For now, return success based on simple validation
-        operation.synthetic_amount > 0 && operation.collateral_amount > 0
+    // ── Storage loaders ───────────────────────────────────────────────────────
+
+    fn load_user_positions(env: &Env) -> Map<Address, Vec<SyntheticPosition>> {
+        env.storage()
+            .instance()
+            .get(&USER_POSITIONS)
+            .unwrap_or_else(|| Map::new(env))
     }
 
-    // Storage getters
-    fn get_user_positions(env: &Env) -> Map<Address, Vec<SyntheticPosition>> {
-        env.storage().instance().get(&USER_POSITIONS).unwrap()
+    fn load_meta(env: &Env) -> Map<u64, PositionMetadata> {
+        env.storage()
+            .instance()
+            .get(&POSITION_META)
+            .unwrap_or_else(|| Map::new(env))
     }
 
-    fn get_position_metadata(env: &Env) -> Map<u64, PositionMetadata> {
-        env.storage().instance().get(&POSITION_METADATA).unwrap()
+    fn load_alerts(env: &Env) -> Map<u64, Vec<PositionAlert>> {
+        env.storage()
+            .instance()
+            .get(&ALERTS)
+            .unwrap_or_else(|| Map::new(env))
     }
 
-    fn get_alerts(env: &Env) -> Map<u64, Vec<PositionAlert>> {
-        env.storage().instance().get(&ALERTS).unwrap()
+    fn load_analytics(env: &Env) -> Map<u64, PositionAnalytics> {
+        env.storage()
+            .instance()
+            .get(&ANALYTICS)
+            .unwrap_or_else(|| Map::new(env))
     }
 
-    fn get_batch_operations(env: &Env) -> Map<u64, BatchOperation> {
-        env.storage().instance().get(&BATCH_OPERATIONS).unwrap()
-    }
+    // ── Auth ──────────────────────────────────────────────────────────────────
 
     fn require_admin(env: &Env) {
-        let admin = env.storage().instance().get(&ADMIN).unwrap_optimized();
-        if env.current_contract_address() != admin {
-            panic!("Not authorized");
-        }
+        let admin: Address = env.storage().instance().get(&ADMIN).unwrap_optimized();
+        admin.require_auth();
     }
 
     fn calculate_health_factor(env: &Env, position_id: u64) -> u64 {
