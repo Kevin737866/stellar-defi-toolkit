@@ -102,3 +102,66 @@ pub struct YieldSummary {
     pub projected_annual: String,
     pub average_apy: f64,
 }
+
+// ─── Position Manager API types (issues #211-#214) ────────────────────────────
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct ApiBatchItemResult {
+    pub position_id: String,
+    pub success: bool,
+    pub error_code: String,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct ApiBatchResult {
+    pub total: i32,
+    pub succeeded: i32,
+    pub failed: i32,
+    pub results: Vec<ApiBatchItemResult>,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct ApiRiskScoreBreakdown {
+    /// Composite risk score 0–10 000 (higher = riskier)
+    pub total_score: i32,
+    /// Collateral ratio component 0–10 000 (weight 50 %)
+    pub collateral_component: i32,
+    /// Volatility component 0–10 000 (weight 30 %)
+    pub volatility_component: i32,
+    /// Age component 0–10 000 (weight 10 %)
+    pub age_component: i32,
+    /// Market condition component 0–10 000 (weight 10 %)
+    pub market_component: i32,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct ApiPositionAlert {
+    pub alert_id: String,
+    pub position_id: String,
+    pub alert_type: String,
+    pub severity: String,
+    pub message: String,
+    pub timestamp: i64,
+    pub acknowledged: bool,
+}
+
+#[derive(SimpleObject, Serialize, Deserialize, Clone, Debug)]
+pub struct ApiPositionAnalytics {
+    pub position_id: String,
+    pub owner: String,
+    pub asset_id: i32,
+    /// Profit / loss in USD (8 decimals, negative = loss)
+    pub pnl: String,
+    /// ROI in basis points
+    pub roi_bps: i32,
+    /// Maximum drawdown in basis points
+    pub max_drawdown_bps: i32,
+    /// Sharpe ratio scaled by 10 000 (e.g. 15 000 = 1.5)
+    pub sharpe_ratio_scaled: i32,
+    pub entry_price: String,
+    pub current_price: String,
+    pub synthetic_amount: String,
+    pub initial_collateral: String,
+    pub days_held: i32,
+    pub last_updated: i64,
+}
