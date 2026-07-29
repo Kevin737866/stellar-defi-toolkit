@@ -3,6 +3,7 @@
 //! NOTE: `asset`, `pool`, `stablecoin`, `synthetic`, `token`, and `vault` are
 //! temporarily excluded — see `contracts/mod.rs` for why.
 
+pub mod asset;
 pub mod lending;
 
 pub use lending::*;

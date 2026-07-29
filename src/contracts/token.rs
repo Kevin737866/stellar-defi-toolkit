@@ -40,6 +40,8 @@ pub struct TokenContract {
     recovery_requests: HashMap<String, (u64, u64)>,
     /// Recovery delay in seconds
     recovery_delay: u64,
+    /// Whether the contract is paused (set after migration – issue #218).
+    paused: bool,
 }
 
 impl TokenContract {
@@ -56,6 +58,105 @@ impl TokenContract {
             admin: None,
             recovery_requests: HashMap::new(),
             recovery_delay: 86400,
+            paused: false,
+        }
+    }
+
+    // ─── Issue #218 – Migration Interface ─────────────────────────────────────
+
+    /// Returns `true` if this contract has been paused (e.g. after migration).
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Pause the contract.  Only the admin may call this.
+    ///
+    /// In a migration scenario the protocol calls this after all state has been
+    /// transferred to the new contract.
+    pub fn pause(&mut self, caller: &str) -> Result<(), String> {
+        self.ensure_admin(caller)?;
+        self.paused = true;
+        println!("[Event] ContractPaused {{ contract: {:?} }}", self.address);
+        Ok(())
+    }
+
+    /// Unpause the contract (admin only).
+    pub fn unpause(&mut self, caller: &str) -> Result<(), String> {
+        self.ensure_admin(caller)?;
+        self.paused = false;
+        println!("[Event] ContractUnpaused {{ contract: {:?} }}", self.address);
+        Ok(())
+    }
+
+    /// Export a snapshot of all balances for migration verification.
+    ///
+    /// Returns a `HashMap<String, u64>` of address → balance together with the
+    /// current total supply so the caller can verify sum(balances) == total_supply.
+    pub fn export_balance_snapshot(&self) -> (HashMap<String, u64>, u64) {
+        (self.balances.clone(), self.total_supply)
+    }
+
+    /// Export a snapshot of all allowances for migration.
+    pub fn export_allowance_snapshot(&self) -> HashMap<String, HashMap<String, u64>> {
+        self.allowances.clone()
+    }
+
+    /// Import balances from a migration snapshot into a *new* contract instance.
+    ///
+    /// This is called on the **new** contract to replay the old contract's state.
+    /// Validates that the sum of imported balances equals `expected_total_supply`.
+    pub fn import_migration_state(
+        &mut self,
+        balances: HashMap<String, u64>,
+        allowances: HashMap<String, HashMap<String, u64>>,
+        expected_total_supply: u64,
+    ) -> Result<(), String> {
+        if self.paused {
+            return Err("contract is paused".to_string());
+        }
+
+        // Verify balance integrity.
+        let sum: u64 = balances.values().sum();
+        if sum != expected_total_supply {
+            return Err(format!(
+                "balance snapshot sum ({}) does not match expected total supply ({})",
+                sum, expected_total_supply
+            ));
+        }
+
+        self.balances = balances;
+        self.allowances = allowances;
+        self.total_supply = expected_total_supply;
+
+        println!(
+            "[Event] MigrationStateImported {{ total_supply: {}, accounts: {} }}",
+            self.total_supply,
+            self.balances.len()
+        );
+
+        Ok(())
+    }
+
+    // ─── Admin helper ─────────────────────────────────────────────────────────
+
+    /// Set the admin address (can only be done once, or must be called before any admin ops).
+    pub fn set_admin(&mut self, admin: String) {
+        self.admin = Some(admin);
+    }
+
+    fn ensure_admin(&self, caller: &str) -> Result<(), String> {
+        match &self.admin {
+            Some(admin) if admin == caller => Ok(()),
+            Some(_) => Err("caller is not the admin".to_string()),
+            None => Err("no admin configured".to_string()),
+        }
+    }
+
+    fn ensure_not_paused(&self) -> Result<(), String> {
+        if self.paused {
+            Err("contract is paused".to_string())
+        } else {
+            Ok(())
         }
     }
 
@@ -78,6 +179,7 @@ impl TokenContract {
 
     /// Mint new tokens
     pub fn mint(&mut self, to: Address, amount: u64) -> Result<(), String> {
+        self.ensure_not_paused()?;
         if amount == 0 {
             return Err("Amount must be greater than 0".to_string());
         }
@@ -120,6 +222,7 @@ impl TokenContract {
     /// Fixes issue #15: implements full transfer logic including balance check,
     /// deducting from sender, crediting receiver, and emitting a Transfer event.
     pub fn transfer(&mut self, from: Address, to: Address, amount: u64) -> Result<(), String> {
+        self.ensure_not_paused()?;
         if amount == 0 {
             return Err("Amount must be greater than 0".to_string());
         }

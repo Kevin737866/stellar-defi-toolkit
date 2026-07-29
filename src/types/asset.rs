@@ -2,8 +2,252 @@
 //!
 //! This module provides type definitions for a wide range of Stellar assets,
 //! including native assets, custom tokens, stablecoins, wrapped assets, and more.
+//!
+//! ## Issue #215 – Allowlist / Blocklist
+//! [`RegistryListEntry`] and [`ListChangeEvent`] support allow/block management.
+//!
+//! ## Issue #216 – Asset Metadata Registry
+//! [`ProtocolAssetMetadata`] stores name, symbol, decimals, token standard and
+//! contract address.  [`TokenStandard`] enumerates the supported standards.
+//!
+//! ## Issue #217 – Risk Parameters
+//! [`AssetRiskParams`] holds LTV, liquidation threshold, liquidation bonus and
+//! oracle source per collateral asset.
+//!
+//! ## Issue #218 – Asset Migration
+//! [`MigrationState`], [`MigrationStatus`] and [`MigrationEvent`] define the
+//! upgrade/migration path for token contracts.
 
 use soroban_sdk::{Address, Symbol, Map, Vec};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// ─── Issue #215 – Allowlist / Blocklist ──────────────────────────────────────
+
+/// Describes why an asset was added to (or removed from) a registry list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListChangeReason {
+    /// Added through normal governance approval.
+    GovernanceApproval,
+    /// Removed after governance vote.
+    GovernanceRemoval,
+    /// Emergency block by an admin (e.g. exploit risk).
+    EmergencyBlock,
+    /// Administrative action without a full governance vote.
+    AdminAction,
+    /// Free-form reason provided at registration time.
+    Custom(String),
+}
+
+/// A single entry in either the allowlist or the blocklist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegistryListEntry {
+    /// Canonical asset identifier (contract address string or ticker).
+    pub asset_id: String,
+    /// The admin / governance address that made the change.
+    pub changed_by: String,
+    /// Human-readable reason.
+    pub reason: ListChangeReason,
+    /// Ledger / unix timestamp at which the entry was recorded.
+    pub recorded_at: u64,
+    /// Whether the entry is currently active (can be soft-deleted).
+    pub active: bool,
+}
+
+/// Events emitted when the allowlist or blocklist changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListChangeEvent {
+    /// Asset was added to the allowlist.
+    AllowlistAdded {
+        asset_id: String,
+        changed_by: String,
+        reason: ListChangeReason,
+    },
+    /// Asset was removed from the allowlist.
+    AllowlistRemoved {
+        asset_id: String,
+        changed_by: String,
+    },
+    /// Asset was added to the blocklist.
+    BlocklistAdded {
+        asset_id: String,
+        changed_by: String,
+        reason: ListChangeReason,
+    },
+    /// Asset was removed from the blocklist.
+    BlocklistRemoved {
+        asset_id: String,
+        changed_by: String,
+    },
+}
+
+// ─── Issue #216 – Asset Metadata & Token Standards ───────────────────────────
+
+/// Recognised token standards on Stellar / Soroban.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TokenStandard {
+    /// Stellar native asset (XLM).
+    StellarNative,
+    /// SEP-41 fungible token interface.
+    Sep41,
+    /// Classic Stellar asset (SEP-0011 / TOML-described).
+    ClassicStellarAsset,
+    /// Wrapped asset bridged from another chain.
+    Wrapped,
+    /// Custom / unknown standard.
+    Custom(String),
+}
+
+impl std::fmt::Display for TokenStandard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenStandard::StellarNative => write!(f, "StellarNative"),
+            TokenStandard::Sep41 => write!(f, "SEP-41"),
+            TokenStandard::ClassicStellarAsset => write!(f, "ClassicStellarAsset"),
+            TokenStandard::Wrapped => write!(f, "Wrapped"),
+            TokenStandard::Custom(s) => write!(f, "Custom({})", s),
+        }
+    }
+}
+
+/// Full metadata for a protocol-registered asset (issue #216).
+///
+/// Queryable by any contract via [`AssetRegistry::get_asset_metadata`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolAssetMetadata {
+    /// Canonical asset identifier (contract address string or ticker).
+    pub asset_id: String,
+    /// Human-readable asset name (e.g. "USD Coin").
+    pub name: String,
+    /// Ticker symbol (e.g. "USDC").
+    pub symbol: String,
+    /// Number of decimal places (e.g. 7 for Stellar-native, 6 for USDC).
+    pub decimals: u8,
+    /// On-chain contract address (empty string for native XLM).
+    pub contract_address: String,
+    /// Token standard this asset conforms to.
+    pub standard: TokenStandard,
+    /// Whether the metadata record is currently valid / active.
+    pub active: bool,
+    /// Ledger timestamp when this metadata was first registered.
+    pub registered_at: u64,
+    /// Ledger timestamp of the most recent admin metadata update.
+    pub last_updated_at: u64,
+}
+
+// ─── Issue #217 – Risk Parameters ────────────────────────────────────────────
+
+/// Risk parameters for an asset used as collateral (issue #217).
+///
+/// All ratio fields are expressed in *basis points* (1 bps = 0.01 %).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssetRiskParams {
+    /// Canonical asset identifier.
+    pub asset_id: String,
+    /// Loan-to-value ratio in bps (e.g. 7500 = 75 %).
+    /// The maximum a borrower can draw against this collateral.
+    pub ltv_bps: u32,
+    /// Liquidation threshold in bps (e.g. 8000 = 80 %).
+    /// Below this health-factor the position becomes liquidatable.
+    pub liquidation_threshold_bps: u32,
+    /// Liquidation bonus in bps (e.g. 500 = 5 %).
+    /// Extra collateral reward paid to the liquidator.
+    pub liquidation_bonus_bps: u32,
+    /// Identifier of the oracle / price-source assigned to this asset.
+    pub oracle_source: String,
+    /// Ledger timestamp when these parameters were last set.
+    pub last_updated_at: u64,
+}
+
+impl AssetRiskParams {
+    /// Basic invariant: LTV ≤ liquidation threshold.
+    pub fn is_valid(&self) -> bool {
+        self.ltv_bps <= self.liquidation_threshold_bps
+            && self.liquidation_threshold_bps <= 10_000
+            && self.liquidation_bonus_bps <= 5_000
+    }
+}
+
+// ─── Issue #218 – Migration / Upgrade Path ────────────────────────────────────
+
+/// Current phase of a token-contract migration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MigrationStatus {
+    /// Migration has been requested but not yet started.
+    Pending,
+    /// Balances are being migrated.
+    InProgress,
+    /// All state has been transferred; old contract is paused.
+    Completed,
+    /// Migration was cancelled before completion.
+    Cancelled,
+}
+
+/// Tracks the full state of a token-contract upgrade/migration (issue #218).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MigrationState {
+    /// Asset being migrated.
+    pub asset_id: String,
+    /// Address of the old (source) contract.
+    pub old_contract: String,
+    /// Address of the new (destination) contract.
+    pub new_contract: String,
+    /// Snapshot of all balances at migration initiation: address → amount.
+    pub balance_snapshot: HashMap<String, u64>,
+    /// Snapshot of all allowances: owner → (spender → amount).
+    pub allowance_snapshot: HashMap<String, HashMap<String, u64>>,
+    /// Total supply at the time the migration was initiated.
+    pub total_supply_snapshot: u64,
+    /// Current migration phase.
+    pub status: MigrationStatus,
+    /// Address that initiated the migration.
+    pub initiated_by: String,
+    /// Ledger timestamp when migration was initiated.
+    pub initiated_at: u64,
+    /// Ledger timestamp when migration completed (0 if not yet done).
+    pub completed_at: u64,
+    /// Whether the old contract has been paused post-migration.
+    pub old_contract_paused: bool,
+}
+
+/// Audit-trail events emitted during a migration (issue #218).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MigrationEvent {
+    /// Migration was initiated.
+    Initiated {
+        asset_id: String,
+        old_contract: String,
+        new_contract: String,
+        initiated_by: String,
+    },
+    /// Balances were successfully transferred to the new contract.
+    BalancesMigrated {
+        asset_id: String,
+        accounts_migrated: u64,
+        total_supply: u64,
+    },
+    /// Allowances were successfully transferred to the new contract.
+    AllowancesMigrated {
+        asset_id: String,
+        allowances_migrated: u64,
+    },
+    /// The old contract was paused to prevent further operations.
+    OldContractPaused {
+        asset_id: String,
+        old_contract: String,
+    },
+    /// Migration completed successfully.
+    Completed {
+        asset_id: String,
+        old_contract: String,
+        new_contract: String,
+    },
+    /// Migration was cancelled (old contract remains active).
+    Cancelled {
+        asset_id: String,
+        cancelled_by: String,
+    },
+}
 
 /// Stellar asset identifier - can be native XLM or a custom token
 #[derive(Clone, Debug, Eq, PartialEq)]

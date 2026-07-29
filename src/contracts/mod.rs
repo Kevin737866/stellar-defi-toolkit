@@ -10,6 +10,7 @@
 //! liquidity_pool, multi_asset_oracle, oracle_manager, position_manager,
 //! price_feed_adapters, price_oracle, stability_pool, stablecoin, staking,
 //! synthetic_governance, synthetic_protocol, token, vault.
+pub mod asset_registry_protocol;
 pub mod lending;
 pub mod oracle;
 pub mod oracle_manager;

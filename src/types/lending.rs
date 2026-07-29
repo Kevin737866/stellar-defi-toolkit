@@ -327,6 +327,9 @@ pub enum ProtocolError {
     InsufficientApprovals,
     #[error("caller already approved this proposal")]
     AlreadyApproved,
+    /// Emitted when an asset is not on the allowlist (or is blocklisted).
+    #[error("asset {0} is not allowed by the asset registry")]
+    AssetNotAllowed(String),
 }
 
 impl InterestRateModel {

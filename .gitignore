@@ -65,6 +65,16 @@ soroban/
 test-data/
 fixtures/
 
+# Test snapshots (auto-generated, not part of reviewed work)
+test_snapshots/
+**/*.snap
+**/*.snap.new
+
+# Test snapshots (auto-generated, not part of reviewed work)
+test_snapshots/
+**/*.snap
+**/*.snap.new
+
 # Documentation build
 /docs/build/
 /book/
