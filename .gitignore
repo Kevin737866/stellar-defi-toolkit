@@ -3,6 +3,12 @@
 **/*.rs.bk
 Cargo.lock
 
+# Test snapshots and artifacts
+test_snapshots/
+**/__snapshots__/
+**/*.snap
+coverage/
+
 # IDE
 .vscode/
 .idea/
@@ -41,10 +47,6 @@ yarn-error.log*
 # Build artifacts
 /dist/
 /build/
-
-# Coverage reports
-/coverage/
-*.lcov
 
 # Backup files
 *.bak
