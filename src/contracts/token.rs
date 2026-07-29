@@ -38,6 +38,12 @@ pub struct TokenContract {
     admin: Option<String>,
     /// Recovery requests: (original_owner, tx_hash) -> (amount, request_time)
     recovery_requests: HashMap<String, (u64, u64)>,
+    /// Issue #225: Blacklisted addresses (address string -> true)
+    blacklisted: HashMap<String, bool>,
+    /// Issue #224: Airdrop records (airdrop_id -> MerkleAirdrop)
+    airdrops: HashMap<u32, MerkleAirdrop>,
+    /// Issue #224: Claimed airdrop tracking (airdrop_id, address -> true)
+    airdrop_claims: HashMap<(u32, String), bool>,
     /// Recovery delay in seconds
     recovery_delay: u64,
     // ─── Issue #222: Token Permit (EIP-2612 style) ─────────────────────────
@@ -1091,5 +1097,188 @@ mod sep41_metadata_tests {
         assert_eq!(token.symbol(), "DFT");
         assert_eq!(token.decimals(), 7);
         assert_eq!(token.token_uri(), Some("ipfs://Qm123/metadata.json"));
+    }
+}
+
+
+// ── Issue #224: Merkle Airdrop ──────────────────────────────────────────────
+
+/// A Merkle-tree-based airdrop distribution.
+#[derive(Clone, Debug)]
+pub struct MerkleAirdrop {
+    pub id: u32,
+    pub token: String,
+    pub merkle_root: [u8; 32],
+    pub total_amount: u64,
+    pub claimed_amount: u64,
+    pub expiry_ledger: u32,
+    pub is_active: bool,
+}
+
+/// Issue #224: Simple Merkle proof verification (for airdrop claims).
+/// In production, this uses a proper Merkle tree library.
+/// This implementation verifies a proof of inclusion in a Merkle tree
+/// with O(log n) gas cost per claim.
+pub fn verify_merkle_proof(
+    leaf: &[u8; 32],
+    proof: &[[u8; 32]],
+    root: &[u8; 32],
+) -> bool {
+    use sha2::{Sha256, Digest};
+    let mut computed_hash = *leaf;
+    for sibling in proof {
+        // Hash(computed_hash || sibling) — order matters
+        let mut hasher = Sha256::new();
+        if computed_hash < *sibling {
+            hasher.update(computed_hash);
+            hasher.update(sibling);
+        } else {
+            hasher.update(sibling);
+            hasher.update(computed_hash);
+        }
+        computed_hash = hasher.finalize().into();
+    }
+    computed_hash == *root
+}
+
+// ── Issue #225: Token Blacklist Implementation ───────────────────────────────
+
+impl TokenContract {
+    /// Add an address to the blacklist (admin only).
+    pub fn add_to_blacklist(&mut self, _env: &Env, address: String, admin: String) {
+        if self.admin.as_deref() != Some(&admin) {
+            panic!("only admin can modify blacklist");
+        }
+        self.blacklisted.insert(address.clone(), true);
+        // Blacklist event would be emitted in the Soroban contract version
+    }
+
+    /// Remove an address from the blacklist (admin only).
+    pub fn remove_from_blacklist(&mut self, _env: &Env, address: String, admin: String) {
+        if self.admin.as_deref() != Some(&admin) {
+            panic!("only admin can modify blacklist");
+        }
+        self.blacklisted.remove(&address);
+    }
+
+    /// Check if an address is blacklisted.
+    pub fn is_blacklisted(&self, address: &str) -> bool {
+        self.blacklisted.get(address).copied().unwrap_or(false)
+    }
+
+    /// Internal: enforce blacklist on transfer (send and receive).
+    fn enforce_blacklist(&self, from: &str, to: &str) {
+        if self.is_blacklisted(from) {
+            panic!("address {} is blacklisted and cannot send tokens", from);
+        }
+        if self.is_blacklisted(to) {
+            panic!("address {} is blacklisted and cannot receive tokens", to);
+        }
+    }
+
+    // ── Issue #224: Airdrop with Merkle Proofs ───────────────────────────────
+
+    /// Create a new Merkle airdrop (admin only).
+    pub fn create_airdrop(
+        &mut self,
+        _env: &Env,
+        token: String,
+        merkle_root: [u8; 32],
+        total_amount: u64,
+        expiry_ledger: u32,
+        admin: String,
+    ) -> u32 {
+        if self.admin.as_deref() != Some(&admin) {
+            panic!("only admin can create airdrops");
+        }
+        let id = self.airdrops.len() as u32;
+        self.airdrops.insert(id, MerkleAirdrop {
+            id,
+            token,
+            merkle_root,
+            total_amount,
+            claimed_amount: 0,
+            expiry_ledger,
+            is_active: true,
+        });
+        id
+    }
+
+    /// Claim tokens from an airdrop using a Merkle proof.
+    /// Each recipient can only claim once. Gas cost is O(log n) per claim.
+    pub fn claim_airdrop(
+        &mut self,
+        env: &Env,
+        airdrop_id: u32,
+        recipient: String,
+        amount: u64,
+        proof: Vec<[u8; 32]>,
+    ) {
+        // Check airdrop exists and is active
+        let airdrop = self.airdrops.get(&airdrop_id).expect("airdrop not found");
+        if !airdrop.is_active {
+            panic!("airdrop is not active");
+        }
+        if env.ledger().sequence() > airdrop.expiry_ledger {
+            panic!("airdrop has expired");
+        }
+
+        // Check if already claimed (once-only)
+        let claim_key = (airdrop_id, recipient.clone());
+        if self.airdrop_claims.contains_key(&claim_key) {
+            panic!("already claimed");
+        }
+
+        // Verify Merkle proof — O(log n) gas cost
+        let leaf = {
+            use sha2::{Sha256, Digest};
+            let mut hasher = Sha256::new();
+            hasher.update(recipient.as_bytes());
+            hasher.update(amount.to_be_bytes());
+            let result: [u8; 32] = hasher.finalize().into();
+            result
+        };
+
+        let proof_vec: Vec<[u8; 32]> = proof;
+        let proof_slice: &[u8; 32] = &proof_vec[0]; // Simplified — full impl iterates
+        if !verify_merkle_proof(&leaf, &proof_vec, &airdrop.merkle_root) {
+            panic!("invalid Merkle proof");
+        }
+
+        // Mark as claimed
+        self.airdrop_claims.insert(claim_key, true);
+
+        // Update airdrop claimed amount
+        if let Some(mut airdrop) = self.airdrops.get(&airdrop_id) {
+            airdrop.claimed_amount += amount;
+            self.airdrops.insert(airdrop_id, airdrop);
+        }
+
+        // Transfer tokens to recipient (internal, no blacklist check for claims)
+        let balance = self.balances.entry(recipient.clone()).or_insert(0);
+        *balance += amount;
+    }
+
+    /// Return unclaimed tokens after expiry (admin only).
+    pub fn return_unclaimed_airdrop(
+        &mut self,
+        env: &Env,
+        airdrop_id: u32,
+        admin: String,
+    ) -> u64 {
+        if self.admin.as_deref() != Some(&admin) {
+            panic!("only admin can return unclaimed tokens");
+        }
+        let airdrop = self.airdrops.get(&airdrop_id).expect("airdrop not found");
+        if env.ledger().sequence() <= airdrop.expiry_ledger {
+            panic!("airdrop has not expired yet");
+        }
+        let unclaimed = airdrop.total_amount - airdrop.claimed_amount;
+        // Mark as inactive
+        if let Some(mut airdrop) = self.airdrops.get(&airdrop_id) {
+            airdrop.is_active = false;
+            self.airdrops.insert(airdrop_id, airdrop);
+        }
+        unclaimed
     }
 }
