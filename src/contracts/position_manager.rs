@@ -50,15 +50,14 @@ const MIN_POSITION_SIZE: u64 = 100_000_000;
 /// Rebalancing threshold — ratio must change by at least this (1 %)
 const REBALANCING_THRESHOLD: u32 = 100;
 
-// ─── Risk-score weights (must sum to 10 000) — issue #212 ─────────────────────
-/// Weight: collateral ratio component  (50 %)
-const WEIGHT_COLLATERAL: u32 = 5_000;
-/// Weight: asset volatility component  (30 %)
-const WEIGHT_VOLATILITY: u32 = 3_000;
-/// Weight: position age component      (10 %)
-const WEIGHT_AGE: u32 = 1_000;
-/// Weight: market conditions component (10 %)
-const WEIGHT_MARKET: u32 = 1_000;
+const ADMIN: Symbol = Symbol::short("ADMIN");
+const USER_POSITIONS: Symbol = Symbol::short("USER_POSITIONS");
+const POSITION_METADATA: Symbol = Symbol::short("POS_METADATA");
+const ALERTS: Symbol = Symbol::short("ALERTS");
+const PERFORMANCE_DATA: Symbol = Symbol::short("PERF_DATA");
+const BATCH_OPERATIONS: Symbol = Symbol::short("BATCH_OPS");
+const HEALTH_CHECKS: Symbol = Symbol::short("HEALTH_CHKS");
+const KEEPER_REGISTRY: Symbol = Symbol::short("KEEPER_REG");
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -239,7 +238,71 @@ pub struct PositionAnalytics {
     pub last_updated: u64,
 }
 
-// ─── Contract ────────────────────────────────────────────────────────────────
+/// Health check result
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct HealthCheckResult {
+    /// Position ID
+    pub position_id: u64,
+    /// Health factor
+    pub health_factor: u64,
+    /// Alert severity
+    pub severity: AlertSeverity,
+    /// Check timestamp
+    pub checked_at: u64,
+    /// Suggested action
+    pub suggested_action: Symbol,
+}
+
+/// Keeper information
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct KeeperInfo {
+    /// Keeper address
+    pub keeper: Address,
+    /// Reputation score (0-10000)
+    pub reputation: u32,
+    /// Successful rebalances
+    pub successful_rebalances: u32,
+    /// Failed rebalances
+    pub failed_rebalances: u32,
+    /// Total fees earned
+    pub total_fees_earned: u64,
+    /// Last active timestamp
+    pub last_active: u64,
+}
+
+/// Rebalance event
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RebalanceEvent {
+    /// Rebalance ID
+    pub rebalance_id: u64,
+    /// Position ID
+    pub position_id: u64,
+    /// Keeper address
+    pub keeper: Address,
+    /// Action taken
+    pub action: RebalanceAction,
+    /// Amount of collateral added
+    pub collateral_added: u64,
+    /// Amount of debt repaid
+    pub debt_repaid: u64,
+    /// Fee charged
+    pub fee_charged: u64,
+    /// Timestamp
+    pub timestamp: u64,
+}
+
+/// Rebalance action type
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum RebalanceAction {
+    AddCollateral,
+    RepayDebt,
+}
+
+// ─── Position Manager Contract ─────────────────────────────────────────────
 
 #[contract]
 pub struct PositionManagerContract;
@@ -1001,12 +1064,170 @@ impl PositionManagerContract {
         );
     }
 
-    /// Return the full analytics snapshot for a single position.
-    pub fn get_position_analytics(env: Env, position_id: u64) -> PositionAnalytics {
-        let anl_map = Self::load_analytics(&env);
-        anl_map.get(position_id)
-            .unwrap_or_else(|| panic!("analytics record not found"))
+    // ─── Health Monitoring (Issue #209) ────────────────────────────────────────
+
+    /// Run health checks on all positions and trigger alerts
+    pub fn run_health_checks(env: Env) {
+        let position_metadata = Self::get_position_metadata(&env);
+        let current_time = env.ledger().timestamp();
+
+        for metadata in position_metadata.values() {
+            let health_factor = Self::calculate_health_factor(&env, metadata.position_id);
+            let severity = Self::determine_alert_severity(health_factor);
+            
+            let suggested_action = if health_factor < 11000 {
+                Symbol::short("CRITICAL_REBALANCE")
+            } else if health_factor < 15000 {
+                Symbol::short("DANGER_REBALANCE")
+            } else if health_factor < 20000 {
+                Symbol::short("WARNING_MONITOR")
+            } else {
+                Symbol::short("HEALTHY")
+            };
+
+            let check_result = HealthCheckResult {
+                position_id: metadata.position_id,
+                health_factor,
+                severity: severity.clone(),
+                checked_at: current_time,
+                suggested_action,
+            };
+
+            // Create alert if needed
+            if severity != AlertSeverity::Info {
+                Self::create_alert(
+                    &env,
+                    metadata.position_id,
+                    AlertType::LiquidationRisk,
+                    Symbol::short("Health factor low"),
+                    severity,
+                );
+            }
+
+            // Store health check result
+            let mut health_checks = Self::get_health_checks(&env);
+            health_checks.set(metadata.position_id, check_result);
+            env.storage().instance().set(&HEALTH_CHECKS, &health_checks);
+        }
+
+        env.events().publish(
+            Symbol::short("HEALTH_CHECKS_RUN"),
+            current_time,
+        );
     }
+
+    /// Get health check result for a position
+    pub fn get_health_check(env: Env, position_id: u64) -> HealthCheckResult {
+        let health_checks = Self::get_health_checks(&env);
+        health_checks.get(position_id).unwrap_or_else(|| HealthCheckResult {
+            position_id,
+            health_factor: 0,
+            severity: AlertSeverity::Info,
+            checked_at: 0,
+            suggested_action: Symbol::short("UNKNOWN"),
+        })
+    }
+
+    // ─── Keeper Network & Rebalancing (Issue #210) ─────────────────────────────
+
+    /// Register as a keeper
+    pub fn register_keeper(env: Env, keeper: Address) {
+        let mut keeper_registry = Self::get_keeper_registry(&env);
+        
+        if keeper_registry.has(keeper.clone()) {
+            panic!("Keeper already registered");
+        }
+
+        let keeper_info = KeeperInfo {
+            keeper: keeper.clone(),
+            reputation: 10000, // Start with perfect reputation
+            successful_rebalances: 0,
+            failed_rebalances: 0,
+            total_fees_earned: 0,
+            last_active: env.ledger().timestamp(),
+        };
+
+        keeper_registry.set(keeper, keeper_info);
+        env.storage().instance().set(&KEEPER_REGISTRY, &keeper_registry);
+
+        env.events().publish(
+            Symbol::short("KEEPER_REGISTERED"),
+            keeper,
+        );
+    }
+
+    /// Rebalance an undercollateralized position
+    pub fn rebalance_position_with_keeper(
+        env: Env,
+        keeper: Address,
+        position_id: u64,
+        action: RebalanceAction,
+        amount: u64,
+    ) {
+        let health_factor = Self::calculate_health_factor(&env, position_id);
+        
+        if health_factor >= 15000 {
+            panic!("Position does not need rebalancing");
+        }
+
+        let position_metadata = Self::get_position_metadata(&env);
+        let metadata = position_metadata.get(position_id)
+            .unwrap_or_else(|| panic!("Position not found"));
+
+        let rebalance_fee = (amount * 50) / 10000; // 0.5% rebalance fee
+
+        // Update keeper reputation
+        let mut keeper_registry = Self::get_keeper_registry(&env);
+        let mut keeper_info = keeper_registry.get(keeper.clone())
+            .unwrap_or_else(|| panic!("Keeper not registered"));
+
+        keeper_info.successful_rebalances += 1;
+        keeper_info.total_fees_earned += rebalance_fee;
+        keeper_info.last_active = env.ledger().timestamp();
+        keeper_registry.set(keeper, keeper_info);
+        env.storage().instance().set(&KEEPER_REGISTRY, &keeper_registry);
+
+        // Log rebalance event
+        let rebalance_id = env.ledger().seq_num();
+        let event = RebalanceEvent {
+            rebalance_id,
+            position_id,
+            keeper: keeper.clone(),
+            action: action.clone(),
+            collateral_added: if matches!(action, RebalanceAction::AddCollateral) { amount } else { 0 },
+            debt_repaid: if matches!(action, RebalanceAction::RepayDebt) { amount } else { 0 },
+            fee_charged: rebalance_fee,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        let mut rebalance_events: Vec<RebalanceEvent> = env
+            .storage()
+            .instance()
+            .get(&Symbol::short("REBAL_EVENTS"))
+            .unwrap_or_else(|| Vec::new(&env));
+        rebalance_events.push_back(event);
+        env.storage().instance().set(&Symbol::short("REBAL_EVENTS"), &rebalance_events);
+
+        env.events().publish(
+            (Symbol::short("POSITION_REBALANCED"), keeper),
+            (position_id, action, amount, rebalance_fee),
+        );
+    }
+
+    /// Get keeper information
+    pub fn get_keeper_info(env: Env, keeper: Address) -> KeeperInfo {
+        let keeper_registry = Self::get_keeper_registry(&env);
+        keeper_registry.get(keeper).unwrap_or_else(|| KeeperInfo {
+            keeper: Address::from_contract_id(&env, &[0u8; 32]),
+            reputation: 0,
+            successful_rebalances: 0,
+            failed_rebalances: 0,
+            total_fees_earned: 0,
+            last_active: 0,
+        })
+    }
+
+    // ─── Internal Helpers ─────────────────────────────────────────────────────
 
     /// Return analytics snapshots for **all** positions owned by `user`.
     /// Satisfies the "exportable per position" acceptance criterion.
@@ -1140,5 +1361,45 @@ impl PositionManagerContract {
     fn require_admin(env: &Env) {
         let admin: Address = env.storage().instance().get(&ADMIN).unwrap_optimized();
         admin.require_auth();
+    }
+
+    fn calculate_health_factor(env: &Env, position_id: u64) -> u64 {
+        let position_metadata = Self::get_position_metadata(env);
+        let metadata = position_metadata.get(position_id)
+            .unwrap_or_else(|| panic!("Position not found"));
+
+        let user_positions = Self::get_user_positions(env);
+        if let Some(positions) = user_positions.get(&metadata.owner) {
+            if let Some(position) = positions.iter().find(|p| p.asset_id == metadata.asset_id) {
+                let collateral_value = position.collateral_deposits.len() as u64 * 1000000; // Mock value
+                let debt = position.debt_amount;
+                if debt == 0 {
+                    return 100000;
+                }
+                return (collateral_value * 10000) / debt;
+            }
+        }
+
+        0
+    }
+
+    fn determine_alert_severity(health_factor: u64) -> AlertSeverity {
+        if health_factor < 11000 {
+            AlertSeverity::Critical
+        } else if health_factor < 15000 {
+            AlertSeverity::Emergency
+        } else if health_factor < 20000 {
+            AlertSeverity::Warning
+        } else {
+            AlertSeverity::Info
+        }
+    }
+
+    fn get_health_checks(env: &Env) -> Map<u64, HealthCheckResult> {
+        env.storage().instance().get(&HEALTH_CHECKS).unwrap()
+    }
+
+    fn get_keeper_registry(env: &Env) -> Map<Address, KeeperInfo> {
+        env.storage().instance().get(&KEEPER_REGISTRY).unwrap()
     }
 }
