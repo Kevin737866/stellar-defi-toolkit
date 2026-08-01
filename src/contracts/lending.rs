@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Symbol, log};
 
+use crate::contracts::asset_registry_protocol::AssetRegistry;
 use crate::contracts::oracle::PriceOracleSim;
 use crate::types::{
     AccountPosition, AdminAction, AdminProposal, AdminProposalStatus, FlashLoanReceipt,
@@ -55,6 +56,9 @@ pub struct LendingProtocol {
     paused: bool,
     /// Append-only event log.  Drain with `drain_events()`.
     events: Vec<ProtocolEvent>,
+    /// Asset allowlist/blocklist registry (issue #215).
+    /// When set, deposit and borrow will check registry approval.
+    asset_registry: Option<AssetRegistry>,
 }
 
 impl LendingProtocol {
@@ -76,6 +80,7 @@ impl LendingProtocol {
             close_factor_bps: 5_000,
             paused: false,
             events: Vec::new(),
+            asset_registry: None,
         }
     }
 
@@ -96,6 +101,37 @@ impl LendingProtocol {
     /// Returns `true` when the protocol is currently paused.
     pub fn is_paused(&self) -> bool {
         self.paused
+    }
+
+    // ─── Asset Registry Integration (issue #215) ─────────────────────────────
+
+    /// Attach an [`AssetRegistry`] to this protocol instance.
+    ///
+    /// Once attached, [`deposit`] and [`borrow`] will reject assets that are
+    /// either not on the allowlist or are on the blocklist.
+    pub fn attach_asset_registry(&mut self, registry: AssetRegistry) {
+        self.asset_registry = Some(registry);
+    }
+
+    /// Returns a reference to the attached [`AssetRegistry`], if any.
+    pub fn asset_registry(&self) -> Option<&AssetRegistry> {
+        self.asset_registry.as_ref()
+    }
+
+    /// Returns a mutable reference to the attached [`AssetRegistry`], if any.
+    pub fn asset_registry_mut(&mut self) -> Option<&mut AssetRegistry> {
+        self.asset_registry.as_mut()
+    }
+
+    /// Returns `Err(ProtocolError::AssetNotAllowed)` when a registry is attached
+    /// and the asset is either not allowlisted or is blocklisted.
+    fn ensure_asset_allowed(&self, asset: &str) -> Result<(), ProtocolError> {
+        if let Some(registry) = &self.asset_registry {
+            if !registry.is_allowed(asset) {
+                return Err(ProtocolError::AssetNotAllowed(asset.to_string()));
+            }
+        }
+        Ok(())
     }
 
     /// Pause all user-facing protocol operations (admin only).
@@ -499,6 +535,8 @@ impl LendingProtocol {
     ) -> Result<i128, ProtocolError> {
         self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
+        // Issue #215: reject assets not approved by the registry.
+        self.ensure_asset_allowed(asset)?;
         self.accrue_interest(asset, now)?;
         let config = self
             .reserve_configs
@@ -674,6 +712,8 @@ impl LendingProtocol {
     ) -> Result<i128, ProtocolError> {
         self.ensure_not_paused()?;
         self.ensure_positive(amount)?;
+        // Issue #215: reject assets not approved by the registry.
+        self.ensure_asset_allowed(asset)?;
         self.accrue_interest(asset, now)?;
         let config = self
             .reserve_configs
