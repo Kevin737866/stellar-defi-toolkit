@@ -17,6 +17,14 @@
 //! - **Keeper**: `submit_price` — intended for a registered oracle, but has no
 //!   `require_auth()` on the `oracle_address` parameter.
 //! - **User**: read-only (aggregated price/oracle info/alert lookups).
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use crate::contracts::price_feed_adapters::OracleAdapter;
+
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use crate::contracts::decentralized_oracle::OracleNode;
+
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use crate::contracts::oracle::{PriceData, check_staleness};
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
@@ -1036,26 +1044,12 @@ pub mod oracle_failover {
 
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PriceReport {
-    pub source: Address,
-    pub price: i128,
-    pub weight: u32,
-    pub timestamp: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AggregatedPrice {
-    pub asset: Symbol,
-    pub price: i128,
-    pub active_sources_count: u32,
-    pub timestamp: u64,
-}
-
-#[contracttype]
 pub enum DataKey {
-    PriceReports(Symbol),
+    PrimaryOracle,
+    SecondaryOracle,
+    StalenessThreshold,
+    LastGoodPrice(Symbol),
+    CircuitBreakerTripped,
 }
 
 #[contract]
@@ -1063,110 +1057,123 @@ pub struct OracleManagerContract;
 
 #[contractimpl]
 impl OracleManagerContract {
-    pub fn submit_price(env: Env, reporter: Address, asset: Symbol, price: i128, weight: u32) {
-        reporter.require_auth();
-        if price <= 0 {
-            panic!("Price must be positive");
-        }
-
-        let key = DataKey::PriceReports(asset.clone());
-        let mut reports: Vec<PriceReport> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+    pub fn get_price(env: Env, asset: Symbol, threshold: u64) -> PriceData {
+        let primary_price_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::PrimaryOracle);
         
-        let mut found = false;
-        for i in 0..reports.len() {
-            let mut rep = reports.get(i).unwrap();
-            if rep.source == reporter {
-                rep.price = price;
-                rep.weight = weight;
-                rep.timestamp = env.ledger().timestamp();
-                reports.set(i, rep);
-                found = true;
-                break;
+        if let Some(primary) = primary_price_opt {
+            if !check_staleness(&env, primary.timestamp, threshold) {
+                env.storage().persistent().set(&DataKey::LastGoodPrice(asset.clone()), &primary);
+                return primary;
             }
         }
-        if !found {
-            reports.push_back(PriceReport {
-                source: reporter.clone(),
-                price,
-                weight,
-                timestamp: env.ledger().timestamp(),
-            });
+
+        // Primary failed or stale; try secondary oracle
+        let secondary_price_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::SecondaryOracle);
+        
+        if let Some(secondary) = secondary_price_opt {
+            if !check_staleness(&env, secondary.timestamp, threshold) {
+                env.events().publish((Symbol::new(&env, "OracleFallbackTriggered"), asset.clone()), ());
+                let degraded_price = PriceData {
+                    price: secondary.price,
+                    timestamp: secondary.timestamp,
+                    is_degraded: true,
+                };
+                env.storage().persistent().set(&DataKey::LastGoodPrice(asset.clone()), &degraded_price);
+                return degraded_price;
+            }
         }
 
-        env.storage().persistent().set(&key, &reports);
-        env.events().publish((Symbol::new(&env, "PriceSubmitted"), asset), (reporter, price));
+        // Secondary failed or stale; check for last known good price or trip circuit breaker
+        let last_good_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::LastGoodPrice(asset.clone()));
+        if let Some(mut last_good) = last_good_opt {
+            env.events().publish((Symbol::new(&env, "StalenessCircuitBreakerTriggered"), asset), ());
+            last_good.is_degraded = true;
+            return last_good;
+        }
+
+        panic!("All oracle sources stale and no last known good price available");
+    }
+}
+
+
+#[contracttype]
+pub enum DataKey {
+    Oracle(Address),
+    PauseThreshold,
+}
+
+#[contract]
+pub struct OracleReputationManagerContract;
+
+#[contractimpl]
+impl OracleReputationManagerContract {
+    pub fn record_missed_update(env: Env, operator: Address) {
+        let key = DataKey::Oracle(operator.clone());
+        let mut node: OracleNode = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Oracle not registered"));
+
+        node.missed_updates += 1;
+        node.reputation_score = node.reputation_score.saturating_sub(150);
+
+        let pause_threshold: u32 = env.storage().instance().get(&DataKey::PauseThreshold).unwrap_or(3000);
+        if node.reputation_score < pause_threshold {
+            node.active = false;
+            env.events().publish((Symbol::new(&env, "OraclePaused"), operator.clone()), node.reputation_score);
+        }
+
+        env.storage().persistent().set(&key, &node);
     }
 
-    pub fn get_aggregated_price(env: Env, asset: Symbol) -> AggregatedPrice {
-        let key = DataKey::PriceReports(asset.clone());
-        let reports: Vec<PriceReport> = env
+    pub fn get_oracle_weight(env: Env, operator: Address) -> u32 {
+        let key = DataKey::Oracle(operator);
+        let node: OracleNode = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Oracle not registered"));
+        if !node.active {
+            return 0;
+        }
+        node.reputation_score
+    }
+}
+
+
+#[contracttype]
+pub enum DataKey {
+    AdapterPriorityList(Symbol),
+    ManualOverride(Symbol),
+}
+
+#[contract]
+pub struct OracleFailoverManagerContract;
+
+#[contractimpl]
+impl OracleFailoverManagerContract {
+    pub fn set_oracle_priority(env: Env, asset: Symbol, adapters: Vec<OracleAdapter>) {
+        env.storage().persistent().set(&DataKey::AdapterPriorityList(asset), &adapters);
+        env.events().publish((Symbol::new(&env, "PriorityListUpdated"),), ());
+    }
+
+    pub fn set_manual_override(env: Env, asset: Symbol, source_id: Address) {
+        env.storage().persistent().set(&DataKey::ManualOverride(asset.clone()), &source_id);
+        env.events().publish((Symbol::new(&env, "ManualOverrideSet"), asset), source_id);
+    }
+
+    pub fn get_active_oracle(env: Env, asset: Symbol) -> Address {
+        if let Some(override_source) = env.storage().persistent().get::<_, Address>(&DataKey::ManualOverride(asset.clone())) {
+            return override_source;
+        }
+
+        let adapters: Vec<OracleAdapter> = env
             .storage()
             .persistent()
-            .get(&key)
-            .unwrap_or_else(|| panic!("No price reports found for asset"));
+            .get(&DataKey::AdapterPriorityList(asset.clone()))
+            .unwrap_or_else(|| panic!("No oracle priority list configured for asset"));
 
-        if reports.len() < 3 {
-            panic!("Insufficient price sources (minimum 3 required for aggregation)");
-        }
-
-        let mut sorted_prices = Vec::new(&env);
-        for i in 0..reports.len() {
-            sorted_prices.push_back(reports.get(i).unwrap().price);
-        }
-
-        let len = sorted_prices.len();
-        for i in 0..len {
-            for j in 0..(len - 1 - i) {
-                let p1 = sorted_prices.get(j).unwrap();
-                let p2 = sorted_prices.get(j + 1).unwrap();
-                if p1 > p2 {
-                    sorted_prices.set(j, p2);
-                    sorted_prices.set(j + 1, p1);
-                }
+        let mut sorted_adapters: Vec<OracleAdapter> = adapters;
+        
+        for adapter in sorted_adapters.iter() {
+            if adapter.is_healthy {
+                return adapter.source_id;
             }
         }
 
-        let median_price = if len % 2 == 1 {
-            sorted_prices.get(len / 2).unwrap()
-        } else {
-            (sorted_prices.get((len / 2) - 1).unwrap() + sorted_prices.get(len / 2).unwrap()) / 2
-        };
-
-        let mut weighted_sum: i128 = 0;
-        let mut total_weight: u32 = 0;
-        let mut active_count: u32 = 0;
-
-        for i in 0..reports.len() {
-            let rep = reports.get(i).unwrap();
-            let diff = if rep.price > median_price {
-                rep.price - median_price
-            } else {
-                median_price - rep.price
-            };
-            
-            let threshold = median_price * 30 / 100;
-            if diff <= threshold {
-                weighted_sum += rep.price * (rep.weight as i128);
-                total_weight += rep.weight;
-                active_count += 1;
-            }
-        }
-
-        if active_count == 0 || total_weight == 0 {
-            panic!("All price reports filtered out as outliers");
-        }
-
-        let final_price = weighted_sum / (total_weight as i128);
-
-        let agg = AggregatedPrice {
-            asset: asset.clone(),
-            price: final_price,
-            active_sources_count: active_count,
-            timestamp: env.ledger().timestamp(),
-        };
-
-        env.events().publish((Symbol::new(&env, "PriceAggregated"), asset), (final_price, active_count));
-
-        agg
+        panic!("All prioritized oracle adapters are unhealthy; failover failed");
     }
 }

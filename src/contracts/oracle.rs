@@ -14,6 +14,8 @@
 //!   the stored admin — no cryptographic auth exists in this struct.
 //! - **User**: read-only (`get_price`, `get_price_at`, `admin`).
 
+use soroban_sdk::{contracttype, Env, Symbol};
+
 use std::collections::BTreeMap;
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Map, String as SorobanString, Symbol};
 use crate::types::{ProtocolError, OracleSanityConfig};
@@ -678,4 +680,18 @@ mod tests {
         let position = protocol.position("alice", &oracle).unwrap();
         assert!(position.collateral_value > 0);
     }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceData {
+    pub price: i128,
+    pub timestamp: u64,
+    pub is_degraded: bool,
+}
+
+pub fn check_staleness(env: &Env, timestamp: u64, threshold_seconds: u64) -> bool {
+    let current_time = env.ledger().timestamp();
+    current_time.saturating_sub(timestamp) > threshold_seconds
 }

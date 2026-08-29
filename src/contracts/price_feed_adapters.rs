@@ -9,7 +9,7 @@
 //!   `require_admin()` (compares the contract's own address, not the caller). See
 //!   `docs/ACCESS_CONTROL_MATRIX.md`.
 //! - **User**: read-only (adapter/category config lookups, `validate_price`).
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{
@@ -944,147 +944,19 @@ pub mod failover {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ValidatedPrice {
-    pub price: i128,
-    pub confidence_level: u32, // basis points, e.g., 9500 = 95% confidence
-    pub timestamp: u64,
-    pub is_flagged: bool,
+pub struct OracleAdapter {
+    pub source_id: Address,
+    pub priority: u32,
+    pub is_healthy: bool,
+    pub last_health_check: u64,
 }
 
-#[contracttype]
-pub enum DataKey {
-    LastPrice(Symbol),
-    MaxRateOfChangeBps, // configurable percentage limit, e.g., 500 = 5%
-    ZScoreThreshold,
-    Admin,
-}
-
-#[contract]
-pub struct PriceFeedAdapterContract;
-
-#[contractimpl]
-impl PriceFeedAdapterContract {
-    pub fn initialize(env: Env, admin: Address) {
-        admin.require_auth();
-        env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::MaxRateOfChangeBps, &500u32); // 5% max rate of change
-        env.storage().instance().set(&DataKey::ZScoreThreshold, &3u32); // Z-score threshold of 3
-        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+pub fn perform_health_check(env: &Env, adapter: &mut OracleAdapter, timeout_seconds: u64) -> bool {
+    let current_time = env.ledger().timestamp();
+    let timed_out = current_time.saturating_sub(adapter.last_health_check) > timeout_seconds;
+    
+    if timed_out {
+        adapter.is_healthy = false;
     }
-
-    pub fn validate_and_update_price(
-        env: Env,
-        reporter: Address,
-        asset: Symbol,
-        new_price: i128,
-        volume: u64,
-        mean_price: i128,
-        std_deviation: i128,
-    ) -> ValidatedPrice {
-        reporter.require_auth();
-        if new_price <= 0 {
-            panic!("Price must be positive");
-        }
-
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        let is_emergency_admin = reporter == admin;
-
-        let last_price_key = DataKey::LastPrice(asset.clone());
-        let mut confidence_level = 10000u32;
-        let mut is_flagged = false;
-
-        if !is_emergency_admin && env.storage().persistent().has(&last_price_key) {
-            let last_validated: ValidatedPrice = env.storage().persistent().get(&last_price_key).unwrap();
-            
-            // 1. Rate-of-change limit check
-            let max_change_bps: u32 = env.storage().instance().get(&DataKey::MaxRateOfChangeBps).unwrap_or(500);
-            let diff = if new_price > last_validated.price {
-                new_price - last_validated.price
-            } else {
-                last_validated.price - new_price
-            };
-            let rate_of_change_bps = ((diff * 10000) / last_validated.price) as u32;
-
-            if rate_of_change_bps > max_change_bps {
-                confidence_level = confidence_level.saturating_sub(4000);
-                is_flagged = true;
-            }
-
-            // 2. Z-score anomaly detection check
-            if std_deviation > 0 {
-                let z_diff = if new_price > mean_price {
-                    new_price - mean_price
-                } else {
-                    mean_price - new_price
-                };
-                let z_score = z_diff / std_deviation;
-                let z_threshold: u32 = env.storage().instance().get(&DataKey::ZScoreThreshold).unwrap_or(3);
-
-                if z_score > (z_threshold as i128) {
-                    confidence_level = confidence_level.saturating_sub(5000);
-                    is_flagged = true;
-                }
-            }
-
-            // 3. Volume-weighted sanity verification
-            if volume == 0 && rate_of_change_bps > 100 {
-                confidence_level = confidence_level.saturating_sub(2000);
-                is_flagged = true;
-            }
-        }
-
-        let validated = ValidatedPrice {
-            price: new_price,
-            confidence_level,
-            timestamp: env.ledger().timestamp(),
-            is_flagged,
-        };
-
-        env.storage().persistent().set(&last_price_key, &validated);
-        env.events().publish(
-            (Symbol::new(&env, "PriceValidated"), asset),
-            (new_price, confidence_level, is_flagged),
-        );
-
-        validated
-    }
-}
-
-// ─── Bridge Relay Adapter ───────────────────────────────────────────────────
-
-#[derive(Clone)]
-#[contracttype]
-pub struct BridgeRelayConfig {
-    pub provider: Symbol,
-    pub expected_chain: Symbol,
-    pub max_staleness: u64,
-}
-
-#[contract]
-pub struct BridgeRelayAdapter;
-
-#[contractimpl]
-impl BridgeRelayAdapter {
-    /// Verify a cross-chain payload signature and freshness
-    pub fn verify_payload(
-        env: Env,
-        payload: soroban_sdk::Bytes,
-        signature: soroban_sdk::Bytes,
-        config: BridgeRelayConfig,
-        payload_timestamp: u64,
-    ) -> bool {
-        let current_time = env.ledger().timestamp();
-        
-        // Freshness check
-        if current_time > payload_timestamp + config.max_staleness {
-            return false;
-        }
-
-        // Dummy signature verification for now (mock Pyth/Wormhole behavior)
-        if signature.len() == 0 || payload.len() == 0 {
-            return false;
-        }
-
-        true
-    }
+    adapter.is_healthy
 }
