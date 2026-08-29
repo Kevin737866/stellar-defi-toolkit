@@ -11,6 +11,16 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
+/// A real-time arbitrage opportunity update.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ArbitrageOpportunityUpdate {
+    pub opportunity_id: u64,
+    pub asset_pair: String,
+    pub potential_profit: u64,
+    pub risk_score: u32,
+    pub timestamp: u64,
+}
+
 /// A price update event for a single asset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PriceUpdate {
@@ -25,6 +35,30 @@ pub struct PriceUpdate {
 pub struct PriceBroadcaster {
     tx: broadcast::Sender<PriceUpdate>,
     last_prices: Arc<RwLock<HashMap<String, PriceUpdate>>>,
+}
+
+/// Shared arbitrage opportunity stream.
+#[derive(Clone)]
+pub struct ArbitrageBroadcaster {
+    tx: broadcast::Sender<ArbitrageOpportunityUpdate>,
+    history: Arc<RwLock<Vec<ArbitrageOpportunityUpdate>>>,
+}
+
+impl ArbitrageBroadcaster {
+    pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(256);
+        Self { tx, history: Arc::new(RwLock::new(Vec::new())) }
+    }
+
+    pub async fn push(&self, update: ArbitrageOpportunityUpdate) {
+        let mut history = self.history.write().await;
+        history.push(update.clone());
+        if history.len() > 10_000 { history.drain(..history.len() - 10_000); }
+        let _ = self.tx.send(update);
+    }
+
+    pub async fn history(&self) -> Vec<ArbitrageOpportunityUpdate> { self.history.read().await.clone() }
+    pub fn subscribe(&self) -> broadcast::Receiver<ArbitrageOpportunityUpdate> { self.tx.subscribe() }
 }
 
 impl PriceBroadcaster {
@@ -58,6 +92,50 @@ struct SubscribeMessage {
     #[serde(rename = "type")]
     msg_type: String,
     assets: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ArbitrageQuery {
+    pub asset_pair: Option<String>,
+    pub min_profit: Option<u64>,
+    pub max_risk: Option<u32>,
+}
+
+/// WebSocket upgrade handler at `/ws/prices`.
+/// WebSocket upgrade handler at `/ws/arbitrage`.
+pub async fn arbitrage_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(query): Query<ArbitrageQuery>,
+    Extension(broadcaster): Extension<ArbitrageBroadcaster>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_arbitrage_socket(socket, broadcaster, query))
+}
+
+async fn handle_arbitrage_socket(socket: WebSocket, broadcaster: ArbitrageBroadcaster, query: ArbitrageQuery) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut rx = broadcaster.subscribe();
+    let history = broadcaster.history().await;
+    for update in history {
+        if matches_arbitrage(&update, &query) {
+            if sender.send(Message::Text(serde_json::to_string(&update).unwrap().into())).await.is_err() { return; }
+        }
+    }
+    while let Some(Ok(message)) = receiver.next().await {
+        if matches!(message, Message::Close(_)) { break; }
+        match rx.recv().await {
+            Ok(update) if matches_arbitrage(&update, &query) => {
+                if sender.send(Message::Text(serde_json::to_string(&update).unwrap().into())).await.is_err() { break; }
+            }
+            Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+fn matches_arbitrage(update: &ArbitrageOpportunityUpdate, query: &ArbitrageQuery) -> bool {
+    query.asset_pair.as_ref().map(|pair| pair == &update.asset_pair).unwrap_or(true)
+        && query.min_profit.map(|profit| update.potential_profit >= profit).unwrap_or(true)
+        && query.max_risk.map(|risk| update.risk_score <= risk).unwrap_or(true)
 }
 
 /// WebSocket upgrade handler at `/ws/prices`.

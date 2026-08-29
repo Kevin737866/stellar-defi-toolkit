@@ -18,6 +18,8 @@
 //!   `require_auth()` on the `oracle_address` parameter.
 //! - **User**: read-only (aggregated price/oracle info/alert lookups).
 
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{OraclePrice, SyntheticAsset};
 
@@ -1029,5 +1031,142 @@ pub mod oracle_failover {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceReport {
+    pub source: Address,
+    pub price: i128,
+    pub weight: u32,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AggregatedPrice {
+    pub asset: Symbol,
+    pub price: i128,
+    pub active_sources_count: u32,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+pub enum DataKey {
+    PriceReports(Symbol),
+}
+
+#[contract]
+pub struct OracleManagerContract;
+
+#[contractimpl]
+impl OracleManagerContract {
+    pub fn submit_price(env: Env, reporter: Address, asset: Symbol, price: i128, weight: u32) {
+        reporter.require_auth();
+        if price <= 0 {
+            panic!("Price must be positive");
+        }
+
+        let key = DataKey::PriceReports(asset.clone());
+        let mut reports: Vec<PriceReport> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+        
+        let mut found = false;
+        for i in 0..reports.len() {
+            let mut rep = reports.get(i).unwrap();
+            if rep.source == reporter {
+                rep.price = price;
+                rep.weight = weight;
+                rep.timestamp = env.ledger().timestamp();
+                reports.set(i, rep);
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            reports.push_back(PriceReport {
+                source: reporter.clone(),
+                price,
+                weight,
+                timestamp: env.ledger().timestamp(),
+            });
+        }
+
+        env.storage().persistent().set(&key, &reports);
+        env.events().publish((Symbol::new(&env, "PriceSubmitted"), asset), (reporter, price));
+    }
+
+    pub fn get_aggregated_price(env: Env, asset: Symbol) -> AggregatedPrice {
+        let key = DataKey::PriceReports(asset.clone());
+        let reports: Vec<PriceReport> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic!("No price reports found for asset"));
+
+        if reports.len() < 3 {
+            panic!("Insufficient price sources (minimum 3 required for aggregation)");
+        }
+
+        let mut sorted_prices = Vec::new(&env);
+        for i in 0..reports.len() {
+            sorted_prices.push_back(reports.get(i).unwrap().price);
+        }
+
+        let len = sorted_prices.len();
+        for i in 0..len {
+            for j in 0..(len - 1 - i) {
+                let p1 = sorted_prices.get(j).unwrap();
+                let p2 = sorted_prices.get(j + 1).unwrap();
+                if p1 > p2 {
+                    sorted_prices.set(j, p2);
+                    sorted_prices.set(j + 1, p1);
+                }
+            }
+        }
+
+        let median_price = if len % 2 == 1 {
+            sorted_prices.get(len / 2).unwrap()
+        } else {
+            (sorted_prices.get((len / 2) - 1).unwrap() + sorted_prices.get(len / 2).unwrap()) / 2
+        };
+
+        let mut weighted_sum: i128 = 0;
+        let mut total_weight: u32 = 0;
+        let mut active_count: u32 = 0;
+
+        for i in 0..reports.len() {
+            let rep = reports.get(i).unwrap();
+            let diff = if rep.price > median_price {
+                rep.price - median_price
+            } else {
+                median_price - rep.price
+            };
+            
+            let threshold = median_price * 30 / 100;
+            if diff <= threshold {
+                weighted_sum += rep.price * (rep.weight as i128);
+                total_weight += rep.weight;
+                active_count += 1;
+            }
+        }
+
+        if active_count == 0 || total_weight == 0 {
+            panic!("All price reports filtered out as outliers");
+        }
+
+        let final_price = weighted_sum / (total_weight as i128);
+
+        let agg = AggregatedPrice {
+            asset: asset.clone(),
+            price: final_price,
+            active_sources_count: active_count,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        env.events().publish((Symbol::new(&env, "PriceAggregated"), asset), (final_price, active_count));
+
+        agg
     }
 }

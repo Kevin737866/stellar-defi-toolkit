@@ -22,7 +22,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Ve
 
 use crate::types::stablecoin::{AlertSeverity, ArbitrageOpportunity, OraclePrice, SystemStats};
 use soroban_sdk::{
-    contract, contractimpl, unwrap::UnwrapOptimized, Address, Env, Map, Symbol, Vec,
+    contract, contractimpl, contracttype, unwrap::UnwrapOptimized, Address, Env, Map, Symbol, Vec,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -53,6 +53,7 @@ const ARBITRAGE_STATS: Symbol = Symbol::short("ARBSTATS");
 const PARAMS: Symbol = Symbol::short("PARAMS");
 const NEXT_OPPORTUNITY_ID: Symbol = Symbol::short("NEXT_OPP");
 const TOTAL_REWARDS_PAID: Symbol = Symbol::short("TOTAL_REW");
+const ROUTES: Symbol = Symbol::short("ROUTES");
 
 // ─── Arbitrage Parameters ───────────────────────────────────────────────────
 
@@ -113,6 +114,28 @@ pub struct ArbitrageExecution {
     pub timestamp: u64,
     /// Whether execution was successful
     pub successful: bool,
+}
+
+/// A pool hop used by a multi-hop arbitrage route.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RouteHop {
+    pub pool: Address,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub fee_bps: u32,
+    pub liquidity: u64,
+}
+
+/// A simulated arbitrage route and its net expected profit.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ArbitrageRoute {
+    pub hops: Vec<RouteHop>,
+    pub input_amount: u64,
+    pub output_amount: u64,
+    pub gas_cost: u64,
+    pub net_profit: i128,
 }
 
 // ─── Arbitrage Contract ─────────────────────────────────────────────────────
@@ -331,6 +354,29 @@ impl ArbitrageContract {
             (Symbol::short("ARBITRAGE_FAILED"), arbitrageur.clone()),
             (opportunity_id, reason),
         );
+    }
+
+    /// Register a route candidate for off-chain execution and comparison.
+    pub fn register_route(env: Env, route: ArbitrageRoute) {
+        Self::require_not_paused(&env);
+        if route.hops.len() < 3 || route.hops.len() > 5 {
+            panic!("Route must contain between 3 and 5 hops");
+        }
+        let mut routes: Vec<ArbitrageRoute> = env.storage().instance().get(&ROUTES).unwrap_or_else(|| Vec::new(&env));
+        routes.push_back(route);
+        env.storage().instance().set(&ROUTES, &routes);
+    }
+
+    /// Return the most profitable registered route after gas costs.
+    pub fn best_route(env: Env) -> Option<ArbitrageRoute> {
+        let routes: Vec<ArbitrageRoute> = env.storage().instance().get(&ROUTES).unwrap_or_else(|| Vec::new(&env));
+        let mut best: Option<ArbitrageRoute> = None;
+        for route in routes.iter() {
+            if route.net_profit > 0 && best.as_ref().map(|current| route.net_profit > current.net_profit).unwrap_or(true) {
+                best = Some(route);
+            }
+        }
+        best
     }
 
     /// Get active arbitrage opportunities

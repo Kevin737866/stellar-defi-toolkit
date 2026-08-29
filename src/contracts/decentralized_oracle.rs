@@ -23,7 +23,7 @@
 //! - **User**: read-only (price/stake/reputation lookups).
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
-use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized, symbol_short, panic_with_error};
+use soroban_sdk::{contract, contractimpl, contracterror, contracttype, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized, symbol_short, panic_with_error};
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -45,6 +45,10 @@ const REWARD_PERCENTAGE: u32 = 10;
 const UNBONDING_PERIOD: u64 = 604800;
 /// Maximum number of oracles
 const MAX_ORACLES: u32 = 100;
+/// Dispute review period (48 hours)
+const DISPUTE_REVIEW_PERIOD: u64 = 172800;
+/// Dispute bond amount
+const DISPUTE_BOND: u64 = 500_000;
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -57,6 +61,8 @@ const AGG_PRICES: Symbol = symbol_short!("AG_PRICES");
 const REPUTATION: Symbol = symbol_short!("REPUTAT");
 const SLASH_EV: Symbol = symbol_short!("SLASH_EV");
 const CONFIG: Symbol = symbol_short!("CONFIG");
+const DISPUTES: Symbol = symbol_short!("DISPUTES");
+const DISP_CNT: Symbol = symbol_short!("DISP_CNT");
 
 // ─── Error Codes ───────────────────────────────────────────────────────────────
 
@@ -77,6 +83,31 @@ pub enum DecentralizedOracleError {
     StillUnbonding = 12,
     ContractPaused = 13,
     InvalidConfig = 14,
+    DisputeNotFound = 15,
+    DisputeNotPending = 16,
+    DisputeReviewActive = 17,
+    InvalidBond = 18,
+}
+
+// ─── Structs ─────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DisputeStatus {
+    Pending,
+    ResolvedValid,
+    ResolvedInvalid,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DisputeRecord {
+    pub oracle: Address,
+    pub asset_id: u32,
+    pub challenger: Address,
+    pub bond_amount: u64,
+    pub start_time: u64,
+    pub status: DisputeStatus,
 }
 
 // ─── Decentralized Oracle Contract ───────────────────────────────────────────
@@ -116,6 +147,10 @@ impl DecentralizedOracle {
 
         let slash_count: Map<Address, u64> = Map::new(&env); // oracle -> slash count
         env.storage().instance().set(&SLASH_EV, &slash_count);
+
+        let disputes: Map<u64, DisputeRecord> = Map::new(&env);
+        env.storage().instance().set(&DISPUTES, &disputes);
+        env.storage().instance().set(&DISP_CNT, &0u64);
 
         // Initialize configuration as individual values
         env.storage().instance().set(&symbol_short!("MIN_STAKE"), &MIN_STAKE);
@@ -481,6 +516,113 @@ impl DecentralizedOracle {
             (symbol_short!("PRICE_AGG"),),
             (asset_id, weighted_price),
         );
+    }
+
+    /// Open a dispute against a specific oracle's price report
+    pub fn open_dispute(
+        env: Env,
+        challenger: Address,
+        oracle: Address,
+        asset_id: u32,
+        bond_amount: u64,
+    ) -> Result<u64, DecentralizedOracleError> {
+        Self::require_not_paused(&env)?;
+        challenger.require_auth();
+
+        if bond_amount != DISPUTE_BOND {
+            return Err(DecentralizedOracleError::InvalidBond);
+        }
+
+        let mut disputes = Self::get_disputes(&env);
+        let dispute_id: u64 = env.storage().instance().get(&DISP_CNT).unwrap_or(0);
+        let current_time = env.ledger().timestamp();
+
+        let record = DisputeRecord {
+            oracle: oracle.clone(),
+            asset_id,
+            challenger: challenger.clone(),
+            bond_amount,
+            start_time: current_time,
+            status: DisputeStatus::Pending,
+        };
+
+        disputes.set(dispute_id, record);
+        env.storage().instance().set(&DISPUTES, &disputes);
+        env.storage().instance().set(&DISP_CNT, &(dispute_id + 1));
+
+        env.events().publish(
+            (symbol_short!("DISPUTE"), symbol_short!("OPENED")),
+            (dispute_id, challenger, oracle, asset_id),
+        );
+
+        Ok(dispute_id)
+    }
+
+    /// Resolve an open dispute
+    pub fn resolve_dispute(
+        env: Env,
+        admin: Address,
+        dispute_id: u64,
+        is_valid: bool,
+    ) -> Result<(), DecentralizedOracleError> {
+        Self::require_admin(&env, admin.clone());
+
+        let mut disputes = Self::get_disputes(&env);
+        let mut record = disputes.get(dispute_id).ok_or(DecentralizedOracleError::DisputeNotFound)?;
+
+        if record.status != DisputeStatus::Pending {
+            return Err(DecentralizedOracleError::DisputeNotPending);
+        }
+
+        let current_time = env.ledger().timestamp();
+        if current_time - record.start_time < DISPUTE_REVIEW_PERIOD {
+            return Err(DecentralizedOracleError::DisputeReviewActive);
+        }
+
+        if is_valid {
+            record.status = DisputeStatus::ResolvedValid;
+            // The challenger was right. We slash the oracle and reward the challenger.
+            // (Bond is effectively returned to challenger off-chain or by token transfer,
+            // here we handle the internal logic for slashing the oracle)
+            
+            let mut stakes = Self::get_stakes(&env);
+            if let Some(oracle_stake) = stakes.get(record.oracle.clone()) {
+                // Slash the oracle by the slash percentage
+                let slash_pct: u32 = env.storage().instance().get(&symbol_short!("SLASH_PCT")).unwrap();
+                let slash_amount = (oracle_stake as u128 * slash_pct as u128 / 10000) as u64;
+                let new_stake = oracle_stake.saturating_sub(slash_amount);
+                stakes.set(record.oracle.clone(), new_stake);
+                env.storage().instance().set(&STAKES, &stakes);
+
+                // Increment slash count
+                let mut slash_counts = Self::get_slash_count(&env);
+                let current_slash = slash_counts.get(record.oracle.clone()).unwrap_or(0);
+                slash_counts.set(record.oracle.clone(), current_slash + 1);
+                env.storage().instance().set(&SLASH_EV, &slash_counts);
+            }
+        } else {
+            record.status = DisputeStatus::ResolvedInvalid;
+            // The challenger was wrong. Bond is forfeited to oracle.
+            let mut stakes = Self::get_stakes(&env);
+            if let Some(oracle_stake) = stakes.get(record.oracle.clone()) {
+                stakes.set(record.oracle.clone(), oracle_stake.saturating_add(record.bond_amount));
+                env.storage().instance().set(&STAKES, &stakes);
+            }
+        }
+
+        disputes.set(dispute_id, record.clone());
+        env.storage().instance().set(&DISPUTES, &disputes);
+
+        env.events().publish(
+            (symbol_short!("DISPUTE"), symbol_short!("RESOLVED")),
+            (dispute_id, is_valid),
+        );
+
+        Ok(())
+    }
+
+    fn get_disputes(env: &Env) -> Map<u64, DisputeRecord> {
+        env.storage().instance().get(&DISPUTES).unwrap_or_else(|| Map::new(env))
     }
 
     // Storage getters

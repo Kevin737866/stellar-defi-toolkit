@@ -23,6 +23,8 @@
 //!   2-day execution delay.
 //! - **User**: read-only (proposal/params/voting-power lookups).
 
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::stablecoin::{
     GovernanceProposal, ProposalType, SystemStats, RiskParameters, FeeConfig
@@ -519,5 +521,112 @@ impl GovernanceContractV2 {
 
     fn get_delegations(env: &Env) -> Map<Address, Address> {
         env.storage().instance().get(&DELEGATIONS).unwrap()
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SecurityCouncil {
+    pub members: Vec<Address>,
+    pub threshold: u32,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalState {
+    pub id: u64,
+    pub execution_time: u64,
+    pub executed: bool,
+    pub vetoed: bool,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Council,
+    Proposal(u64),
+    VetoLockout(u64),
+}
+
+#[contract]
+pub struct GovernanceV2Contract;
+
+#[contractimpl]
+impl GovernanceV2Contract {
+    pub fn initialize_council(env: Env, admin: Address, members: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        if threshold == 0 || threshold > members.len() {
+            panic!("Invalid council threshold");
+        }
+        let council = SecurityCouncil {
+            members,
+            threshold,
+            active: true,
+        };
+        env.storage().instance().set(&DataKey::Council, &council);
+        env.events().publish((Symbol::new(&env, "CouncilInitialized"),), admin);
+    }
+
+    pub fn veto_proposal(env: Env, council_member: Address, proposal_id: u64) {
+        council_member.require_auth();
+
+        let council: SecurityCouncil = env
+            .storage()
+            .instance()
+            .get(&DataKey::Council)
+            .unwrap_or_else(|| panic!("Security council not configured"));
+
+        if !council.active {
+            panic!("Security council veto power has been revoked");
+        }
+
+        if !council.members.contains(&council_member) {
+            panic!("Caller is not a security council member");
+        }
+
+        let prop_key = DataKey::Proposal(proposal_id);
+        let mut proposal: ProposalState = env
+            .storage()
+            .persistent()
+            .get(&prop_key)
+            .unwrap_or_else(|| panic!("Proposal not found"));
+
+        if proposal.executed {
+            panic!("Cannot veto an already executed proposal");
+        }
+
+        if proposal.vetoed {
+            panic!("Proposal is already vetoed");
+        }
+
+        let current_time = env.ledger().timestamp();
+        if current_time > proposal.execution_time {
+            panic!("Timelock period has elapsed; proposal cannot be vetoed");
+        }
+
+        proposal.vetoed = true;
+        env.storage().persistent().set(&prop_key, &proposal);
+
+        let lockout_expiration = current_time + (30 * 86400); // 30 days re-submission block
+        env.storage().persistent().set(&DataKey::VetoLockout(proposal_id), &lockout_expiration);
+
+        env.events().publish(
+            (Symbol::new(&env, "ProposalVetoed"), proposal_id),
+            council_member,
+        );
+    }
+
+    pub fn remove_veto_power(env: Env, admin: Address) {
+        admin.require_auth();
+        let mut council: SecurityCouncil = env
+            .storage()
+            .instance()
+            .get(&DataKey::Council)
+            .unwrap_or_else(|| panic!("Security council not configured"));
+
+        council.active = false;
+        env.storage().instance().set(&DataKey::Council, &council);
+        env.events().publish((Symbol::new(&env, "VetoPowerRemoved"),), admin);
     }
 }
