@@ -939,3 +939,42 @@ pub mod failover {
         fn default() -> Self { Self::new() }
     }
 }
+
+// ─── Bridge Relay Adapter ───────────────────────────────────────────────────
+
+#[derive(Clone)]
+#[contracttype]
+pub struct BridgeRelayConfig {
+    pub provider: Symbol,
+    pub expected_chain: Symbol,
+    pub max_staleness: u64,
+}
+
+#[contract]
+pub struct BridgeRelayAdapter;
+
+#[contractimpl]
+impl BridgeRelayAdapter {
+    /// Verify a cross-chain payload signature and freshness
+    pub fn verify_payload(
+        env: Env,
+        payload: soroban_sdk::Bytes,
+        signature: soroban_sdk::Bytes,
+        config: BridgeRelayConfig,
+        payload_timestamp: u64,
+    ) -> bool {
+        let current_time = env.ledger().timestamp();
+        
+        // Freshness check
+        if current_time > payload_timestamp + config.max_staleness {
+            return false;
+        }
+
+        // Dummy signature verification for now (mock Pyth/Wormhole behavior)
+        if signature.len() == 0 || payload.len() == 0 {
+            return false;
+        }
+
+        true
+    }
+}
