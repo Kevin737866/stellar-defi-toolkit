@@ -18,10 +18,11 @@
 //! - **Keeper**: `detect_opportunity` (intended for bots/oracles), `execute_arbitrage`,
 //!   `report_failed_arbitrage` — open to any caller, no auth check on the acting address.
 //! - **User**: none beyond acting as a Keeper (any address may execute an opportunity).
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 use crate::types::stablecoin::{AlertSeverity, ArbitrageOpportunity, OraclePrice, SystemStats};
 use soroban_sdk::{
-    contract, contractimpl, unwrap::UnwrapOptimized, Address, Env, Map, Symbol, Vec,
+    contract, contractimpl, contracttype, unwrap::UnwrapOptimized, Address, Env, Map, Symbol, Vec,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ const ARBITRAGE_STATS: Symbol = Symbol::short("ARBSTATS");
 const PARAMS: Symbol = Symbol::short("PARAMS");
 const NEXT_OPPORTUNITY_ID: Symbol = Symbol::short("NEXT_OPP");
 const TOTAL_REWARDS_PAID: Symbol = Symbol::short("TOTAL_REW");
+const ROUTES: Symbol = Symbol::short("ROUTES");
 
 // ─── Arbitrage Parameters ───────────────────────────────────────────────────
 
@@ -112,6 +114,28 @@ pub struct ArbitrageExecution {
     pub timestamp: u64,
     /// Whether execution was successful
     pub successful: bool,
+}
+
+/// A pool hop used by a multi-hop arbitrage route.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RouteHop {
+    pub pool: Address,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub fee_bps: u32,
+    pub liquidity: u64,
+}
+
+/// A simulated arbitrage route and its net expected profit.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ArbitrageRoute {
+    pub hops: Vec<RouteHop>,
+    pub input_amount: u64,
+    pub output_amount: u64,
+    pub gas_cost: u64,
+    pub net_profit: i128,
 }
 
 // ─── Arbitrage Contract ─────────────────────────────────────────────────────
@@ -330,6 +354,29 @@ impl ArbitrageContract {
             (Symbol::short("ARBITRAGE_FAILED"), arbitrageur.clone()),
             (opportunity_id, reason),
         );
+    }
+
+    /// Register a route candidate for off-chain execution and comparison.
+    pub fn register_route(env: Env, route: ArbitrageRoute) {
+        Self::require_not_paused(&env);
+        if route.hops.len() < 3 || route.hops.len() > 5 {
+            panic!("Route must contain between 3 and 5 hops");
+        }
+        let mut routes: Vec<ArbitrageRoute> = env.storage().instance().get(&ROUTES).unwrap_or_else(|| Vec::new(&env));
+        routes.push_back(route);
+        env.storage().instance().set(&ROUTES, &routes);
+    }
+
+    /// Return the most profitable registered route after gas costs.
+    pub fn best_route(env: Env) -> Option<ArbitrageRoute> {
+        let routes: Vec<ArbitrageRoute> = env.storage().instance().get(&ROUTES).unwrap_or_else(|| Vec::new(&env));
+        let mut best: Option<ArbitrageRoute> = None;
+        for route in routes.iter() {
+            if route.net_profit > 0 && best.as_ref().map(|current| route.net_profit > current.net_profit).unwrap_or(true) {
+                best = Some(route);
+            }
+        }
+        best
     }
 
     /// Get active arbitrage opportunities
@@ -583,5 +630,95 @@ impl ArbitrageContract {
 
     fn get_params(env: &Env) -> ArbitrageParams {
         env.storage().instance().get(&PARAMS).unwrap()
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArbitrageRisk {
+    pub volatility_score: u32,
+    pub liquidity_score: u32,
+    pub time_risk_score: u32,
+    pub counterparty_score: u32,
+    pub aggregate_score: u32, // 0 - 100 scale
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArbitrageOpportunity {
+    pub id: u64,
+    pub source_dex: Address,
+    pub target_dex: Address,
+    pub expected_profit: i128,
+    pub risk: ArbitrageRisk,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Opportunity(u64),
+    MaxRiskThreshold,
+}
+
+#[contract]
+pub struct ArbitrageContract;
+
+#[contractimpl]
+impl ArbitrageContract {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        // Default max risk threshold set to 70; opportunities above this are filtered out
+        env.storage().instance().set(&DataKey::MaxRiskThreshold, &70u32);
+        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+    }
+
+    pub fn evaluate_opportunity(
+        env: Env,
+        id: u64,
+        source_dex: Address,
+        target_dex: Address,
+        expected_profit: i128,
+        volatility: u32,
+        liquidity_depth: u32,
+        time_variance: u32,
+        counterparty_risk: u32,
+    ) -> bool {
+        // Compute individual component risk factors (normalized 0 to 25 each, total max 100)
+        let vol_score = (volatility * 25) / 100;
+        let liq_score = (liquidity_depth * 25) / 100;
+        let time_score = (time_variance * 25) / 100;
+        let cp_score = (counterparty_risk * 25) / 100;
+
+        let aggregate_score = vol_score + liq_score + time_score + cp_score;
+        let max_threshold: u32 = env.storage().instance().get(&DataKey::MaxRiskThreshold).unwrap_or(70);
+
+        let risk = ArbitrageRisk {
+            volatility_score: vol_score,
+            liquidity_score: liq_score,
+            time_risk_score: time_score,
+            counterparty_score: cp_score,
+            aggregate_score,
+        };
+
+        let opportunity = ArbitrageOpportunity {
+            id,
+            source_dex,
+            target_dex,
+            expected_profit,
+            risk,
+        };
+
+        // Filter out opportunities exceeding the maximum risk threshold (70)
+        let is_viable = aggregate_score <= max_threshold;
+        if is_viable {
+            env.storage().persistent().set(&DataKey::Opportunity(id), &opportunity);
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "ArbitrageEvaluated"), id),
+            (aggregate_score, is_viable),
+        );
+
+        is_viable
     }
 }

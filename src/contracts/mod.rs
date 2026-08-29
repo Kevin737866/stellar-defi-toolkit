@@ -11,7 +11,7 @@
 //! price_feed_adapters, price_oracle, stability_pool, stablecoin, staking,
 //! synthetic_governance, synthetic_protocol, token, vault.
 pub mod asset_registry_protocol;
-//! synthetic_governance, synthetic_protocol, vault.
+/// synthetic_governance, synthetic_protocol, vault.
 pub mod asset_registry;
 pub mod governance;
 pub mod lending;
@@ -33,4 +33,4 @@ pub mod vault;
 
 pub use lending::LendingProtocol;
 pub use oracle::{PriceOracle, PriceOracleSim};
-pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter};
+pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter, BridgeRelayAdapter, BridgeRelayConfig};

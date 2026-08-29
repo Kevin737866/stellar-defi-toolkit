@@ -82,6 +82,8 @@ pub struct PriceHistoryEntry {
     pub timestamp: u64,
     /// Source of this price
     pub source: Address,
+    /// Cumulative price for TWAP
+    pub cumulative_price: u128,
 }
 
 /// Circuit breaker status for an asset
@@ -270,19 +272,28 @@ impl PriceOracleContract {
         
         // Add to price history
         let mut price_history = Self::get_price_history(&env);
-        let history_entry = PriceHistoryEntry {
-            price,
-            timestamp: env.ledger().timestamp(),
-            source: source_address,
-        };
-        
         let asset_history = price_history.get(asset_address.clone())
             .unwrap_or_else(|| Vec::new(&env));
         let mut updated_history = asset_history;
+
+        let mut cumulative_price: u128 = 0;
+        let current_time = env.ledger().timestamp();
+        if let Some(last_entry) = updated_history.last() {
+            let time_elapsed = (current_time - last_entry.timestamp) as u128;
+            cumulative_price = last_entry.cumulative_price + (last_entry.price as u128 * time_elapsed);
+        }
+
+        let history_entry = PriceHistoryEntry {
+            price,
+            timestamp: current_time,
+            source: source_address.clone(),
+            cumulative_price,
+        };
+        
         updated_history.push_back(history_entry);
         
-        // Keep only last 100 entries per asset
-        if updated_history.len() > 100 {
+        // Keep a larger buffer for 24h TWAP
+        if updated_history.len() > 1000 {
             updated_history.pop_front();
         }
         
@@ -430,36 +441,40 @@ impl PriceOracleContract {
             .unwrap_or_else(|| panic!("No price history for asset"));
         
         let current_time = env.ledger().timestamp();
-        let cutoff_time = current_time - period;
+        if period == 0 || history.is_empty() {
+            panic!("Invalid period or no history");
+        }
         
-        let mut weighted_sum = 0u128;
-        let mut total_weight = 0u64;
-        let mut last_timestamp = 0u64;
-        let mut last_price = 0u64;
-        let mut decimals = 6u32;
+        let cutoff_time = current_time.saturating_sub(period);
+        let latest_entry = history.last().unwrap();
         
+        let mut old_entry = history.first().unwrap();
         for entry in history.iter() {
-            if entry.timestamp >= cutoff_time {
-                if last_timestamp > 0 {
-                    let time_weight = entry.timestamp - last_timestamp;
-                    weighted_sum += (last_price as u128) * (time_weight as u128);
-                    total_weight += time_weight;
-                }
-                last_timestamp = entry.timestamp;
-                last_price = entry.price;
-                
-                // Get decimals from current price if available
-                if let Ok(current_price) = Self::get_price(env.clone(), asset_address.clone()) {
-                    decimals = current_price.decimals;
-                }
+            if entry.timestamp <= cutoff_time {
+                old_entry = entry;
+            } else {
+                break;
             }
         }
         
-        if total_weight == 0 {
-            panic!("No price data in the specified period");
+        let twap_price = if old_entry.timestamp == latest_entry.timestamp {
+            latest_entry.price
+        } else {
+            let time_elapsed_since_last = (current_time - latest_entry.timestamp) as u128;
+            let current_cumulative = latest_entry.cumulative_price + (latest_entry.price as u128 * time_elapsed_since_last);
+            let time_weight = (current_time - old_entry.timestamp) as u128;
+            if time_weight == 0 {
+                latest_entry.price
+            } else {
+                let diff = current_cumulative.saturating_sub(old_entry.cumulative_price);
+                (diff / time_weight) as u64
+            }
+        };
+
+        let mut decimals = 6u32;
+        if let Ok(current_price) = Self::get_price(env.clone(), asset_address.clone()) {
+            decimals = current_price.decimals;
         }
-        
-        let twap_price = (weighted_sum / (total_weight as u128)) as u64;
         
         OraclePrice {
             asset_address,

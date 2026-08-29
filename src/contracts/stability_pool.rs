@@ -19,6 +19,7 @@
 //!   has no auth check at all.
 //! - **User**: `deposit`, `withdraw`, `claim_rewards` — none call `require_auth()` on
 //!   the `depositor` address; any caller can withdraw/claim on behalf of any depositor.
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
 use crate::types::stablecoin::{
     LiquidationEvent, StabilityPoolDepositEvent, StabilityPoolInfo, StabilityPoolWithdrawalEvent,
@@ -51,6 +52,7 @@ const POOL_INFO: Symbol = Symbol::short("POOLINFO");
 const USER_DEPOSITS: Symbol = Symbol::short("USERDEP");
 const REWARD_INDEX: Symbol = Symbol::short("REWARDIDX");
 const PARAMS: Symbol = Symbol::short("PARAMS");
+const AUTO_COMPOUND: Symbol = Symbol::short("AUTOCOMP");
 const MIGRATION_VERSION: Symbol = Symbol::short("MIGVER");
 const MIGRATION_EVENTS: Symbol = Symbol::short("MIGEVENTS");
 
@@ -197,7 +199,45 @@ pub struct StabilityPoolParams {
     pub liquidation_reward_share_bps: u32,
 }
 
+/// Per-user auto-compounding preference and last compound time.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct AutoCompoundConfig {
+    /// Whether rewards should be reinvested automatically.
+    pub enabled: bool,
+    /// Minimum interval between automatic compounds in seconds.
+    pub interval: u64,
+    /// Last ledger timestamp at which rewards were compounded.
+    pub last_compounded_at: u64,
+}
+
 // ─── Stability Pool Contract ───────────────────────────────────────────────────
+
+/// Migration record for audit trail.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct MigrationRecord {
+    pub migration_id: u64,
+    pub user: Address,
+    pub amount: u64,
+    pub reward_index: u64,
+    pub deposit_timestamp: u64,
+    pub migrated_at: u64,
+}
+
+/// Pool health metrics for dashboard integration.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct PoolHealthMetrics {
+    pub coverage_ratio_bps: u32,
+    pub concentration_bps: u32,
+    pub withdrawal_pressure_bps: u32,
+    pub reward_sustainability_bps: u32,
+    pub health_score: u32,
+    pub pool_size: u64,
+    pub total_debt: u64,
+    pub depositor_count: u32,
+}
 
 /// Stability pool contract
 #[contract]
@@ -505,6 +545,81 @@ impl StabilityPoolContract {
     /// Get current parameters
     pub fn get_params(env: Env) -> StabilityPoolParams {
         Self::get_params(&env)
+    }
+
+    /// Configure automatic reinvestment of a depositor's pending rewards.
+    pub fn set_auto_compound(env: Env, depositor: Address, enabled: bool, interval: u64) {
+        Self::require_not_paused(&env);
+        if interval == 0 {
+            panic!("Compound interval must be greater than 0");
+        }
+        let mut configs: Map<Address, AutoCompoundConfig> = env.storage().instance()
+            .get(&AUTO_COMPOUND).unwrap_or_else(|| Map::new(&env));
+        configs.set(depositor.clone(), AutoCompoundConfig {
+            enabled,
+            interval,
+            last_compounded_at: env.ledger().timestamp(),
+        });
+        env.storage().instance().set(&AUTO_COMPOUND, &configs);
+        env.events().publish(
+            (Symbol::short("AUTO_COMPOUND_UPDATED"), depositor),
+            (enabled, interval),
+        );
+    }
+
+    /// Return a depositor's auto-compounding configuration.
+    pub fn get_auto_compound(env: Env, depositor: Address) -> AutoCompoundConfig {
+        let configs: Map<Address, AutoCompoundConfig> = env.storage().instance()
+            .get(&AUTO_COMPOUND).unwrap_or_else(|| Map::new(&env));
+        configs.get(depositor).unwrap_or(AutoCompoundConfig {
+            enabled: false,
+            interval: 0,
+            last_compounded_at: 0,
+        })
+    }
+
+    /// Reinvest one depositor's pending rewards into the pool.
+    pub fn compound(env: Env, depositor: Address) {
+        Self::require_not_paused(&env);
+        Self::update_rewards(&env);
+        let mut configs: Map<Address, AutoCompoundConfig> = env.storage().instance()
+            .get(&AUTO_COMPOUND).unwrap_or_else(|| Map::new(&env));
+        let mut config = configs.get(depositor.clone()).unwrap_or_else(|| panic!("Auto-compounding is not configured"));
+        if !config.enabled || env.ledger().timestamp() < config.last_compounded_at + config.interval {
+            panic!("Compound interval has not elapsed");
+        }
+        let mut deposits = Self::get_user_deposits(&env);
+        let mut deposit = deposits.get(depositor.clone()).unwrap_or_else(|| panic!("No deposit found"));
+        let index = env.storage().instance().get(&REWARD_INDEX).unwrap();
+        let rewards = Self::calculate_rewards(deposit.amount, deposit.reward_index, index);
+        if rewards == 0 {
+            panic!("No rewards to compound");
+        }
+        let before = deposit.amount;
+        deposit.amount = deposit.amount.checked_add(rewards).unwrap_or_else(|| panic!("Compound amount overflow"));
+        deposit.reward_index = index;
+        deposit.rewards_claimed = deposit.rewards_claimed.checked_add(rewards).unwrap_or_else(|| panic!("Rewards overflow"));
+        deposits.set(depositor.clone(), deposit.clone());
+        env.storage().instance().set(&USER_DEPOSITS, &deposits);
+        let mut pool = Self::get_pool_info(&env);
+        pool.total_deposits = pool.total_deposits.checked_add(rewards).unwrap_or_else(|| panic!("Pool balance overflow"));
+        env.storage().instance().set(&POOL_INFO, &pool);
+        config.last_compounded_at = env.ledger().timestamp();
+        configs.set(depositor.clone(), config);
+        env.storage().instance().set(&AUTO_COMPOUND, &configs);
+        env.events().publish((Symbol::short("REWARDS_COMPOUNDED"), depositor), (before, deposit.amount, rewards));
+    }
+
+    /// Compound all eligible depositors in a single call.
+    pub fn compound_all(env: Env) {
+        Self::require_not_paused(&env);
+        let deposits = Self::get_user_deposits(&env);
+        for depositor in deposits.keys() {
+            let config = Self::get_auto_compound(env.clone(), depositor.clone());
+            if config.enabled && env.ledger().timestamp() >= config.last_compounded_at + config.interval {
+                Self::compound(env.clone(), depositor);
+            }
+        }
     }
 
     // ─── Issue #202: Withdrawal Queue Management ───────────────────────────────
@@ -1062,24 +1177,6 @@ impl StabilityPoolContract {
 
     // ─── Migration (Issue #207) ────────────────────────────────────────────────
 
-    /// Migration record for audit trail
-    #[derive(Clone, Debug)]
-    #[contracttype]
-    pub struct MigrationRecord {
-        /// Migration event ID
-        pub migration_id: u64,
-        /// User migrating
-        pub user: Address,
-        /// Amount migrated
-        pub amount: u64,
-        /// Reward index carried over
-        pub reward_index: u64,
-        /// Deposit timestamp preserved
-        pub deposit_timestamp: u64,
-        /// Migration timestamp
-        pub migrated_at: u64,
-    }
-
     /// Migrate user deposit to new pool version (admin-assisted one-click migration)
     ///
     /// # Arguments
@@ -1135,28 +1232,6 @@ impl StabilityPoolContract {
     }
 
     // ─── Pool Health Metrics (Issue #208) ──────────────────────────────────────
-
-    /// Pool health metrics for dashboard integration
-    #[derive(Clone, Debug)]
-    #[contracttype]
-    pub struct PoolHealthMetrics {
-        /// Coverage ratio: pool_size / total_stablecoin_debt (basis points)
-        pub coverage_ratio_bps: u32,
-        /// Concentration: top 10 depositors percentage of pool (basis points)
-        pub concentration_bps: u32,
-        /// Withdrawal pressure: pending withdrawals / pool_size (basis points)
-        pub withdrawal_pressure_bps: u32,
-        /// Reward sustainability: rewards_paid / liquidation_proceeds (basis points)
-        pub reward_sustainability_bps: u32,
-        /// Overall health score 0-10000
-        pub health_score: u32,
-        /// Total pool size
-        pub pool_size: u64,
-        /// Total stablecoin debt
-        pub total_debt: u64,
-        /// Number of depositors
-        pub depositor_count: u32,
-    }
 
     /// Calculate pool health metrics
     pub fn get_pool_health(env: Env) -> PoolHealthMetrics {
@@ -1216,5 +1291,113 @@ impl StabilityPoolContract {
             total_debt,
             depositor_count,
         }
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DepositorInfo {
+    pub account: Address,
+    pub balance: i128,
+    pub deposit_timestamp: u64,
+    pub last_update_timestamp: u64,
+    pub boost_multiplier: u32, // basis points, e.g., 10000 = 1x, 20000 = 2x
+}
+
+#[contracttype]
+pub enum DataKey {
+    Depositor(Address),
+    MaxBoostDays,
+}
+
+#[contract]
+pub struct StabilityPoolContract;
+
+#[contractimpl]
+impl StabilityPoolContract {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::MaxBoostDays, &180u64);
+        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+    }
+
+    pub fn deposit(env: Env, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Deposit amount must be positive");
+        }
+
+        let current_time = env.ledger().timestamp();
+        let key = DataKey::Depositor(depositor.clone());
+        
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or(DepositorInfo {
+            account: depositor.clone(),
+            balance: 0,
+            deposit_timestamp: current_time,
+            last_update_timestamp: current_time,
+            boost_multiplier: 10000,
+        });
+
+        if info.balance == 0 {
+            info.deposit_timestamp = current_time;
+        }
+
+        info.balance += amount;
+        info.last_update_timestamp = current_time;
+        info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, current_time);
+
+        env.storage().persistent().set(&key, &info);
+        env.events().publish((Symbol::new(&env, "Deposited"), depositor), (amount, info.boost_multiplier));
+    }
+
+    pub fn withdraw(env: Env, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Withdrawal amount must be positive");
+        }
+
+        let key = DataKey::Depositor(depositor.clone());
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("No deposit found"));
+
+        if info.balance < amount {
+            panic!("Insufficient deposited balance");
+        }
+
+        let current_time = env.ledger().timestamp();
+        info.balance -= amount;
+
+        if info.balance == 0 {
+            info.deposit_timestamp = current_time;
+            info.boost_multiplier = 10000;
+        } else {
+            // Partial withdrawals preserve duration streak to incentivize long-term participation
+            info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, current_time);
+        }
+
+        info.last_update_timestamp = current_time;
+        env.storage().persistent().set(&key, &info);
+
+        env.events().publish((Symbol::new(&env, "Withdrawn"), depositor), (amount, info.boost_multiplier));
+    }
+
+    pub fn calculate_boost(env: Env, deposit_timestamp: u64, current_time: u64) -> u32 {
+        let max_days: u64 = env.storage().instance().get(&DataKey::MaxBoostDays).unwrap_or(180);
+        let max_seconds = max_days * 86400;
+        
+        let duration = current_time.saturating_sub(deposit_timestamp);
+        if duration >= max_seconds {
+            return 20000; // Max 2x boost limit (20000 basis points)
+        }
+
+        let boost_addition = (duration as u128 * 10000u128) / max_seconds as u128;
+        10000 + boost_addition as u32
+    }
+
+    pub fn get_depositor_info(env: Env, depositor: Address) -> DepositorInfo {
+        let key = DataKey::Depositor(depositor);
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Depositor not found"));
+        info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, env.ledger().timestamp());
+        info
     }
 }

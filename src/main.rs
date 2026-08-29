@@ -794,8 +794,6 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-    }
-}
 
 fn handle_lend_command(cmd: LendCommands) {
     use stellar_defi_toolkit::{

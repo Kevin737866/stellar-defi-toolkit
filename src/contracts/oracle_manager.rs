@@ -26,6 +26,8 @@ use crate::contracts::decentralized_oracle::OracleNode;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 use crate::contracts::oracle::{PriceData, check_staleness};
 
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{OraclePrice, SyntheticAsset};
 
