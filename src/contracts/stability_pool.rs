@@ -19,6 +19,7 @@
 //!   has no auth check at all.
 //! - **User**: `deposit`, `withdraw`, `claim_rewards` — none call `require_auth()` on
 //!   the `depositor` address; any caller can withdraw/claim on behalf of any depositor.
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
 use crate::types::stablecoin::{
     LiquidationEvent, StabilityPoolDepositEvent, StabilityPoolInfo, StabilityPoolWithdrawalEvent,
@@ -1290,5 +1291,113 @@ impl StabilityPoolContract {
             total_debt,
             depositor_count,
         }
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DepositorInfo {
+    pub account: Address,
+    pub balance: i128,
+    pub deposit_timestamp: u64,
+    pub last_update_timestamp: u64,
+    pub boost_multiplier: u32, // basis points, e.g., 10000 = 1x, 20000 = 2x
+}
+
+#[contracttype]
+pub enum DataKey {
+    Depositor(Address),
+    MaxBoostDays,
+}
+
+#[contract]
+pub struct StabilityPoolContract;
+
+#[contractimpl]
+impl StabilityPoolContract {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::MaxBoostDays, &180u64);
+        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+    }
+
+    pub fn deposit(env: Env, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Deposit amount must be positive");
+        }
+
+        let current_time = env.ledger().timestamp();
+        let key = DataKey::Depositor(depositor.clone());
+        
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or(DepositorInfo {
+            account: depositor.clone(),
+            balance: 0,
+            deposit_timestamp: current_time,
+            last_update_timestamp: current_time,
+            boost_multiplier: 10000,
+        });
+
+        if info.balance == 0 {
+            info.deposit_timestamp = current_time;
+        }
+
+        info.balance += amount;
+        info.last_update_timestamp = current_time;
+        info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, current_time);
+
+        env.storage().persistent().set(&key, &info);
+        env.events().publish((Symbol::new(&env, "Deposited"), depositor), (amount, info.boost_multiplier));
+    }
+
+    pub fn withdraw(env: Env, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Withdrawal amount must be positive");
+        }
+
+        let key = DataKey::Depositor(depositor.clone());
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("No deposit found"));
+
+        if info.balance < amount {
+            panic!("Insufficient deposited balance");
+        }
+
+        let current_time = env.ledger().timestamp();
+        info.balance -= amount;
+
+        if info.balance == 0 {
+            info.deposit_timestamp = current_time;
+            info.boost_multiplier = 10000;
+        } else {
+            // Partial withdrawals preserve duration streak to incentivize long-term participation
+            info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, current_time);
+        }
+
+        info.last_update_timestamp = current_time;
+        env.storage().persistent().set(&key, &info);
+
+        env.events().publish((Symbol::new(&env, "Withdrawn"), depositor), (amount, info.boost_multiplier));
+    }
+
+    pub fn calculate_boost(env: Env, deposit_timestamp: u64, current_time: u64) -> u32 {
+        let max_days: u64 = env.storage().instance().get(&DataKey::MaxBoostDays).unwrap_or(180);
+        let max_seconds = max_days * 86400;
+        
+        let duration = current_time.saturating_sub(deposit_timestamp);
+        if duration >= max_seconds {
+            return 20000; // Max 2x boost limit (20000 basis points)
+        }
+
+        let boost_addition = (duration as u128 * 10000u128) / max_seconds as u128;
+        10000 + boost_addition as u32
+    }
+
+    pub fn get_depositor_info(env: Env, depositor: Address) -> DepositorInfo {
+        let key = DataKey::Depositor(depositor);
+        let mut info: DepositorInfo = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Depositor not found"));
+        info.boost_multiplier = Self::calculate_boost(env.clone(), info.deposit_timestamp, env.ledger().timestamp());
+        info
     }
 }

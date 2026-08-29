@@ -21,6 +21,7 @@
 //!   no auth check on the `oracle_address` parameter; any caller can act on behalf of
 //!   any registered oracle.
 //! - **User**: read-only (price/stake/reputation lookups).
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
 use soroban_sdk::{contract, contractimpl, contracterror, contracttype, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized, symbol_short, panic_with_error};
 
@@ -740,5 +741,131 @@ mod tests {
         let unauthorized = Address::generate(&env);
         let result = client.try_update_config(&unauthorized, &symbol_short!("MIN_ORACL"), &4);
         assert!(matches!(result, Err(_)));
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleNode {
+    pub operator: Address,
+    pub staked_balance: i128,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashingEvidence {
+    pub node: Address,
+    pub reported_price: i128,
+    pub consensus_price: i128,
+    pub deviation_bps: u32,
+    pub severity: u32, // 1: Minor, 2: Moderate, 3: Severe
+    pub challenge_deadline: u64,
+    pub executed: bool,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Node(Address),
+    SlashingRecord(u64),
+    SlashingCount,
+    ConsensusDeviationThreshold, // basis points, e.g., 1500 = 15%
+}
+
+#[contract]
+pub struct OracleSlashingContract;
+
+#[contractimpl]
+impl OracleSlashingContract {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::ConsensusDeviationThreshold, &1500u32);
+        env.storage().instance().set(&DataKey::SlashingCount, &0u64);
+        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+    }
+
+    pub fn report_bad_data(
+        env: Env,
+        challenger: Address,
+        node: Address,
+        reported_price: i128,
+        consensus_price: i128,
+        challenge_duration: u64,
+    ) -> u64 {
+        challenger.require_auth();
+
+        let threshold: u32 = env.storage().instance().get(&DataKey::ConsensusDeviationThreshold).unwrap_or(1500);
+        
+        let diff = if reported_price > consensus_price {
+            reported_price - consensus_price
+        } else {
+            consensus_price - reported_price
+        };
+
+        let deviation_bps = ((diff * 10000) / consensus_price) as u32;
+        if deviation_bps <= threshold {
+            panic!("Deviation is within acceptable consensus limits");
+        }
+
+        let severity = if deviation_bps > 5000 {
+            3 // Severe (>50%)
+        } else if deviation_bps > 3000 {
+            2 // Moderate (>30%)
+        } else {
+            1 // Minor (>15%)
+        };
+
+        let count: u64 = env.storage().instance().get(&DataKey::SlashingCount).unwrap_or(0);
+        let slashing_id = count + 1;
+        let current_time = env.ledger().timestamp();
+        let challenge_deadline = current_time + challenge_duration;
+
+        let evidence = SlashingEvidence {
+            node: node.clone(),
+            reported_price,
+            consensus_price,
+            deviation_bps,
+            severity,
+            challenge_deadline,
+            executed: false,
+        };
+
+        env.storage().instance().set(&DataKey::SlashingCount, &slashing_id);
+        env.storage().persistent().set(&DataKey::SlashingRecord(slashing_id), &evidence);
+
+        env.events().publish(
+            (Symbol::new(&env, "SlashingInitiated"), slashing_id),
+            (node, deviation_bps, severity),
+        );
+
+        slashing_id
+    }
+
+    pub fn execute_slashing(env: Env, admin: Address, slashing_id: u64) {
+        admin.require_auth();
+
+        let key = DataKey::SlashingRecord(slashing_id);
+        let mut evidence: SlashingEvidence = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic!("Slashing record not found"));
+
+        if evidence.executed {
+            panic!("Slashing already executed");
+        }
+
+        if env.ledger().timestamp() < evidence.challenge_deadline {
+            panic!("Challenge period has not yet elapsed");
+        }
+
+        evidence.executed = true;
+        env.storage().persistent().set(&key, &evidence);
+
+        env.events().publish(
+            (Symbol::new(&env, "SlashingExecuted"), slashing_id),
+            (evidence.node, evidence.severity),
+        );
     }
 }
