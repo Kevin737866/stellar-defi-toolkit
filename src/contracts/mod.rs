@@ -33,4 +33,4 @@ pub mod vault;
 
 pub use lending::LendingProtocol;
 pub use oracle::{PriceOracle, PriceOracleSim};
-pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter};
+pub use price_feed_adapters::{PriceFeedAdaptersContract, StellarDexAdapter, BridgeRelayAdapter, BridgeRelayConfig};

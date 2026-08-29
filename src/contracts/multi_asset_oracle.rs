@@ -16,7 +16,7 @@ use crate::types::asset::{
     AssetMetadata, PriceFeedConfig, AggregationMethod, PriceDeviationAlert,
     AlertSeverity, AssetStats,
 };
-use crate::contracts::price_feed_adapters::StellarDexAdapter;
+use crate::contracts::price_feed_adapters::{StellarDexAdapter, BridgeRelayAdapter, BridgeRelayConfig};
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -128,6 +128,83 @@ impl MultiAssetOracleContract {
         env.events().publish(
             Symbol::short("PRICE_SUBMITTED"),
             (asset_id, price.price),
+        );
+    }
+
+    /// Submit prices for multiple assets in a single batch
+    ///
+    /// # Arguments
+    /// * `prices` - Vector of asset identifier and price pairs
+    pub fn submit_batch_prices(env: Env, prices: Vec<(StellarAssetId, AssetPrice)>) {
+        Self::require_not_paused(&env);
+        
+        if prices.len() > 50 {
+            panic!("Batch size exceeds maximum of 50");
+        }
+        
+        for (asset_id, price) in prices.iter() {
+            Self::submit_price(env.clone(), asset_id.clone(), price.clone());
+        }
+        
+        env.events().publish(
+            Symbol::short("BATCH_SUBMIT"),
+            prices.len(),
+        );
+    }
+
+    /// Submit a cross-chain price
+    ///
+    /// # Arguments
+    /// * `asset_id` - Asset identifier
+    /// * `price` - Price data
+    /// * `payload` - Cross-chain payload (e.g. Pyth VAA)
+    /// * `signature` - Payload signature
+    /// * `source_chain` - Originating chain symbol
+    /// * `config` - Bridge relay config
+    pub fn update_cross_chain_price(
+        env: Env,
+        asset_id: StellarAssetId,
+        price: AssetPrice,
+        payload: soroban_sdk::Bytes,
+        signature: soroban_sdk::Bytes,
+        source_chain: Symbol,
+        config: BridgeRelayConfig,
+    ) {
+        Self::require_not_paused(&env);
+
+        let is_valid = BridgeRelayAdapter::verify_payload(
+            env.clone(),
+            payload.clone(),
+            signature.clone(),
+            config.clone(),
+            price.timestamp,
+        );
+
+        if !is_valid {
+            // Check fallback: if cross-chain updates stall > 1 hour, revert to native on-chain data
+            // (In this mockup, we just panic if not valid, but we could allow native fallback here if designed that way)
+            // But let's check if the last valid price is older than 1 hour.
+            let cache = Self::get_aggregation_cache(&env);
+            if let Some(cached_price) = cache.get(asset_id.clone()) {
+                let current_time = env.ledger().timestamp();
+                if current_time - cached_price.timestamp > 3600 {
+                    // Fallback to native on-chain data if available
+                    // For instance, returning or emitting a fallback event.
+                    env.events().publish(
+                        Symbol::short("FALLBACK_NATIVE"),
+                        (asset_id.clone(), source_chain.clone()),
+                    );
+                    return; // Skip update but don't panic so the contract can use fallback mechanisms
+                }
+            }
+            panic!("Invalid cross-chain payload or signature");
+        }
+
+        Self::submit_price(env.clone(), asset_id.clone(), price.clone());
+
+        env.events().publish(
+            Symbol::short("CC_PRICE_UPD"),
+            (asset_id, source_chain, price.price),
         );
     }
 
