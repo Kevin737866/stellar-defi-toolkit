@@ -18,6 +18,9 @@
 //!   `require_auth()` on the `oracle_address` parameter.
 //! - **User**: read-only (aggregated price/oracle info/alert lookups).
 
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use crate::contracts::oracle::{PriceData, check_staleness};
+
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{OraclePrice, SyntheticAsset};
 
@@ -1029,5 +1032,58 @@ pub mod oracle_failover {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
+    }
+}
+
+
+#[contracttype]
+pub enum DataKey {
+    PrimaryOracle,
+    SecondaryOracle,
+    StalenessThreshold,
+    LastGoodPrice(Symbol),
+    CircuitBreakerTripped,
+}
+
+#[contract]
+pub struct OracleManagerContract;
+
+#[contractimpl]
+impl OracleManagerContract {
+    pub fn get_price(env: Env, asset: Symbol, threshold: u64) -> PriceData {
+        let primary_price_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::PrimaryOracle);
+        
+        if let Some(primary) = primary_price_opt {
+            if !check_staleness(&env, primary.timestamp, threshold) {
+                env.storage().persistent().set(&DataKey::LastGoodPrice(asset.clone()), &primary);
+                return primary;
+            }
+        }
+
+        // Primary failed or stale; try secondary oracle
+        let secondary_price_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::SecondaryOracle);
+        
+        if let Some(secondary) = secondary_price_opt {
+            if !check_staleness(&env, secondary.timestamp, threshold) {
+                env.events().publish((Symbol::new(&env, "OracleFallbackTriggered"), asset.clone()), ());
+                let degraded_price = PriceData {
+                    price: secondary.price,
+                    timestamp: secondary.timestamp,
+                    is_degraded: true,
+                };
+                env.storage().persistent().set(&DataKey::LastGoodPrice(asset.clone()), &degraded_price);
+                return degraded_price;
+            }
+        }
+
+        // Secondary failed or stale; check for last known good price or trip circuit breaker
+        let last_good_opt: Option<PriceData> = env.storage().persistent().get(&DataKey::LastGoodPrice(asset.clone()));
+        if let Some(mut last_good) = last_good_opt {
+            env.events().publish((Symbol::new(&env, "StalenessCircuitBreakerTriggered"), asset), ());
+            last_good.is_degraded = true;
+            return last_good;
+        }
+
+        panic!("All oracle sources stale and no last known good price available");
     }
 }
