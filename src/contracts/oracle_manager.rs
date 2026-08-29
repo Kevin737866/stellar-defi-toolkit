@@ -18,6 +18,9 @@
 //!   `require_auth()` on the `oracle_address` parameter.
 //! - **User**: read-only (aggregated price/oracle info/alert lookups).
 
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use crate::contracts::decentralized_oracle::OracleNode;
+
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 use crate::contracts::oracle::{PriceData, check_staleness};
 
@@ -1085,5 +1088,43 @@ impl OracleManagerContract {
         }
 
         panic!("All oracle sources stale and no last known good price available");
+    }
+}
+
+
+#[contracttype]
+pub enum DataKey {
+    Oracle(Address),
+    PauseThreshold,
+}
+
+#[contract]
+pub struct OracleReputationManagerContract;
+
+#[contractimpl]
+impl OracleReputationManagerContract {
+    pub fn record_missed_update(env: Env, operator: Address) {
+        let key = DataKey::Oracle(operator.clone());
+        let mut node: OracleNode = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Oracle not registered"));
+
+        node.missed_updates += 1;
+        node.reputation_score = node.reputation_score.saturating_sub(150);
+
+        let pause_threshold: u32 = env.storage().instance().get(&DataKey::PauseThreshold).unwrap_or(3000);
+        if node.reputation_score < pause_threshold {
+            node.active = false;
+            env.events().publish((Symbol::new(&env, "OraclePaused"), operator.clone()), node.reputation_score);
+        }
+
+        env.storage().persistent().set(&key, &node);
+    }
+
+    pub fn get_oracle_weight(env: Env, operator: Address) -> u32 {
+        let key = DataKey::Oracle(operator);
+        let node: OracleNode = env.storage().persistent().get(&key).unwrap_or_else(|| panic!("Oracle not registered"));
+        if !node.active {
+            return 0;
+        }
+        node.reputation_score
     }
 }

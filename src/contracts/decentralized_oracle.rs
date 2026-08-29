@@ -22,6 +22,8 @@
 //!   any registered oracle.
 //! - **User**: read-only (price/stake/reputation lookups).
 
+use soroban_sdk::{contracttype, Address, Env, Symbol};
+
 use soroban_sdk::{contract, contractimpl, contracterror, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized, symbol_short, panic_with_error};
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -598,5 +600,32 @@ mod tests {
         let unauthorized = Address::generate(&env);
         let result = client.try_update_config(&unauthorized, &symbol_short!("MIN_ORACL"), &4);
         assert!(matches!(result, Err(_)));
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleNode {
+    pub operator: Address,
+    pub reputation_score: u32, // 0 to 10000 basis points
+    pub active: bool,
+    pub successful_reports: u32,
+    pub missed_updates: u32,
+}
+
+pub fn update_reputation(node: &mut OracleNode, is_accurate: bool, response_time_ms: u64) {
+    if !node.active {
+        return;
+    }
+
+    if is_accurate {
+        node.successful_reports += 1;
+        // Reward for fast response time (< 500ms)
+        let bonus = if response_time_ms < 500 { 10 } else { 5 };
+        node.reputation_score = std::cmp::min(10000, node.reputation_score + bonus);
+    } else {
+        // Penalty for deviation or inaccuracy
+        node.reputation_score = node.reputation_score.saturating_sub(200);
     }
 }
