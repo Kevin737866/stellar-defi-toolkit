@@ -76,6 +76,13 @@ impl TokenContract {
             recovery_requests: HashMap::new(),
             recovery_delay: 86400,
             paused: false,
+            permit_nonces: HashMap::new(),
+            before_transfer_hooks: HashMap::new(),
+            after_transfer_hooks: HashMap::new(),
+            token_uri: None,
+            blacklisted: HashMap::new(),
+            airdrops: HashMap::new(),
+            airdrop_claims: HashMap::new(),
         }
     }
 
@@ -174,13 +181,6 @@ impl TokenContract {
             Err("contract is paused".to_string())
         } else {
             Ok(())
-            // Issue #222
-            permit_nonces: HashMap::new(),
-            // Issue #221
-            before_transfer_hooks: HashMap::new(),
-            after_transfer_hooks: HashMap::new(),
-            // Issue #220
-            token_uri: None,
         }
     }
 

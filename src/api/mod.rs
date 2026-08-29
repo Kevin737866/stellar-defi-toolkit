@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use crate::contracts::price_history::PriceHistoryManager;
 use crate::utils::StellarClient;
 use crate::api::schema::{create_schema, StellarSchema};
-use crate::api::ws::PriceBroadcaster;
+use crate::api::ws::{ArbitrageBroadcaster, PriceBroadcaster};
 
 pub async fn graphql_handler(
     State(schema): State<StellarSchema>,
@@ -33,11 +33,15 @@ pub async fn graphql_playground() -> impl IntoResponse {
 pub async fn start_api_server(port: u16, client: StellarClient) -> anyhow::Result<()> {
     let price_manager = PriceHistoryManager::new();
     let schema = create_schema(client, price_manager);
+    let broadcaster = PriceBroadcaster::new();
+    let arbitrage_broadcaster = ArbitrageBroadcaster::new();
 
     let app = Router::new()
         .route("/graphql", get(graphql_playground).post(graphql_handler))
         .route("/ws/prices", get(ws::ws_handler))
+        .route("/ws/arbitrage", get(ws::arbitrage_ws_handler))
         .layer(axum::Extension(broadcaster))
+        .layer(axum::Extension(arbitrage_broadcaster))
         .with_state(schema);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
