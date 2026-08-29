@@ -5,5 +5,10 @@
 
 pub mod asset;
 pub mod lending;
+pub mod pool;
+pub mod stablecoin;
+pub mod synthetic;
+pub mod token;
+pub mod vault;
 
 pub use lending::*;
