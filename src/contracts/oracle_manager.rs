@@ -17,6 +17,8 @@
 //! - **Keeper**: `submit_price` — intended for a registered oracle, but has no
 //!   `require_auth()` on the `oracle_address` parameter.
 //! - **User**: read-only (aggregated price/oracle info/alert lookups).
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use crate::contracts::price_feed_adapters::OracleAdapter;
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 use crate::contracts::decentralized_oracle::OracleNode;
@@ -1126,5 +1128,50 @@ impl OracleReputationManagerContract {
             return 0;
         }
         node.reputation_score
+    }
+}
+
+
+#[contracttype]
+pub enum DataKey {
+    AdapterPriorityList(Symbol),
+    ManualOverride(Symbol),
+}
+
+#[contract]
+pub struct OracleFailoverManagerContract;
+
+#[contractimpl]
+impl OracleFailoverManagerContract {
+    pub fn set_oracle_priority(env: Env, asset: Symbol, adapters: Vec<OracleAdapter>) {
+        env.storage().persistent().set(&DataKey::AdapterPriorityList(asset), &adapters);
+        env.events().publish((Symbol::new(&env, "PriorityListUpdated"),), ());
+    }
+
+    pub fn set_manual_override(env: Env, asset: Symbol, source_id: Address) {
+        env.storage().persistent().set(&DataKey::ManualOverride(asset.clone()), &source_id);
+        env.events().publish((Symbol::new(&env, "ManualOverrideSet"), asset), source_id);
+    }
+
+    pub fn get_active_oracle(env: Env, asset: Symbol) -> Address {
+        if let Some(override_source) = env.storage().persistent().get::<_, Address>(&DataKey::ManualOverride(asset.clone())) {
+            return override_source;
+        }
+
+        let adapters: Vec<OracleAdapter> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdapterPriorityList(asset.clone()))
+            .unwrap_or_else(|| panic!("No oracle priority list configured for asset"));
+
+        let mut sorted_adapters: Vec<OracleAdapter> = adapters;
+        
+        for adapter in sorted_adapters.iter() {
+            if adapter.is_healthy {
+                return adapter.source_id;
+            }
+        }
+
+        panic!("All prioritized oracle adapters are unhealthy; failover failed");
     }
 }

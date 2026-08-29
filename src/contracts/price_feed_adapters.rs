@@ -9,6 +9,7 @@
 //!   `require_admin()` (compares the contract's own address, not the caller). See
 //!   `docs/ACCESS_CONTROL_MATRIX.md`.
 //! - **User**: read-only (adapter/category config lookups, `validate_price`).
+use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::asset::{
@@ -938,4 +939,24 @@ pub mod failover {
     impl Default for FailoverEngine {
         fn default() -> Self { Self::new() }
     }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleAdapter {
+    pub source_id: Address,
+    pub priority: u32,
+    pub is_healthy: bool,
+    pub last_health_check: u64,
+}
+
+pub fn perform_health_check(env: &Env, adapter: &mut OracleAdapter, timeout_seconds: u64) -> bool {
+    let current_time = env.ledger().timestamp();
+    let timed_out = current_time.saturating_sub(adapter.last_health_check) > timeout_seconds;
+    
+    if timed_out {
+        adapter.is_healthy = false;
+    }
+    adapter.is_healthy
 }
