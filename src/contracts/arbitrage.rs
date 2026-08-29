@@ -18,6 +18,7 @@
 //! - **Keeper**: `detect_opportunity` (intended for bots/oracles), `execute_arbitrage`,
 //!   `report_failed_arbitrage` — open to any caller, no auth check on the acting address.
 //! - **User**: none beyond acting as a Keeper (any address may execute an opportunity).
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 use crate::types::stablecoin::{AlertSeverity, ArbitrageOpportunity, OraclePrice, SystemStats};
 use soroban_sdk::{
@@ -583,5 +584,95 @@ impl ArbitrageContract {
 
     fn get_params(env: &Env) -> ArbitrageParams {
         env.storage().instance().get(&PARAMS).unwrap()
+    }
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArbitrageRisk {
+    pub volatility_score: u32,
+    pub liquidity_score: u32,
+    pub time_risk_score: u32,
+    pub counterparty_score: u32,
+    pub aggregate_score: u32, // 0 - 100 scale
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArbitrageOpportunity {
+    pub id: u64,
+    pub source_dex: Address,
+    pub target_dex: Address,
+    pub expected_profit: i128,
+    pub risk: ArbitrageRisk,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Opportunity(u64),
+    MaxRiskThreshold,
+}
+
+#[contract]
+pub struct ArbitrageContract;
+
+#[contractimpl]
+impl ArbitrageContract {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        // Default max risk threshold set to 70; opportunities above this are filtered out
+        env.storage().instance().set(&DataKey::MaxRiskThreshold, &70u32);
+        env.events().publish((Symbol::new(&env, "Initialized"),), admin);
+    }
+
+    pub fn evaluate_opportunity(
+        env: Env,
+        id: u64,
+        source_dex: Address,
+        target_dex: Address,
+        expected_profit: i128,
+        volatility: u32,
+        liquidity_depth: u32,
+        time_variance: u32,
+        counterparty_risk: u32,
+    ) -> bool {
+        // Compute individual component risk factors (normalized 0 to 25 each, total max 100)
+        let vol_score = (volatility * 25) / 100;
+        let liq_score = (liquidity_depth * 25) / 100;
+        let time_score = (time_variance * 25) / 100;
+        let cp_score = (counterparty_risk * 25) / 100;
+
+        let aggregate_score = vol_score + liq_score + time_score + cp_score;
+        let max_threshold: u32 = env.storage().instance().get(&DataKey::MaxRiskThreshold).unwrap_or(70);
+
+        let risk = ArbitrageRisk {
+            volatility_score: vol_score,
+            liquidity_score: liq_score,
+            time_risk_score: time_score,
+            counterparty_score: cp_score,
+            aggregate_score,
+        };
+
+        let opportunity = ArbitrageOpportunity {
+            id,
+            source_dex,
+            target_dex,
+            expected_profit,
+            risk,
+        };
+
+        // Filter out opportunities exceeding the maximum risk threshold (70)
+        let is_viable = aggregate_score <= max_threshold;
+        if is_viable {
+            env.storage().persistent().set(&DataKey::Opportunity(id), &opportunity);
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "ArbitrageEvaluated"), id),
+            (aggregate_score, is_viable),
+        );
+
+        is_viable
     }
 }
