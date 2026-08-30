@@ -65,6 +65,7 @@ const SLASH_EV: Symbol = symbol_short!("SLASH_EV");
 const CONFIG: Symbol = symbol_short!("CONFIG");
 const DISPUTES: Symbol = symbol_short!("DISPUTES");
 const DISP_CNT: Symbol = symbol_short!("DISP_CNT");
+const HB_ALERTS: Symbol = symbol_short!("HB_ALERT");
 
 // ─── Error Codes ───────────────────────────────────────────────────────────────
 
@@ -306,6 +307,158 @@ impl DecentralizedOracle {
         let reputation = Self::get_reputation(&env);
         reputation.get(oracle_address)
             .ok_or(DecentralizedOracleError::OracleNotFound)
+    }
+
+    // ─── Heartbeat Monitoring ─────────────────────────────────────────────────
+
+    /// Configure heartbeat interval for an oracle
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address
+    /// * `oracle_address` - Oracle to configure
+    /// * `interval_seconds` - Expected heartbeat interval (0 to disable)
+    pub fn set_heartbeat_interval(
+        env: Env,
+        admin: Address,
+        oracle_address: Address,
+        interval_seconds: u64,
+    ) -> Result<(), DecentralizedOracleError> {
+        Self::require_admin(&env, admin);
+
+        if !env.storage().instance().get(&ORACLES).unwrap_or(Map::<Address, u64>::new(&env)).contains_key(oracle_address.clone()) {
+            return Err(DecentralizedOracleError::OracleNotFound);
+        }
+
+        let current_time = env.ledger().timestamp();
+        env.storage().persistent().set(
+            &(symbol_short!("HB_INTVL"), oracle_address.clone()),
+            &interval_seconds,
+        );
+        env.storage().persistent().set(
+            &(symbol_short!("HB_LAST"), oracle_address.clone()),
+            &current_time,
+        );
+        env.storage().persistent().set(
+            &(symbol_short!("HB_CONSEC"), oracle_address.clone()),
+            &0u32,
+        );
+
+        env.events().publish(
+            (symbol_short!("HB_SET"),),
+            (oracle_address, interval_seconds),
+        );
+
+        Ok(())
+    }
+
+    /// Record a heartbeat from an oracle (called when it submits a price)
+    pub fn record_heartbeat(
+        env: Env,
+        oracle_address: Address,
+    ) -> Result<(), DecentralizedOracleError> {
+        let oracles = Self::get_oracles(&env);
+        if !oracles.contains_key(oracle_address.clone()) {
+            return Err(DecentralizedOracleError::OracleNotFound);
+        }
+
+        let current_time = env.ledger().timestamp();
+        let was_missed: bool = env.storage().persistent().get(
+            &(symbol_short!("HB_CONSEC"), oracle_address.clone()),
+        ).unwrap_or(0u32) > 0;
+
+        env.storage().persistent().set(
+            &(symbol_short!("HB_LAST"), oracle_address.clone()),
+            &current_time,
+        );
+        env.storage().persistent().set(
+            &(symbol_short!("HB_CONSEC"), oracle_address.clone()),
+            &0u32,
+        );
+
+        if was_missed {
+            env.events().publish(
+                (symbol_short!("HB_RECOV"),),
+                oracle_address,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Check heartbeats for all configured oracles and emit alerts
+    ///
+    /// This should be called periodically by a keeper bot.
+    pub fn check_heartbeats(env: Env) {
+        let current_time = env.ledger().timestamp();
+        let oracles = Self::get_oracles(&env);
+
+        for oracle_addr in oracles.keys() {
+            let interval: u64 = env.storage().persistent().get(
+                &(symbol_short!("HB_INTVL"), oracle_addr.clone()),
+            ).unwrap_or(0);
+
+            if interval == 0 {
+                continue; // Heartbeat monitoring not configured
+            }
+
+            let last_heartbeat: u64 = env.storage().persistent().get(
+                &(symbol_short!("HB_LAST"), oracle_addr.clone()),
+            ).unwrap_or(0);
+
+            let mut consecutive_missed: u32 = env.storage().persistent().get(
+                &(symbol_short!("HB_CONSEC"), oracle_addr.clone()),
+            ).unwrap_or(0);
+
+            let elapsed = current_time.saturating_sub(last_heartbeat);
+            let missed_intervals = (elapsed / interval) as u32;
+
+            if missed_intervals > 0 {
+                consecutive_missed = consecutive_missed.saturating_add(missed_intervals);
+                env.storage().persistent().set(
+                    &(symbol_short!("HB_CONSEC"), oracle_addr.clone()),
+                    &consecutive_missed,
+                );
+
+                // Emit heartbeat missed alert
+                env.events().publish(
+                    (symbol_short!("HB_MISSED"),),
+                    (oracle_addr.clone(), consecutive_missed),
+                );
+
+                // Auto-downgrade reputation on consecutive misses (threshold: 3)
+                if consecutive_missed >= 3 {
+                    let mut reputation = Self::get_reputation(&env);
+                    if let Some(rep) = reputation.get(oracle_addr.clone()) {
+                        let downgrade = 200u32 * (consecutive_missed / 3).min(10);
+                        let new_rep = rep.saturating_sub(downgrade);
+                        reputation.set(oracle_addr.clone(), new_rep);
+                        env.storage().instance().set(&REPUTATION, &reputation);
+
+                        env.events().publish(
+                            (symbol_short!("HB_DOWNGRD"),),
+                            (oracle_addr.clone(), consecutive_missed, new_rep),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get heartbeat info for a specific oracle
+    pub fn get_heartbeat_info(
+        env: Env,
+        oracle_address: Address,
+    ) -> (u64, u64, u32) {
+        let interval: u64 = env.storage().persistent().get(
+            &(symbol_short!("HB_INTVL"), oracle_address.clone()),
+        ).unwrap_or(0);
+        let last_heartbeat: u64 = env.storage().persistent().get(
+            &(symbol_short!("HB_LAST"), oracle_address.clone()),
+        ).unwrap_or(0);
+        let consecutive_missed: u32 = env.storage().persistent().get(
+            &(symbol_short!("HB_CONSEC"), oracle_address.clone()),
+        ).unwrap_or(0);
+        (interval, last_heartbeat, consecutive_missed)
     }
 
     /// Get all registered oracle addresses
@@ -744,6 +897,69 @@ mod tests {
         let result = client.try_update_config(&unauthorized, &symbol_short!("MIN_ORACL"), &4);
         assert!(matches!(result, Err(_)));
     }
+
+    #[test]
+    fn test_heartbeat_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin) = setup_test(&env);
+
+        let oracle = Address::generate(&env);
+        client.register_oracle(&oracle, &MIN_STAKE);
+
+        // Configure heartbeat: 60s interval, alert after 3 misses
+        client.set_heartbeat_interval(&admin, &oracle, &60);
+
+        // Record heartbeat
+        client.record_heartbeat(&oracle);
+
+        // Check heartbeat info - should be 0 consecutive misses
+        let (interval, _last, missed) = client.get_heartbeat_info(&oracle);
+        assert_eq!(interval, 60);
+        assert_eq!(missed, 0);
+    }
+
+    #[test]
+    fn test_heartbeat_check_early() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin) = setup_test(&env);
+
+        let oracle = Address::generate(&env);
+        client.register_oracle(&oracle, &MIN_STAKE);
+
+        // Configure heartbeat: 60s interval
+        client.set_heartbeat_interval(&admin, &oracle, &60);
+
+        // Check immediately - no misses
+        client.check_heartbeats();
+        let (_, _, missed) = client.get_heartbeat_info(&oracle);
+        assert_eq!(missed, 0);
+    }
+
+    #[test]
+    fn test_heartbeat_missed_affects_reputation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin) = setup_test(&env);
+
+        let oracle = Address::generate(&env);
+        client.register_oracle(&oracle, &MIN_STAKE);
+
+        let initial_rep = client.get_oracle_reputation(&oracle).unwrap();
+
+        // Configure heartbeat: 1s interval
+        client.set_heartbeat_interval(&admin, &oracle, &1);
+
+        // Advance time past several heartbeat windows
+        env.ledger().set_timestamp(10);
+
+        // Check heartbeats - should detect misses and downgrade reputation
+        client.check_heartbeats();
+
+        let new_rep = client.get_oracle_reputation(&oracle).unwrap();
+        assert!(new_rep < initial_rep, "Reputation should decrease after missed heartbeats");
+    }
 }
 
 
@@ -755,6 +971,12 @@ pub struct OracleNode {
     pub active: bool,
     pub successful_reports: u32,
     pub missed_updates: u32,
+    /// Expected heartbeat interval in seconds (0 = disabled)
+    pub heartbeat_interval: u64,
+    /// Timestamp of the last successful heartbeat
+    pub last_heartbeat: u64,
+    /// Number of consecutive missed heartbeats
+    pub consecutive_missed: u32,
 }
 
 pub fn update_reputation(node: &mut OracleNode, is_accurate: bool, response_time_ms: u64) {

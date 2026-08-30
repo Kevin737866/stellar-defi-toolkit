@@ -1,6 +1,6 @@
 //! Type definitions for the Stablecoin contract
 
-use soroban_sdk::{Address, Map, Symbol};
+use soroban_sdk::{Address, Map, Symbol, Vec};
 
 /// Collateral type enumeration
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -239,6 +239,124 @@ pub struct ArbitrageOpportunity {
     pub expires_at: u64,
     /// Whether this opportunity is still valid
     pub valid: bool,
+}
+
+/// Estimated MEV cost for an arbitrage opportunity
+///
+/// Represents the expected cost of MEV extraction (sandwich attacks,
+/// frontrunning) that must be subtracted from gross profit to determine
+/// net expected profit.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct MEVCost {
+    /// Estimated sandwich attack cost in base units
+    pub sandwich_cost: u64,
+    /// Estimated frontrunning cost in base units
+    pub frontrun_cost: u64,
+    /// Total MEV cost (sum of sandwich + frontrun)
+    pub total_mev_cost: u64,
+    /// MEV buffer percentage (basis points) applied on top of estimated cost
+    pub buffer_bps: u32,
+    /// Gas cost included in MEV calculation
+    pub gas_cost: u64,
+    /// Block number this estimate was derived from
+    pub estimated_at_block: u64,
+}
+
+/// MEV risk level for market monitoring
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum MEVRiskLevel {
+    /// Low MEV activity, safe to execute
+    Low,
+    /// Moderate MEV activity, execute with caution
+    Medium,
+    /// High MEV activity, significant risk of extraction
+    High,
+    /// Extreme MEV activity, recommend postponing
+    Critical,
+}
+
+/// MEV event for monitoring market conditions
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct MEVEvent {
+    /// Type of MEV activity detected
+    pub event_type: Symbol,
+    /// Estimated cost in base units
+    pub cost_estimate: u64,
+    /// Risk level
+    pub risk_level: MEVRiskLevel,
+    /// Block number
+    pub block_number: u64,
+    /// Timestamp
+    pub timestamp: u64,
+}
+
+/// Arbitrage simulation result (read-only, no state changes)
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ArbitrageSimulation {
+    /// Whether the simulation succeeded
+    pub success: bool,
+    /// Expected gross profit before fees
+    pub gross_profit: u64,
+    /// Pool fees across all hops
+    pub pool_fees: u64,
+    /// Gas cost for execution
+    pub gas_cost: u64,
+    /// Protocol fees
+    pub protocol_fees: u64,
+    /// Estimated slippage for the trade size
+    pub slippage_estimate: u64,
+    /// Estimated MEV cost
+    pub mev_cost: u64,
+    /// Net profit after all deductions
+    pub net_profit: i128,
+    /// Route description
+    pub route_summary: Symbol,
+    /// Simulation timestamp
+    pub simulated_at: u64,
+}
+
+/// Flash bundle for atomic multi-hop arbitrage execution
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct FlashBundle {
+    /// Unique bundle ID
+    pub bundle_id: u64,
+    /// Flash loan amount (principal)
+    pub loan_amount: u64,
+    /// Flash loan fee
+    pub loan_fee: u64,
+    /// List of swap hops in execution order
+    pub hops: Vec<FlashBundleHop>,
+    /// Expected net profit after all costs
+    pub expected_profit: i128,
+    /// Maximum acceptable gas cost
+    pub max_gas_cost: u64,
+    /// Whether execution was successful (atomic)
+    pub executed: bool,
+    /// Execution timestamp
+    pub executed_at: u64,
+}
+
+/// A single swap hop within a flash bundle
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct FlashBundleHop {
+    /// Pool address for this swap
+    pub pool: Address,
+    /// Token being swapped in
+    pub token_in: Address,
+    /// Token being swapped out
+    pub token_out: Address,
+    /// Amount of token_in
+    pub amount_in: u64,
+    /// Minimum amount of token_out (slippage protection)
+    pub min_amount_out: u64,
+    /// Pool fee in basis points
+    pub fee_bps: u32,
 }
 
 /// System statistics for monitoring

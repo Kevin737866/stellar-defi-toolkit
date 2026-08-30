@@ -49,6 +49,9 @@ const ORACLES: Symbol = Symbol::short("ORACLES");
 const PRICES: Symbol = Symbol::short("PRICES");
 const REPUTATION: Symbol = Symbol::short("REPUTATION");
 const AGGREGATION_PARAMS: Symbol = Symbol::short("AGG_PARAMS");
+const HEARTBEAT_CONFIGS: Symbol = Symbol::short("HB_CONF");
+const HEARTBEAT_STATUS: Symbol = Symbol::short("HB_STAT");
+const HEARTBEAT_ALERTS: Symbol = Symbol::short("HB_ALERT");
 
 // ─── Oracle Information ─────────────────────────────────────────────────────
 
@@ -122,6 +125,52 @@ pub struct PriceDeviationAlert {
     pub timestamp: u64,
     /// Alert severity
     pub severity: AlertSeverity,
+}
+
+/// Heartbeat configuration per oracle node
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct HeartbeatConfig {
+    /// Oracle address
+    pub oracle_address: Address,
+    /// Expected heartbeat interval in seconds
+    pub interval_seconds: u64,
+    /// Maximum tolerated missed heartbeats before alert
+    pub max_missed: u32,
+    /// Whether heartbeat monitoring is enabled for this oracle
+    pub enabled: bool,
+}
+
+/// Heartbeat status tracked per oracle node
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct HeartbeatStatus {
+    /// Oracle address
+    pub oracle_address: Address,
+    /// Timestamp of last successful heartbeat
+    pub last_heartbeat: u64,
+    /// Number of consecutive missed heartbeats
+    pub missed_count: u32,
+    /// Total missed heartbeats over lifetime
+    pub total_missed: u32,
+    /// Whether the oracle is currently flagged for missed heartbeats
+    pub flagged: bool,
+}
+
+/// Alert emitted when an oracle misses heartbeats
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct HeartbeatAlert {
+    /// Oracle address that missed the heartbeat
+    pub oracle_address: Address,
+    /// Number of consecutive misses at time of alert
+    pub consecutive_misses: u32,
+    /// Alert timestamp
+    pub timestamp: u64,
+    /// Alert severity
+    pub severity: AlertSeverity,
+    /// Whether reputation was auto-downgraded
+    pub reputation_downgraded: bool,
 }
 
 /// Alert severity levels
@@ -398,6 +447,242 @@ impl OracleManagerContract {
         // In production, this would return actual alerts
         // For now, return empty vector
         Vec::new(&env)
+    }
+
+    // ─── Heartbeat Monitoring ─────────────────────────────────────────────────
+
+    /// Configure heartbeat monitoring for an oracle node
+    ///
+    /// # Arguments
+    /// * `oracle_address` - Oracle to configure heartbeat for
+    /// * `interval_seconds` - Expected heartbeat interval
+    /// * `max_missed` - Maximum tolerated misses before alert
+    pub fn set_heartbeat_config(
+        env: Env,
+        oracle_address: Address,
+        interval_seconds: u64,
+        max_missed: u32,
+    ) {
+        Self::require_admin(&env);
+
+        if interval_seconds == 0 {
+            panic!("Heartbeat interval must be positive");
+        }
+n        let config = HeartbeatConfig {
+            oracle_address: oracle_address.clone(),
+            interval_seconds,
+            max_missed,
+            enabled: true,
+        };
+
+        let mut configs: Map<Address, HeartbeatConfig> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_CONFIGS)
+            .unwrap_or_else(|| Map::new(&env));
+        configs.set(oracle_address.clone(), config);
+        env.storage().instance().set(&HEARTBEAT_CONFIGS, &configs);
+
+        // Initialize heartbeat status if not present
+        let mut statuses: Map<Address, HeartbeatStatus> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_STATUS)
+            .unwrap_or_else(|| Map::new(&env));
+        if !statuses.contains_key(&oracle_address) {
+            statuses.set(
+                oracle_address.clone(),
+                HeartbeatStatus {
+                    oracle_address: oracle_address.clone(),
+                    last_heartbeat: env.ledger().timestamp(),
+                    missed_count: 0,
+                    total_missed: 0,
+                    flagged: false,
+                },
+            );
+            env.storage().instance().set(&HEARTBEAT_STATUS, &statuses);
+        }
+
+        env.events().publish(
+            Symbol::short("HB_CONFIG_SET"),
+            (oracle_address, interval_seconds, max_missed),
+        );
+    }
+
+    /// Record a heartbeat from an oracle (typically called when it submits a price)
+    pub fn record_heartbeat(env: Env, oracle_address: Address) {
+        let mut statuses: Map<Address, HeartbeatStatus> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_STATUS)
+            .unwrap_or_else(|| Map::new(&env));
+
+        let mut status = statuses.get(oracle_address.clone())
+            .unwrap_or(HeartbeatStatus {
+                oracle_address: oracle_address.clone(),
+                last_heartbeat: 0,
+                missed_count: 0,
+                total_missed: 0,
+                flagged: false,
+            });
+
+        let was_flagged = status.flagged;
+        status.last_heartbeat = env.ledger().timestamp();
+        status.missed_count = 0;
+        status.flagged = false;
+        statuses.set(oracle_address.clone(), status);
+        env.storage().instance().set(&HEARTBEAT_STATUS, &statuses);
+
+        if was_flagged {
+            env.events().publish(
+                Symbol::short("HB_RECOVERED"),
+                oracle_address,
+            );
+        }
+    }
+
+    /// Check heartbeats for all configured oracles and emit alerts
+    /// for any that have missed their expected intervals.
+    ///
+    /// This should be called periodically (e.g., by a keeper bot).
+    pub fn check_heartbeats(env: Env) -> Vec<HeartbeatAlert> {
+        let configs: Map<Address, HeartbeatConfig> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_CONFIGS)
+            .unwrap_or_else(|| Map::new(&env));
+        let mut statuses: Map<Address, HeartbeatStatus> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_STATUS)
+            .unwrap_or_else(|| Map::new(&env));
+        let mut oracles = Self::get_oracles(&env);
+
+        let current_time = env.ledger().timestamp();
+        let mut alerts = Vec::new(&env);
+        let mut rep_updates: Vec<(Address, u32)> = Vec::new(&env);
+n        for config in configs.values() {
+            if !config.enabled {
+                continue;
+            }
+n            let mut status = statuses.get(config.oracle_address.clone())
+                .unwrap_or(HeartbeatStatus {
+                    oracle_address: config.oracle_address.clone(),
+                    last_heartbeat: 0,
+                    missed_count: 0,
+                    total_missed: 0,
+                    flagged: false,
+                });
+
+            let elapsed = current_time.saturating_sub(status.last_heartbeat);
+            let expected_misses = (elapsed / config.interval_seconds) as u32;
+            if expected_misses > 0 {
+                let new_missed = expected_misses.saturating_sub(status.missed_count);
+                status.missed_count = expected_misses;
+                status.total_missed = status.total_missed.saturating_add(new_missed);
+
+                // Determine severity based on consecutive misses
+                let severity = if status.missed_count >= config.max_missed * 2 {
+                    AlertSeverity::Critical
+                } else if status.missed_count >= config.max_missed {
+                    AlertSeverity::High
+                } else if status.missed_count >= config.max_missed / 2 {
+                    AlertSeverity::Medium
+                } else {
+                    AlertSeverity::Low
+                };
+
+                // Auto-downgrade reputation on consecutive misses
+                let mut reputation_downgraded = false;
+                let mut oracle_info = oracles.get(config.oracle_address.clone());
+                if let Some(ref mut info) = oracle_info {
+                    if status.missed_count >= config.max_missed {
+                        let downgrade = 200u32 * (status.missed_count / config.max_missed).min(10);
+                        info.reputation = info.reputation.saturating_sub(downgrade);
+                        reputation_downgraded = true;
+                        rep_updates.push((config.oracle_address.clone(), info.reputation));
+                    }
+                }
+                if let Some(info) = oracle_info {
+                    oracles.set(config.oracle_address.clone(), info);
+                }
+
+                status.flagged = status.missed_count >= config.max_missed;
+
+                let alert = HeartbeatAlert {
+                    oracle_address: config.oracle_address.clone(),
+                    consecutive_misses: status.missed_count,
+                    timestamp: current_time,
+                    severity,
+                    reputation_downgraded,
+                };
+                alerts.push_back(alert);
+n                env.events().publish(
+                    Symbol::short("HB_MISSED"),
+                    (
+                        config.oracle_address.clone(),
+                        status.missed_count,
+                        reputation_downgraded,
+                    ),
+                );
+            }
+
+            statuses.set(config.oracle_address.clone(), status);
+        }
+
+        env.storage().instance().set(&HEARTBEAT_STATUS, &statuses);
+        env.storage().instance().set(&ORACLES, &oracles);
+
+        alerts
+    }
+
+    /// Get heartbeat status for a specific oracle
+    pub fn get_heartbeat_status(env: Env, oracle_address: Address) -> Option<HeartbeatStatus> {
+        let statuses: Map<Address, HeartbeatStatus> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_STATUS)
+            .unwrap_or_else(|| Map::new(&env));
+        statuses.get(oracle_address)
+    }
+
+    /// Get heartbeat configuration for a specific oracle
+    pub fn get_heartbeat_config(env: Env, oracle_address: Address) -> Option<HeartbeatConfig> {
+        let configs: Map<Address, HeartbeatConfig> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_CONFIGS)
+            .unwrap_or_else(|| Map::new(&env));
+        configs.get(oracle_address)
+    }
+
+    /// Get all oracle heartbeat statuses
+    pub fn get_all_heartbeat_statuses(env: Env) -> Vec<HeartbeatStatus> {
+        let statuses: Map<Address, HeartbeatStatus> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_STATUS)
+            .unwrap_or_else(|| Map::new(&env));
+        let mut result = Vec::new(&env);
+        for status in statuses.values() {
+            result.push_back(status);
+        }
+        result
+    }
+
+    /// Disable heartbeat monitoring for an oracle (admin only)
+    pub fn disable_heartbeat(env: Env, oracle_address: Address) {
+        Self::require_admin(&env);
+        let mut configs: Map<Address, HeartbeatConfig> = env
+            .storage()
+            .instance()
+            .get(&HEARTBEAT_CONFIGS)
+            .unwrap_or_else(|| Map::new(&env));
+        if let Some(mut config) = configs.get(oracle_address.clone()) {
+            config.enabled = false;
+            configs.set(oracle_address, config);
+            env.storage().instance().set(&HEARTBEAT_CONFIGS, &configs);
+        }
     }
 
     // ─── Internal Helpers ─────────────────────────────────────────────────────
