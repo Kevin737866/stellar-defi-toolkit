@@ -10,6 +10,7 @@
 //! liquidity_pool, multi_asset_oracle,
 //! price_feed_adapters, price_oracle, stability_pool, stablecoin, staking,
 //! synthetic_governance, synthetic_protocol, token, vault.
+pub mod arbitrage;
 pub mod asset_registry_protocol;
 /// synthetic_governance, synthetic_protocol, vault.
 pub mod asset_registry;
