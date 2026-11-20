@@ -25,7 +25,8 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap
 use crate::types::synthetic::{
     SyntheticAsset, SyntheticPosition, LiquidationEvent, OraclePrice, FeeDistribution,
     RiskParameters, ProtocolStats, AssetProposal, AssetProposalType, AssetUpdateParams,
-    StakingPosition, MarketData, AssetType
+    StakingPosition, MarketData, AssetType, MintRequest, MintReceipt, RedemptionRequest,
+    RedemptionReceipt, ExchangeRequest, ExchangeReceipt,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -45,17 +46,31 @@ const STAKING_REWARD_RATE_BPS: u32 = 1000;
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
+// `Symbol::short` caps at 9 characters, so longer keys are abbreviated.
 const ADMIN: Symbol = Symbol::short("ADMIN");
 const PAUSED: Symbol = Symbol::short("PAUSED");
 const ASSETS: Symbol = Symbol::short("ASSETS");
 const POSITIONS: Symbol = Symbol::short("POSITIONS");
 const ORACLES: Symbol = Symbol::short("ORACLES");
-const RISK_PARAMS: Symbol = Symbol::short("RISK_PARAMS");
+const RISK_PARAMS: Symbol = Symbol::short("RISKPARMS");
 const FEE_DIST: Symbol = Symbol::short("FEE_DIST");
 const STAKING: Symbol = Symbol::short("STAKING");
-const PROTOCOL_STATS: Symbol = Symbol::short("PROTOCOL_STATS");
-const NEXT_ASSET_ID: Symbol = Symbol::short("NEXT_ASSET_ID");
-const NEXT_PROPOSAL_ID: Symbol = Symbol::short("NEXT_PROPOSAL_ID");
+const PROTOCOL_STATS: Symbol = Symbol::short("PROTOSTAT");
+const NEXT_ASSET_ID: Symbol = Symbol::short("NEXTASST");
+const NEXT_PROPOSAL_ID: Symbol = Symbol::short("NEXTPROP");
+const REDEEM_FEE: Symbol = Symbol::short("REDEEMFEE");
+const EXCHANGE_FEE: Symbol = Symbol::short("EXCHGFEE");
+const PRICES: Symbol = Symbol::short("PRICES");
+/// Default redemption fee (0.5%)
+const DEFAULT_REDEMPTION_FEE_BPS: u32 = 50;
+/// Default synth-to-synth exchange fee (0.3%)
+const DEFAULT_EXCHANGE_FEE_BPS: u32 = 30;
+/// Ceiling for the configurable redemption and exchange fees (10%)
+const MAX_FEE_BPS: u32 = 1000;
+/// Price used before an oracle reports for an asset ($1.00 at 6 decimals)
+const DEFAULT_PRICE: u64 = 100_000_000;
+const PRICE_DECIMALS: u32 = 6;
+const DEFAULT_ORACLE_CONFIDENCE: u32 = 9500;
 
 // ─── Synthetic Protocol Contract ───────────────────────────────────────────
 
@@ -126,8 +141,8 @@ impl SyntheticProtocolContract {
         env.storage().instance().set(&STAKING, &staking);
 
         env.events().publish(
-            Symbol::short("SYNTHETIC_PROTOCOL_INITIALIZED"),
-            admin,
+            (Symbol::short("PROTOINIT"), admin.clone()),
+            (),
         );
     }
 
@@ -160,14 +175,14 @@ impl SyntheticProtocolContract {
 
         // Initialize oracle list for this asset
         let mut oracles = Self::get_oracles(&env);
-        let oracle_list = Vec::new(&env);
-        oracle_list.push_back(asset.oracle_address);
+        let mut oracle_list = Vec::new(&env);
+        oracle_list.push_back(asset.oracle_address.clone());
         oracles.set(asset_id, oracle_list);
         env.storage().instance().set(&ORACLES, &oracles);
 
         env.events().publish(
-            Symbol::short("ASSET_LISTED"),
-            (asset_id, asset.symbol),
+            (Symbol::short("ASSETLIST"), asset_id),
+            asset.symbol.clone(),
         );
     }
 
@@ -190,13 +205,13 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         // Get asset info
-        let asset = Self::get_asset(&env, asset_id);
+        let asset = Self::asset_of(&env, asset_id);
         if !asset.active {
             panic!("Asset is not active");
         }
 
         // Get current price
-        let price = Self::get_asset_price(&env, asset_id);
+        let price = Self::price_of(&env, asset_id);
         if price.confidence < MIN_ORACLE_CONFIDENCE {
             panic!("Oracle confidence too low");
         }
@@ -247,31 +262,23 @@ impl SyntheticProtocolContract {
             let mut collateral_deposits = Map::new(&env);
             collateral_deposits.set(collateral_token.clone(), collateral_amount);
             
-            let new_position = SyntheticPosition {
+            let mut new_position = SyntheticPosition {
                 owner: user.clone(),
                 asset_id,
                 synthetic_amount: mint_amount,
                 collateral_deposits,
                 debt_amount: synthetic_amount,
-                collateral_ratio: Self::calculate_collateral_ratio(&env, &SyntheticPosition {
-                    owner: user.clone(),
-                    asset_id,
-                    synthetic_amount: mint_amount,
-                    collateral_deposits: collateral_deposits.clone(),
-                    debt_amount: synthetic_amount,
-                    collateral_ratio: 0,
-                    created_at: env.ledger().timestamp(),
-                    last_updated: env.ledger().timestamp(),
-                    liquidating: false,
-                }),
+                collateral_ratio: 0,
                 created_at: env.ledger().timestamp(),
                 last_updated: env.ledger().timestamp(),
                 liquidating: false,
             };
+            new_position.collateral_ratio =
+                Self::calculate_collateral_ratio(&env, &new_position);
             updated_positions.push_back(new_position);
         }
 
-        positions.set(user, updated_positions);
+        positions.set(user.clone(), updated_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Update asset totals
@@ -289,8 +296,8 @@ impl SyntheticProtocolContract {
         Self::distribute_fees(&env, minting_fee);
 
         env.events().publish(
-            Symbol::short("SYNTHETIC_MINTED"),
-            (user, asset_id, mint_amount, collateral_amount),
+            (Symbol::short("SYNTHMINT"), user.clone(), asset_id),
+            (mint_amount, collateral_amount, price.price),
         );
     }
 
@@ -313,7 +320,7 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         let mut positions = Self::get_positions(&env);
-        let user_positions = positions.get(user.clone())
+        let mut user_positions = positions.get(user.clone())
             .unwrap_or_else(|| panic!("No positions found for user"));
 
         // Find and update position
@@ -351,7 +358,7 @@ impl SyntheticProtocolContract {
             panic!("Position not found for asset");
         }
 
-        positions.set(user, user_positions);
+        positions.set(user.clone(), user_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Update asset totals
@@ -366,10 +373,401 @@ impl SyntheticProtocolContract {
         Self::update_protocol_stats(&env, 0, 0, synthetic_amount);
 
         env.events().publish(
-            Symbol::short("SYNTHETIC_BURNED"),
-            (user, asset_id, synthetic_amount, collateral_amount),
+            (Symbol::short("SYNTHBURN"), user.clone(), asset_id),
+            (synthetic_amount, collateral_amount),
         );
     }
+
+    /// Mint synthetic tokens against deposited collateral at the live oracle price
+    ///
+    /// The position must end at or above the asset's minimum collateral ratio, and
+    /// the minting fee is deducted from the synthetic credited to the user while the
+    /// full requested amount is registered as debt.
+    pub fn mint(env: Env, request: MintRequest) -> MintReceipt {
+        Self::require_not_paused(&env);
+        request.user.require_auth();
+
+        if request.synthetic_amount == 0 {
+            panic!("Synthetic amount must be positive");
+        }
+        if request.collateral_amount == 0 {
+            panic!("Collateral amount must be positive");
+        }
+
+        let asset = Self::asset_of(&env, request.asset_id);
+        if !asset.active {
+            panic!("Asset is not active");
+        }
+
+        let price = Self::price_of(&env, request.asset_id);
+        if price.confidence < MIN_ORACLE_CONFIDENCE {
+            panic!("Oracle confidence too low");
+        }
+
+        let minting_fee = (request.synthetic_amount * asset.minting_fee_bps as u64) / 10_000;
+        let mint_amount = request.synthetic_amount - minting_fee;
+
+        let collateral_value = Self::calculate_usd_value(request.collateral_amount, &price);
+        let debt_value = Self::calculate_usd_value(mint_amount, &price);
+        let required_collateral =
+            (debt_value * asset.min_collateral_ratio as u64) / 10_000;
+
+        if collateral_value < required_collateral {
+            panic!("Insufficient collateral");
+        }
+
+        let risk_params = Self::risk_params_of(&env);
+        let current_debt = Self::get_user_debt(&env, request.user.clone());
+        if current_debt + mint_amount > risk_params.max_debt_per_user {
+            panic!("Exceeds maximum debt per user");
+        }
+
+        let mut positions = Self::get_positions(&env);
+        let mut user_positions = positions
+            .get(request.user.clone())
+            .unwrap_or_else(|| Vec::new(&env));
+
+        match Self::position_index(&user_positions, request.asset_id) {
+            Some(index) => {
+                let mut position = user_positions.get(index).unwrap();
+                position.synthetic_amount += mint_amount;
+                position.debt_amount += mint_amount;
+                let deposited = position
+                    .collateral_deposits
+                    .get(request.collateral_token.clone())
+                    .unwrap_or(0);
+                position.collateral_deposits.set(
+                    request.collateral_token.clone(),
+                    deposited + request.collateral_amount,
+                );
+                position.collateral_ratio = Self::calculate_collateral_ratio(&env, &position);
+                position.last_updated = env.ledger().timestamp();
+                user_positions.set(index, position);
+            }
+            None => {
+                let mut collateral_deposits = Map::new(&env);
+                collateral_deposits.set(request.collateral_token.clone(), request.collateral_amount);
+                let mut position = SyntheticPosition {
+                    owner: request.user.clone(),
+                    asset_id: request.asset_id,
+                    synthetic_amount: mint_amount,
+                    collateral_deposits,
+                    debt_amount: mint_amount,
+                    collateral_ratio: 0,
+                    created_at: env.ledger().timestamp(),
+                    last_updated: env.ledger().timestamp(),
+                    liquidating: false,
+                };
+                position.collateral_ratio = Self::calculate_collateral_ratio(&env, &position);
+                user_positions.push_back(position);
+            }
+        }
+
+        positions.set(request.user.clone(), user_positions);
+        env.storage().instance().set(&POSITIONS, &positions);
+
+        let mut assets = Self::get_assets(&env);
+        let mut asset_info = assets.get(request.asset_id).unwrap();
+        asset_info.total_supply += mint_amount;
+        asset_info.total_collateral += request.collateral_amount;
+        assets.set(request.asset_id, asset_info);
+        env.storage().instance().set(&ASSETS, &assets);
+
+        Self::update_protocol_stats(&env, mint_amount, collateral_value, 0);
+        Self::distribute_fees(&env, minting_fee);
+
+        let collateral_ratio = Self::position_ratio(&env, request.user.clone(), request.asset_id);
+        let receipt = MintReceipt {
+            user: request.user.clone(),
+            asset_id: request.asset_id,
+            collateral_token: request.collateral_token,
+            collateral_amount: request.collateral_amount,
+            synthetic_minted: mint_amount,
+            minting_fee,
+            collateral_value_usd: collateral_value,
+            debt_value_usd: debt_value,
+            collateral_ratio,
+            price: price.price,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        env.events().publish(
+            (Symbol::short("SYNTHMINT"), request.user, request.asset_id),
+            (mint_amount, price.price, collateral_ratio),
+        );
+
+        receipt
+    }
+
+    /// Redeem synthetic tokens for the deposited collateral at the live oracle price
+    ///
+    /// The redemption fee is charged on the collateral released. A partial redemption
+    /// is allowed as long as the remaining position stays above the liquidation
+    /// threshold; a full redemption must first clear the position's debt.
+    pub fn redeem(env: Env, request: RedemptionRequest) -> RedemptionReceipt {
+        Self::require_not_paused(&env);
+        request.user.require_auth();
+
+        if request.synthetic_amount == 0 {
+            panic!("Synthetic amount must be positive");
+        }
+
+        let price = Self::price_of(&env, request.asset_id);
+        let fee_bps = Self::redemption_fee_bps(&env);
+
+        let positions = Self::get_positions(&env);
+        let mut user_positions = positions
+            .get(request.user.clone())
+            .unwrap_or_else(|| panic!("No positions found for user"));
+
+        let index = Self::position_index(&user_positions, request.asset_id)
+            .unwrap_or_else(|| panic!("Position not found for asset"));
+
+        let mut position = user_positions.get(index).unwrap();
+        if position.synthetic_amount < request.synthetic_amount {
+            panic!("Insufficient synthetic balance");
+        }
+
+        let collateral_balance = position
+            .collateral_deposits
+            .get(request.collateral_token.clone())
+            .unwrap_or(0);
+
+        // Size the payout in collateral units. Collateral is valued 1:1 with USD
+        // (see `get_position_collateral_value`), so the burned synths are first
+        // converted to USD and then back to collateral units through the feed.
+        let burned_value = Self::calculate_usd_value(request.synthetic_amount, &price);
+        let gross_collateral = Self::value_to_amount(burned_value, &price);
+        if collateral_balance < gross_collateral {
+            panic!("Insufficient collateral balance");
+        }
+        let redemption_fee = (gross_collateral * fee_bps as u64) / 10_000;
+        let collateral_released = gross_collateral - redemption_fee;
+
+        position.synthetic_amount -= request.synthetic_amount;
+        position.debt_amount = position
+            .debt_amount
+            .saturating_sub(request.synthetic_amount);
+        let remaining = collateral_balance - gross_collateral;
+        if remaining == 0 {
+            position.collateral_deposits.remove(request.collateral_token.clone());
+        } else {
+            position.collateral_deposits
+                .set(request.collateral_token.clone(), remaining);
+        }
+        position.collateral_ratio = Self::calculate_collateral_ratio(&env, &position);
+        position.last_updated = env.ledger().timestamp();
+
+        let risk_params = Self::risk_params_of(&env);
+        if position.debt_amount > 0 && position.collateral_ratio < risk_params.liquidation_threshold {
+            panic!("Health factor too low after redemption");
+        }
+
+        let collateral_ratio = position.collateral_ratio;
+        user_positions.set(index, position);
+        let mut positions = positions;
+        positions.set(request.user.clone(), user_positions);
+        env.storage().instance().set(&POSITIONS, &positions);
+
+        let mut assets = Self::get_assets(&env);
+        if let Some(mut asset_info) = assets.get(request.asset_id) {
+            asset_info.total_supply = asset_info.total_supply.saturating_sub(request.synthetic_amount);
+            asset_info.total_collateral =
+                asset_info.total_collateral.saturating_sub(gross_collateral);
+            assets.set(request.asset_id, asset_info);
+        }
+        env.storage().instance().set(&ASSETS, &assets);
+
+        Self::update_protocol_stats(&env, 0, 0, request.synthetic_amount);
+        Self::distribute_fees(&env, redemption_fee);
+
+        let receipt = RedemptionReceipt {
+            user: request.user.clone(),
+            asset_id: request.asset_id,
+            collateral_token: request.collateral_token,
+            synthetic_burned: request.synthetic_amount,
+            collateral_released,
+            redemption_fee,
+            price: price.price,
+            collateral_ratio,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        env.events().publish(
+            (Symbol::short("SYNTHREDM"), request.user, request.asset_id),
+            (request.synthetic_amount, collateral_released, price.price),
+        );
+
+        receipt
+    }
+
+    /// Exchange one synthetic asset for another at oracle prices
+    ///
+    /// `route` lists the asset ids to pass through. A two-element route is a direct
+    /// swap; longer routes perform a multi-hop exchange, applying the fee per hop.
+    /// Every touched debt pool is updated and the resulting position must stay above
+    /// the liquidation threshold.
+    pub fn exchange(env: Env, request: ExchangeRequest, route: Vec<u32>) -> ExchangeReceipt {
+        Self::require_not_paused(&env);
+        request.user.require_auth();
+
+        if request.synthetic_amount == 0 {
+            panic!("Synthetic amount must be positive");
+        }
+        if request.from_asset_id == request.to_asset_id {
+            panic!("Cannot exchange an asset for itself");
+        }
+        if route.len() < 2 {
+            panic!("Route must contain at least two assets");
+        }
+        if route.first().unwrap() != request.from_asset_id
+            || route.last().unwrap() != request.to_asset_id
+        {
+            panic!("Route must start and end with the requested assets");
+        }
+
+        let fee_bps = Self::exchange_fee_bps(&env);
+        let from_price = Self::price_of(&env, request.from_asset_id);
+        let to_price = Self::price_of(&env, request.to_asset_id);
+
+        // Only the starting balance is debited; intermediate hops are netted out.
+        let from_balance = Self::position_amount(&env, request.user.clone(), request.from_asset_id);
+        if from_balance < request.synthetic_amount {
+            panic!("Insufficient synthetic balance");
+        }
+
+        let mut amount = request.synthetic_amount;
+        let mut total_fee = 0u64;
+        let mut hops = 0u32;
+
+        for hop in 0..route.len() - 1 {
+            let hop_from = route.get(hop).unwrap();
+            let hop_to = route.get(hop + 1).unwrap();
+            let hop_from_price = Self::price_of(&env, hop_from);
+            let hop_to_price = Self::price_of(&env, hop_to);
+
+            let value = Self::calculate_usd_value(amount, &hop_from_price);
+            let gross_out = Self::value_to_amount(value, &hop_to_price);
+            let fee = (gross_out * fee_bps as u64) / 10_000;
+
+            amount = gross_out - fee;
+            total_fee += fee;
+            hops += 1;
+        }
+
+        let risk_params = Self::risk_params_of(&env);
+        let (total_collateral, total_debt) = Self::account_totals(&env, request.user.clone());
+        if total_debt > 0 && (total_collateral * 10_000) / total_debt < risk_params.liquidation_threshold as u64 {
+            panic!("Health factor too low after exchange");
+        }
+
+        let mut positions = Self::get_positions(&env);
+        let mut user_positions = positions
+            .get(request.user.clone())
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let from_index = Self::position_index(&user_positions, request.from_asset_id)
+            .unwrap_or_else(|| panic!("No position for source asset"));
+        let mut from_position = user_positions.get(from_index).unwrap();
+        from_position.synthetic_amount =
+            from_position.synthetic_amount.saturating_sub(request.synthetic_amount);
+        from_position.debt_amount =
+            from_position.debt_amount.saturating_sub(request.synthetic_amount);
+        from_position.collateral_ratio = Self::calculate_collateral_ratio(&env, &from_position);
+        from_position.last_updated = env.ledger().timestamp();
+        user_positions.set(from_index, from_position);
+
+        match Self::position_index(&user_positions, request.to_asset_id) {
+            Some(index) => {
+                let mut position = user_positions.get(index).unwrap();
+                position.synthetic_amount += amount;
+                position.debt_amount += amount;
+                position.collateral_ratio = Self::calculate_collateral_ratio(&env, &position);
+                position.last_updated = env.ledger().timestamp();
+                user_positions.set(index, position);
+            }
+            None => {
+                let mut position = SyntheticPosition {
+                    owner: request.user.clone(),
+                    asset_id: request.to_asset_id,
+                    synthetic_amount: amount,
+                    collateral_deposits: Map::new(&env),
+                    debt_amount: amount,
+                    collateral_ratio: 0,
+                    created_at: env.ledger().timestamp(),
+                    last_updated: env.ledger().timestamp(),
+                    liquidating: false,
+                };
+                position.collateral_ratio = Self::calculate_collateral_ratio(&env, &position);
+                user_positions.push_back(position);
+            }
+        }
+
+        positions.set(request.user.clone(), user_positions);
+        env.storage().instance().set(&POSITIONS, &positions);
+
+        let mut assets = Self::get_assets(&env);
+        if let Some(mut from_info) = assets.get(request.from_asset_id) {
+            from_info.total_supply = from_info.total_supply.saturating_sub(request.synthetic_amount);
+            assets.set(request.from_asset_id, from_info);
+        }
+        if let Some(mut to_info) = assets.get(request.to_asset_id) {
+            to_info.total_supply += amount;
+            assets.set(request.to_asset_id, to_info);
+        }
+        env.storage().instance().set(&ASSETS, &assets);
+
+        Self::distribute_fees(&env, total_fee);
+
+        let receipt = ExchangeReceipt {
+            user: request.user.clone(),
+            from_asset_id: request.from_asset_id,
+            to_asset_id: request.to_asset_id,
+            amount_in: request.synthetic_amount,
+            amount_out: amount,
+            exchange_fee: total_fee,
+            from_price: from_price.price,
+            to_price: to_price.price,
+            hops,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        env.events().publish(
+            (Symbol::short("SYNTHEXCH"), request.user, request.from_asset_id),
+            (request.to_asset_id, request.synthetic_amount, amount, total_fee),
+        );
+
+        receipt
+    }
+
+    /// Set the redemption fee (admin only)
+    pub fn set_redemption_fee(env: Env, fee_bps: u32) {
+        Self::require_admin(&env);
+        if fee_bps > MAX_FEE_BPS {
+            panic!("Redemption fee too high");
+        }
+        env.storage().instance().set(&REDEEM_FEE, &fee_bps);
+    }
+
+    /// Set the synth-to-synth exchange fee (admin only)
+    pub fn set_exchange_fee(env: Env, fee_bps: u32) {
+        Self::require_admin(&env);
+        if fee_bps > MAX_FEE_BPS {
+            panic!("Exchange fee too high");
+        }
+        env.storage().instance().set(&EXCHANGE_FEE, &fee_bps);
+    }
+
+    /// Current redemption fee in basis points
+    pub fn get_redemption_fee(env: Env) -> u32 {
+        Self::redemption_fee_bps(&env)
+    }
+
+    /// Current exchange fee in basis points
+    pub fn get_exchange_fee(env: Env) -> u32 {
+        Self::exchange_fee_bps(&env)
+    }
+
 
     /// Liquidate an under-collateralized position
     /// 
@@ -386,8 +784,8 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         let risk_params = Self::get_risk_params(&env);
-        let positions = Self::get_positions(&env);
-        let user_positions = positions.get(user.clone())
+        let mut positions = Self::get_positions(&env);
+        let mut user_positions = positions.get(user.clone())
             .unwrap_or_else(|| panic!("No positions found for user"));
 
         // Find position to liquidate
@@ -417,12 +815,12 @@ impl SyntheticProtocolContract {
         // Mark as liquidating
         position.liquidating = true;
         let mut updated_positions = user_positions;
-        updated_positions.set(position_index, position);
+        updated_positions.set(position_index, position.clone());
         positions.set(user.clone(), updated_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Calculate liquidation
-        let price = Self::get_asset_price(&env, asset_id);
+        let price = Self::price_of(&env, asset_id);
         let debt_value = Self::calculate_usd_value(position.debt_amount, &price);
         let liquidation_penalty = (debt_value * LIQUIDATION_PENALTY_BPS as u64) / 10000;
         
@@ -432,7 +830,7 @@ impl SyntheticProtocolContract {
         let user_share = total_collateral_value - liquidator_share;
 
         // Create liquidation event
-        let event_id = env.ledger().seq_num();
+        let event_id = env.ledger().sequence() as u64;
         let liquidation_event = LiquidationEvent {
             event_id,
             position_owner: user.clone(),
@@ -465,7 +863,7 @@ impl SyntheticProtocolContract {
                 break;
             }
         }
-        positions.set(user, final_positions);
+        positions.set(user.clone(), final_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Update protocol stats
@@ -475,8 +873,8 @@ impl SyntheticProtocolContract {
         Self::distribute_fees(&env, liquidation_penalty);
 
         env.events().publish(
-            Symbol::short("POSITION_LIQUIDATED"),
-            (user, asset_id, liquidator, position.synthetic_amount),
+            (Symbol::short("LIQUIDATE"), user, asset_id),
+            (liquidator, position.synthetic_amount),
         );
     }
 
@@ -499,7 +897,7 @@ impl SyntheticProtocolContract {
         let asset_oracles = oracles.get(asset_id)
             .unwrap_or_else(|| panic!("Asset not found"));
 
-        let oracle_authorized = asset_oracles.iter().any(|addr| *addr == oracle_address);
+        let oracle_authorized = asset_oracles.iter().any(|addr| addr == oracle_address);
         if !oracle_authorized {
             panic!("Oracle not authorized for this asset");
         }
@@ -518,10 +916,13 @@ impl SyntheticProtocolContract {
             source_address: oracle_address,
         };
 
-        // In production, store price data with timestamp
+        let mut prices = Self::get_prices(&env);
+        prices.set(asset_id, price_data);
+        env.storage().instance().set(&PRICES, &prices);
+
         env.events().publish(
-            Symbol::short("PRICE_UPDATED"),
-            (asset_id, price, confidence),
+            (Symbol::short("PRICEUPD"), asset_id),
+            (price, confidence),
         );
     }
 
@@ -548,12 +949,12 @@ impl SyntheticProtocolContract {
         });
 
         staking_pos.staked_amount += amount;
-        staking.set(user, staking_pos);
+        staking.set(user.clone(), staking_pos);
         env.storage().instance().set(&STAKING, &staking);
 
         env.events().publish(
-            Symbol::short("STAKED"),
-            (user, amount),
+            (Symbol::short("STAKED"), user.clone()),
+            amount,
         );
     }
 
@@ -579,18 +980,22 @@ impl SyntheticProtocolContract {
         staking_pos.total_rewards_claimed += current_rewards;
         staking_pos.last_claim = env.ledger().timestamp();
 
-        staking.set(user, staking_pos);
+        staking.set(user.clone(), staking_pos);
         env.storage().instance().set(&STAKING, &staking);
 
         env.events().publish(
-            Symbol::short("UNSTAKED"),
-            (user, amount, current_rewards),
+            (Symbol::short("UNSTAKED"), user.clone()),
+            (amount, current_rewards),
         );
     }
 
     /// Get asset information
     pub fn get_asset(env: Env, asset_id: u32) -> SyntheticAsset {
-        Self::get_assets(&env).get(asset_id)
+        Self::asset_of(&env, asset_id)
+    }
+
+    fn asset_of(env: &Env, asset_id: u32) -> SyntheticAsset {
+        Self::get_assets(env).get(asset_id)
             .unwrap_or_else(|| panic!("Asset not found"))
     }
 
@@ -610,21 +1015,26 @@ impl SyntheticProtocolContract {
 
     /// Get current asset price
     pub fn get_asset_price(env: Env, asset_id: u32) -> OraclePrice {
-        // In production, this would aggregate from multiple oracles
-        // For now, return mock price
+        Self::price_of(&env, asset_id)
+    }
+
+    fn price_of(env: &Env, asset_id: u32) -> OraclePrice {
+        if let Some(price) = Self::get_prices(env).get(asset_id) {
+            return price;
+        }
         OraclePrice {
             asset_id,
-            price: 100_000_000, // $1.00 with 6 decimals
-            decimals: 6,
-            confidence: 9500, // 95% confidence
+            price: DEFAULT_PRICE,
+            decimals: PRICE_DECIMALS,
+            confidence: DEFAULT_ORACLE_CONFIDENCE,
             timestamp: env.ledger().timestamp(),
-            source_address: Address::generate(&env),
+            source_address: env.current_contract_address(),
         }
     }
 
     /// Get protocol statistics
     pub fn get_protocol_stats(env: Env) -> ProtocolStats {
-        Self::get_protocol_stats(&env)
+        Self::stats_of(&env)
     }
 
     /// Get all listed assets
@@ -647,14 +1057,14 @@ impl SyntheticProtocolContract {
     pub fn pause(env: Env) {
         Self::require_admin(&env);
         env.storage().instance().set(&PAUSED, &true);
-        env.events().publish(Symbol::short("PAUSED"), true);
+        env.events().publish((Symbol::short("PAUSED"),), true);
     }
 
     /// Unpause the protocol (admin only)
     pub fn unpause(env: Env) {
         Self::require_admin(&env);
         env.storage().instance().set(&PAUSED, &false);
-        env.events().publish(Symbol::short("PAUSED"), false);
+        env.events().publish((Symbol::short("PAUSED"),), false);
     }
 
     /// Update risk parameters (admin only)
@@ -669,10 +1079,71 @@ impl SyntheticProtocolContract {
         }
         
         env.storage().instance().set(&RISK_PARAMS, &new_params);
-        env.events().publish(Symbol::short("RISK_PARAMS_UPDATED"), ());
+        env.events().publish((Symbol::short("RISKUPD"),), ());
     }
 
     // ─── Internal Helpers ─────────────────────────────────────────────────────
+
+    fn position_index(positions: &Vec<SyntheticPosition>, asset_id: u32) -> Option<u32> {
+        for i in 0..positions.len() {
+            if positions.get(i).unwrap().asset_id == asset_id {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn position_ratio(env: &Env, user: Address, asset_id: u32) -> u32 {
+        Self::try_position_ratio(env, user, asset_id).unwrap_or(0)
+    }
+
+    fn try_position_ratio(env: &Env, user: Address, asset_id: u32) -> Option<u32> {
+        let positions = Self::get_positions(env).get(user)?;
+        let index = Self::position_index(&positions, asset_id)?;
+        let position = positions.get(index)?;
+        Some(Self::calculate_collateral_ratio(env, &position))
+    }
+
+    /// Total collateral and debt across every position the user holds
+    fn account_totals(env: &Env, user: Address) -> (u64, u64) {
+        let positions = Self::get_positions(env).get(user).unwrap_or_else(|| Vec::new(env));
+        let mut collateral = 0u64;
+        let mut debt = 0u64;
+        for position in positions.iter() {
+            collateral += Self::get_position_collateral_value(env, &position);
+            debt += position.debt_amount;
+        }
+        (collateral, debt)
+    }
+
+    fn position_amount(env: &Env, user: Address, asset_id: u32) -> u64 {
+        let positions = Self::get_positions(env).get(user).unwrap_or_else(|| Vec::new(env));
+        match Self::position_index(&positions, asset_id) {
+            Some(index) => positions.get(index).unwrap().synthetic_amount,
+            None => 0,
+        }
+    }
+
+    fn position_debt(env: &Env, user: Address, asset_id: u32) -> u64 {
+        let positions = Self::get_positions(env).get(user).unwrap_or_else(|| Vec::new(env));
+        match Self::position_index(&positions, asset_id) {
+            Some(index) => positions.get(index).unwrap().debt_amount,
+            None => 0,
+        }
+    }
+
+    fn value_to_amount(value: u64, price: &OraclePrice) -> u64 {
+        let scale = 10_u64.pow(price.decimals);
+        if price.price == 0 {
+            return 0;
+        }
+        (value * scale) / price.price
+    }
+
+    fn risk_params_of(env: &Env) -> RiskParameters {
+        env.storage().instance().get(&RISK_PARAMS).unwrap()
+    }
+
 
     fn calculate_collateral_ratio(env: &Env, position: &SyntheticPosition) -> u32 {
         let total_collateral_value = Self::get_position_collateral_value(env, position);
@@ -715,8 +1186,13 @@ impl SyntheticProtocolContract {
     }
 
     fn update_protocol_stats(env: &Env, minted: u64, collateral_added: u64, burned: u64) {
-        let mut stats = Self::get_protocol_stats(env);
-        stats.total_synthetic_supply += minted - burned;
+        let mut stats = Self::stats_of(env);
+        // Mint and burn are mutually exclusive per call, so subtract from the
+        // running total rather than netting `minted - burned` (which underflows).
+        stats.total_synthetic_supply = stats
+            .total_synthetic_supply
+            .saturating_add(minted)
+            .saturating_sub(burned);
         stats.total_value_locked += collateral_added;
         
         // Recalculate average collateral ratio
@@ -726,7 +1202,7 @@ impl SyntheticProtocolContract {
         
         for user_positions in positions.values() {
             for pos in user_positions.iter() {
-                total_ratio += Self::calculate_collateral_ratio(env, pos);
+                total_ratio += Self::calculate_collateral_ratio(env, &pos);
                 position_count += 1;
             }
         }
@@ -785,11 +1261,32 @@ impl SyntheticProtocolContract {
         env.storage().instance().get(&FEE_DIST).unwrap()
     }
 
-    fn get_protocol_stats(env: &Env) -> ProtocolStats {
+    fn stats_of(env: &Env) -> ProtocolStats {
         env.storage().instance().get(&PROTOCOL_STATS).unwrap()
     }
 
     fn get_staking(env: &Env) -> Map<Address, StakingPosition> {
         env.storage().instance().get(&STAKING).unwrap()
+    }
+
+    fn get_prices(env: &Env) -> Map<u32, OraclePrice> {
+        env.storage()
+            .instance()
+            .get(&PRICES)
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    fn redemption_fee_bps(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&REDEEM_FEE)
+            .unwrap_or(DEFAULT_REDEMPTION_FEE_BPS)
+    }
+
+    fn exchange_fee_bps(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&EXCHANGE_FEE)
+            .unwrap_or(DEFAULT_EXCHANGE_FEE_BPS)
     }
 }
