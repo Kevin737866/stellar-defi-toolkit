@@ -1,19 +1,27 @@
-//! Yield Farming Vault contract for Stellar DeFi Toolkit
+//! Yield farming vault contract for the Stellar DeFi Toolkit.
 //!
-//! Implements an automated yield farming vault that optimizes returns across
-//! multiple Stellar DeFi protocols using Soroban smart contracts.
+//! The vault accepts deposits of a single underlying asset, issues SEP-41 style
+//! share tokens, and allocates capital across pluggable yield strategies.
 //!
-//! ## Architecture
+//! ## Features
+//! - Strategy registration, switching, and APY-based optimisation
+//! - Auto-compounding harvest with a performance fee
+//! - Deposit/withdrawal queue that smooths large TVL changes (issue #145)
+//! - Emergency withdrawal with a pro-rata redistributed penalty (issue #149)
+//! - Permissionless keeper compounding with a caller reward (issue #150)
 //!
-//! - Vault token (share representation via SEP-41)
-//! - Strategy pattern for pluggable yield sources
-//! - Auto-compounding mechanism
-//! - Performance fee structure
-//! - Emergency pause mechanism
-//! - Yield optimization algorithm
-//! - Strategy switching logic
-//! - Harvest and reinvest functions
+//! ## Access control
+//! - **Admin**: strategy management, fee/treasury settings, pause, queue
+//!   configuration, and queue processing. Gated by `require_admin`, which
+//!   compares the stored admin address with the caller passed to the
+//!   admin-only entry points.
+//! - **Keeper**: `compound` and `harvest` are open to any caller and rate
+//!   limited by a minimum interval.
+//! - **User**: `deposit`, `withdraw`, `emergency_withdraw`,
+//!   `cancel_queue_request` operate on the caller-supplied `Address`.
 //!
+//! Shares are tracked in a per-owner ledger (`SHARES`), so a withdrawal is
+//! always capped by the shares the caller actually owns.
 //! ## Access Control
 //! - **Admin**: `add_strategy`, `switch_strategy`, `optimize_strategy`,
 //!   `collect_fees`, `pause`, `unpause`, `emergency_exit`, `set_performance_fee`,
@@ -33,9 +41,15 @@ use crate::types::vault::{
     RebalanceThresholds, RebalanceTrigger,
 };
 
-// ─── Storage Keys ────────────────────────────────────────────────────────────
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
-// Storage keys are not used as fields are stored directly in the contract struct
+use crate::types::vault::{
+    CompoundReceipt, DepositResult, EmergencyWithdrawReceipt, HarvestResult,
+    QueueEntry, QueueKind, QueueProcessResult, VaultDataKey, VaultEvent, VaultInfo,
+    VaultQueueSummary, VaultStats, VaultStrategy, WithdrawResult,
+};
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 /// Default performance fee: 10% (1000 bps)
 const DEFAULT_PERFORMANCE_FEE_BPS: u32 = 1000;
@@ -43,11 +57,52 @@ const DEFAULT_PERFORMANCE_FEE_BPS: u32 = 1000;
 const MAX_PERFORMANCE_FEE_BPS: u32 = 3000;
 /// Minimum harvest interval: 1 hour in seconds
 const MIN_HARVEST_INTERVAL: u64 = 3600;
+/// Default queue threshold: 1% of TVL (100 bps)
+const DEFAULT_QUEUE_THRESHOLD_BPS: u32 = 100;
+/// Default queue processing interval: 1 hour in seconds
+const DEFAULT_QUEUE_INTERVAL: u64 = 3600;
+/// Minimum queue processing interval: 10 minutes
+const MIN_QUEUE_INTERVAL: u64 = 600;
+/// Default emergency withdrawal penalty: 5% (500 bps)
+pub const DEFAULT_EMERGENCY_PENALTY_BPS: u32 = 500;
+/// Maximum emergency withdrawal penalty: 20% (2000 bps)
+const MAX_EMERGENCY_PENALTY_BPS: u32 = 2000;
+/// Maximum number of strategies a vault may register
+const MAX_STRATEGIES: u32 = 10;
+/// Seconds per year, used for APY maths
+const SECONDS_PER_YEAR: u64 = 365 * 24 * 3600;
+/// Maximum number of strategies compounded in a single keeper call
+const MAX_COMPOUND_STRATEGIES: u32 = 10;
 
-// ─── Vault Contract ───────────────────────────────────────────────────────────
+// ─── Storage Keys ────────────────────────────────────────────────────────────
 
-/// Automated yield farming vault with multi-strategy optimization
+const ADMIN: Symbol = Symbol::short("ADMIN");
+const TREASURY: Symbol = Symbol::short("TREASURY");
+const ASSET: Symbol = Symbol::short("ASSET");
+const SHARE_TOKEN: Symbol = Symbol::short("SHARETOK");
+const TOTAL_SHARES: Symbol = Symbol::short("TOTSHARES");
+const TOTAL_ASSETS: Symbol = Symbol::short("TOTASSETS");
+const STRATEGIES: Symbol = Symbol::short("STRATS");
+const ACTIVE_IDX: Symbol = Symbol::short("ACTIVEIDX");
+const PERF_FEE: Symbol = Symbol::short("PERFFEE");
+const PAUSED: Symbol = Symbol::short("PAUSED");
+const LAST_HARVEST: Symbol = Symbol::short("LASTHARV");
+const FEES: Symbol = Symbol::short("FEES");
+const QUEUE: Symbol = Symbol::short("QUEUE");
+const NEXT_REQ_ID: Symbol = Symbol::short("NEXTREQID");
+const QUEUE_THRESHOLD: Symbol = Symbol::short("QTHRESH");
+const QUEUE_INTERVAL: Symbol = Symbol::short("QINTERVAL");
+const NEXT_PROCESS: Symbol = Symbol::short("NEXTPROC");
+const EMERG_PENALTY: Symbol = Symbol::short("EMERPEN");
+const KEEPER_REWARD: Symbol = Symbol::short("KEEPRWRD");
+const COMPOUND_INTERVAL: Symbol = Symbol::short("CMPINT");
+const LAST_COMPOUND: Symbol = Symbol::short("LASTCMP");
+
+// ─── Contract ────────────────────────────────────────────────────────────────
+
+/// Automated yield farming vault with multi-strategy optimisation.
 #[contract]
+pub struct YieldVaultContract;
 pub struct YieldVaultContract {
     /// Underlying asset token address (what users deposit)
     pub asset_token: Address,
@@ -79,7 +134,13 @@ pub struct YieldVaultContract {
     pub address: Option<Address>,
 }
 
+#[contractimpl]
 impl YieldVaultContract {
+    // ─── Setup ───────────────────────────────────────────────────────────────
+
+    /// Initialize the vault.
+    ///
+    /// `performance_fee_bps` must not exceed [`MAX_PERFORMANCE_FEE_BPS`].
     /// Create a new yield vault
     pub fn new(_env: &Env, asset_token: Address, share_token: Address) -> Self {
         Self {
@@ -111,30 +172,85 @@ impl YieldVaultContract {
 
     /// Initialize vault with admin and treasury
     pub fn initialize(
-        mut self,
+        env: Env,
         admin: Address,
         treasury: Address,
+        asset_token: Address,
+        share_token: Address,
         performance_fee_bps: u32,
-    ) -> Result<Self, String> {
-        if performance_fee_bps > MAX_PERFORMANCE_FEE_BPS {
-            return Err(format!(
-                "Performance fee exceeds maximum of {} bps",
-                MAX_PERFORMANCE_FEE_BPS
-            ));
+    ) {
+        if env.storage().instance().has(&ADMIN) {
+            panic!("vault already initialized");
         }
-        self.admin = Some(admin);
-        self.treasury = Some(treasury);
-        self.performance_fee_bps = performance_fee_bps;
-        Ok(self)
+        if performance_fee_bps > MAX_PERFORMANCE_FEE_BPS {
+            panic!("performance fee exceeds maximum");
+        }
+
+        env.storage().instance().set(&ADMIN, &admin);
+        env.storage().instance().set(&TREASURY, &treasury);
+        env.storage().instance().set(&ASSET, &asset_token);
+        env.storage().instance().set(&SHARE_TOKEN, &share_token);
+        env.storage().instance().set(&TOTAL_SHARES, &0u64);
+        env.storage().instance().set(&TOTAL_ASSETS, &0u64);
+        env.storage().instance().set(&ACTIVE_IDX, &0u32);
+        env.storage().instance().set(&PERF_FEE, &performance_fee_bps);
+        env.storage().instance().set(&PAUSED, &false);
+        env.storage()
+            .instance()
+            .set(&LAST_HARVEST, &env.ledger().timestamp());
+        env.storage().instance().set(&FEES, &0u64);
+        env.storage()
+            .instance()
+            .set(&QUEUE_THRESHOLD, &DEFAULT_QUEUE_THRESHOLD_BPS);
+        env.storage()
+            .instance()
+            .set(&QUEUE_INTERVAL, &DEFAULT_QUEUE_INTERVAL);
+        env.storage().instance().set(&NEXT_REQ_ID, &1u64);
+        env.storage()
+            .instance()
+            .set(&NEXT_PROCESS, &(env.ledger().timestamp() + DEFAULT_QUEUE_INTERVAL));
+        env.storage()
+            .instance()
+            .set(&EMERG_PENALTY, &DEFAULT_EMERGENCY_PENALTY_BPS);
+        env.storage().instance().set(&KEEPER_REWARD, &0u32);
+        env.storage()
+            .instance()
+            .set(&COMPOUND_INTERVAL, &MIN_HARVEST_INTERVAL);
+        env.storage().instance().set(&LAST_COMPOUND, &0u64);
     }
 
-    // ─── Strategy Management ──────────────────────────────────────────────────
+    // ─── Strategy management ─────────────────────────────────────────────────
 
-    pub fn add_strategy(&mut self, strategy: VaultStrategy) -> Result<u32, String> {
-        self.require_admin()?;
-        if self.strategies.len() >= 10 {
-            return Err("Maximum of 10 strategies allowed".to_string());
+    /// Register a new strategy and return its index.
+    pub fn add_strategy(env: Env, admin: Address, strategy: VaultStrategy) -> u32 {
+        Self::require_admin(&env, &admin);
+        let mut strategies = Self::load_strategies(&env);
+        if strategies.len() >= MAX_STRATEGIES {
+            panic!("maximum strategies reached");
         }
+        strategies.push_back(strategy);
+        Self::save_strategies(&env, &strategies);
+        strategies.len() - 1
+    }
+
+    /// Switch the active strategy, harvesting and moving capital across.
+    pub fn switch_strategy(env: Env, admin: Address, new_index: u32) {
+        Self::require_admin(&env, &admin);
+        Self::require_not_paused(&env);
+        Self::switch_strategy_internal(&env, new_index);
+    }
+
+    /// Switch to the highest-APY strategy when it beats the current one by at
+    /// least `threshold_bps`. Returns the new active index.
+    pub fn optimize_strategy(env: Env, admin: Address, threshold_bps: u32) -> u32 {
+        Self::require_admin(&env, &admin);
+        Self::require_not_paused(&env);
+
+        let strategies = Self::load_strategies(&env);
+        let active = Self::active_strategy_index(&env);
+        let optimal = Self::optimal_strategy_index(&strategies);
+        if optimal == active || strategies.is_empty() {
+            return active;
         self.strategies.push(strategy);
         Ok((self.strategies.len() - 1) as u32)
     }
@@ -173,31 +289,69 @@ impl YieldVaultContract {
             return 0;
         }
 
-        let mut best_index = 0;
-        let mut best_apy = 0;
+        let current_apy = strategies
+            .get(active)
+            .map(|s| s.estimated_apy_bps)
+            .unwrap_or(0);
+        let optimal_apy = strategies
+            .get(optimal)
+            .map(|s| s.estimated_apy_bps)
+            .unwrap_or(0);
 
-        for (i, strategy) in self.strategies.iter().enumerate() {
-            if strategy.estimated_apy > best_apy {
-                best_apy = strategy.estimated_apy;
-                best_index = i as u32;
-            }
+        if Self::improvement_bps(current_apy, optimal_apy) >= threshold_bps {
+            Self::switch_strategy_internal(&env, optimal);
+            return optimal;
         }
-
-        best_index
+        active
     }
 
-    /// Auto-optimize: switch to the highest-yield strategy if it's significantly better
-    ///
-    /// Only switches if the new strategy APY exceeds current by at least `threshold_bps`.
-    pub fn optimize_strategy(&mut self, threshold_bps: u32) -> Result<bool, String> {
-        self.require_admin()?;
-        self.require_not_paused()?;
+    // ─── Deposits and withdrawals ────────────────────────────────────────────
 
-        let optimal = self.get_optimal_strategy_index();
-        if optimal == self.active_strategy_index {
-            return Ok(false);
+    /// Deposit assets into the vault.
+    ///
+    /// Deposits at or below the queue threshold execute immediately. Larger
+    /// deposits are queued so strategy execution is not disrupted by a sudden
+    /// TVL change.
+    pub fn deposit(env: Env, depositor: Address, amount: u64) -> DepositResult {
+        Self::require_not_paused(&env);
+        if amount == 0 {
+            panic!("deposit amount must be greater than 0");
         }
 
+        if Self::should_queue(&env, amount) {
+            let entry = Self::enqueue(&env, depositor.clone(), QueueKind::Deposit, amount, 0);
+            Self::emit(
+                &env,
+                VaultEvent::DepositQueued(depositor.clone(), amount, entry.id),
+            );
+            return DepositResult {
+                depositor: depositor.clone(),
+                amount_deposited: 0,
+                shares_minted: 0,
+                share_price_bps: Self::share_price_bps(&env),
+                queued: true,
+                request_id: entry.id,
+                queue_position: Self::queue_position(&env, QueueKind::Deposit, entry.id),
+                estimated_processing_at: entry.processable_at,
+            };
+        }
+
+        let shares = Self::execute_deposit(&env, depositor.clone(), amount);
+        Self::emit(
+            &env,
+            VaultEvent::DepositExecuted(depositor.clone(), amount, shares),
+        );
+        DepositResult {
+            depositor,
+            amount_deposited: amount,
+            shares_minted: shares,
+            share_price_bps: Self::share_price_bps(&env),
+            queued: false,
+            request_id: 0,
+            queue_position: 0,
+            estimated_processing_at: 0,
+        }
+    }
         let current_apy = self
             .strategies
             .get(self.active_strategy_index as usize)
@@ -210,22 +364,83 @@ impl YieldVaultContract {
             .map(|s| s.estimated_apy)
             .unwrap_or(0);
 
-        let improvement_bps = if current_apy > 0 {
-            (optimal_apy.saturating_sub(current_apy) as u64 * 10000 / current_apy as u64) as u32
-        } else if optimal_apy > 0 {
-            10000 // Infinite improvement
-        } else {
-            0
-        };
-
-        if improvement_bps >= threshold_bps {
-            self.switch_strategy(optimal)?;
-            return Ok(true);
+    /// Withdraw assets by burning shares.
+    ///
+    /// Withdrawals at or below the queue threshold execute immediately.
+    /// Larger withdrawals are queued and bypass-checked only when the vault is
+    /// paused, in which case `emergency_withdraw` must be used.
+    pub fn withdraw(env: Env, withdrawer: Address, shares: u64) -> WithdrawResult {
+        Self::require_not_paused(&env);
+        if shares == 0 {
+            panic!("shares amount must be greater than 0");
+        }
+        let balance = Self::shares_of(&env, &withdrawer);
+        if shares > balance {
+            panic!("insufficient shares");
         }
 
-        Ok(false)
+        let assets = Self::assets_for_shares(&env, shares);
+        if Self::should_queue(&env, assets) {
+            let entry = Self::enqueue(
+                &env,
+                withdrawer.clone(),
+                QueueKind::Withdrawal,
+                shares,
+                assets,
+            );
+            Self::emit(
+                &env,
+                VaultEvent::WithdrawQueued(withdrawer.clone(), shares, entry.id),
+            );
+            return WithdrawResult {
+                withdrawer: withdrawer.clone(),
+                shares_burned: 0,
+                amount_withdrawn: 0,
+                share_price_bps: Self::share_price_bps(&env),
+                queued: true,
+                request_id: entry.id,
+                queue_position: Self::queue_position(&env, QueueKind::Withdrawal, entry.id),
+                estimated_processing_at: entry.processable_at,
+            };
+        }
+
+        let assets = Self::execute_withdraw(&env, withdrawer.clone(), shares);
+        Self::emit(
+            &env,
+            VaultEvent::WithdrawExecuted(withdrawer.clone(), shares, assets),
+        );
+        WithdrawResult {
+            withdrawer,
+            shares_burned: shares,
+            amount_withdrawn: assets,
+            share_price_bps: Self::share_price_bps(&env),
+            queued: false,
+            request_id: 0,
+            queue_position: 0,
+            estimated_processing_at: 0,
+        }
     }
 
+    // ─── Queue (issue #145) ──────────────────────────────────────────────────
+
+    /// Cancel a pending queue request owned by `owner`.
+    pub fn cancel_queue_request(env: Env, owner: Address, request_id: u64) {
+        let mut queue = Self::load_queue(&env);
+        let mut index: Option<u32> = None;
+        for (i, entry) in queue.iter().enumerate() {
+            if entry.id == request_id {
+                if entry.owner != owner {
+                    panic!("request does not belong to caller");
+                }
+                index = Some(i as u32);
+                break;
+            }
+        }
+        let index = index.unwrap_or_else(|| panic!("request not found"));
+        queue.remove(index);
+        Self::save_queue(&env, &queue);
+        Self::emit(&env, VaultEvent::QueueRequestCancelled(owner, request_id));
+    }
     // ─── Rebalancing Triggers ─────────────────────────────────────────────────
 
     /// Evaluate every enabled market-condition trigger without moving funds
@@ -410,189 +625,410 @@ impl YieldVaultContract {
 
     // ─── Deposit / Withdrawal ─────────────────────────────────────────────────
 
-    /// Deposit assets into the vault and receive share tokens
+    /// Process every pending request whose delay has elapsed.
     ///
-    /// Shares are calculated as: `shares = (amount * total_shares) / total_assets`
-    /// For the first deposit: `shares = amount`
-    pub fn deposit(&mut self, depositor: Address, amount: u64) -> Result<DepositResult, String> {
-        self.require_not_paused()?;
+    /// Processed withdrawals release capital first so they are not blocked by
+    /// the deposits they share a window with.
+    pub fn process_queue(env: Env, admin: Address) -> QueueProcessResult {
+        Self::require_admin(&env, &admin);
+        Self::require_not_paused(&env);
 
-        if amount == 0 {
-            return Err("Deposit amount must be greater than 0".to_string());
+        let now = env.ledger().timestamp();
+        if !Self::window_is_open(&env) {
+            panic!("queue processing window not reached");
         }
 
-        // Calculate shares to mint
-        let shares_to_mint = self.calculate_shares_for_amount(amount);
+        let queue = Self::load_queue(&env);
+        let mut remaining = Vec::new(&env);
+        let mut withdrawals = Vec::new(&env);
+        let mut deposits = Vec::new(&env);
 
-        // Deploy assets into active strategy
-        if !self.strategies.is_empty() {
-            self.deposit_into_strategy(self.active_strategy_index, amount)?;
+        for entry in queue.iter() {
+            if entry.processable_at > now {
+                remaining.push_back(entry);
+            } else if entry.kind == QueueKind::Withdrawal {
+                withdrawals.push_back(entry);
+            } else {
+                deposits.push_back(entry);
+            }
         }
 
-        // Update state
-        self.total_assets += amount;
-        self.total_shares += shares_to_mint;
+        let mut result = QueueProcessResult {
+            deposits_processed: 0,
+            withdrawals_processed: 0,
+            deposited_amount: 0,
+            withdrawn_amount: 0,
+            processed_at: now,
+        };
 
-        Ok(DepositResult {
-            depositor,
-            amount_deposited: amount,
-            shares_minted: shares_to_mint,
-            share_price: self.get_share_price(),
-        })
+        for entry in withdrawals.iter() {
+            let assets = Self::execute_withdraw(&env, entry.owner.clone(), entry.amount);
+            result.withdrawals_processed += 1;
+            result.withdrawn_amount += assets;
+            Self::emit(
+                &env,
+                VaultEvent::WithdrawExecuted(entry.owner, entry.amount, assets),
+            );
+        }
+
+        for entry in deposits.iter() {
+            let shares = Self::execute_deposit(&env, entry.owner.clone(), entry.amount);
+            result.deposits_processed += 1;
+            result.deposited_amount += entry.amount;
+            Self::emit(
+                &env,
+                VaultEvent::DepositExecuted(entry.owner, entry.amount, shares),
+            );
+        }
+
+        let interval = Self::queue_interval(&env);
+        env.storage().instance().set(&NEXT_PROCESS, &(now + interval));
+        Self::save_queue(&env, &remaining);
+        Self::emit(
+            &env,
+            VaultEvent::QueueProcessed(result.deposits_processed, result.withdrawals_processed),
+        );
+        result
     }
 
-    /// Withdraw assets from the vault by burning share tokens
-    ///
-    /// Assets returned: `amount = (shares * total_assets) / total_shares`
-    pub fn withdraw(&mut self, withdrawer: Address, shares: u64) -> Result<WithdrawResult, String> {
-        self.require_not_paused()?;
+    /// Look up a queue entry by id.
+    pub fn get_queue_entry(env: Env, request_id: u64) -> QueueEntry {
+        for entry in Self::load_queue(&env).iter() {
+            if entry.id == request_id {
+                return entry;
+            }
+        }
+        panic!("request not found");
+    }
 
+    /// Pending queue requests owned by `owner`, in processing order.
+    pub fn get_owner_requests(env: Env, owner: Address) -> Vec<QueueEntry> {
+        let mut result = Vec::new(&env);
+        for entry in Self::load_queue(&env).iter() {
+            if entry.owner == owner {
+                result.push_back(entry);
+            }
+        }
+        result
+    }
+
+    /// Summary of both queues, including the next processing window.
+    pub fn queue_summary(env: Env) -> VaultQueueSummary {
+        let mut summary = VaultQueueSummary {
+            pending_deposits: 0,
+            pending_withdrawals: 0,
+            queued_deposit_amount: 0,
+            queued_withdrawal_shares: 0,
+            next_processing_at: Self::next_processing_at(&env),
+            processing_interval: Self::queue_interval(&env),
+        };
+        for entry in Self::load_queue(&env).iter() {
+            match entry.kind {
+                QueueKind::Deposit => {
+                    summary.pending_deposits += 1;
+                    summary.queued_deposit_amount += entry.amount;
+                }
+                QueueKind::Withdrawal => {
+                    summary.pending_withdrawals += 1;
+                    summary.queued_withdrawal_shares += entry.amount;
+                }
+            }
+        }
+        summary
+    }
+
+    /// 1-based position of a request within its queue, or `0` when the request
+    /// is not pending.
+    pub fn queue_position_of(env: Env, request_id: u64) -> u32 {
+        for entry in Self::load_queue(&env).iter() {
+            if entry.id == request_id {
+                return Self::queue_position(&env, entry.kind, request_id);
+            }
+        }
+        0
+    }
+
+    /// Number of seconds until the next queue processing window.
+    pub fn time_to_next_processing(env: Env) -> u64 {
+        Self::next_processing_at(&env)
+            .saturating_sub(env.ledger().timestamp())
+    }
+
+    /// Update the queue threshold (basis points of TVL) and interval (seconds).
+    pub fn set_queue_config(env: Env, admin: Address, threshold_bps: u32, interval: u64) {
+        Self::require_admin(&env, &admin);
+        if threshold_bps > 10_000 {
+            panic!("threshold cannot exceed 100%");
+        }
+        if interval < MIN_QUEUE_INTERVAL {
+            panic!("interval below minimum");
+        }
+        env.storage().instance().set(&QUEUE_THRESHOLD, &threshold_bps);
+        env.storage().instance().set(&QUEUE_INTERVAL, &interval);
+        // Re-anchor the schedule so the new interval takes effect immediately.
+        env.storage()
+            .instance()
+            .set(&NEXT_PROCESS, &(env.ledger().timestamp() + interval));
+    }
+
+    /// Current queue threshold in basis points of TVL.
+    pub fn queue_threshold_bps(env: Env) -> u32 {
+        env.storage().instance().get(&QUEUE_THRESHOLD).unwrap_or(0)
+    }
+
+    // ─── Emergency withdrawal (issue #149) ───────────────────────────────────
+
+    /// Exit the vault immediately while it is paused, paying a penalty that is
+    /// redistributed pro-rata to the remaining depositors.
+    ///
+    /// The penalty is converted into extra assets left behind by the exiting
+    /// depositor, so the share price of everyone still in the vault rises.
+    pub fn emergency_withdraw(env: Env, owner: Address, shares: u64) -> EmergencyWithdrawReceipt {
+        if !Self::paused(&env) {
+            panic!("emergency withdrawal requires a paused vault");
+        }
         if shares == 0 {
-            return Err("Shares amount must be greater than 0".to_string());
+            panic!("shares amount must be greater than 0");
+        }
+        let balance = Self::shares_of(&env, &owner);
+        if shares > balance {
+            panic!("insufficient shares");
+        }
+        if shares == Self::total_shares(&env) && !Self::load_queue(&env).is_empty() {
+            // Exiting the whole vault would leave queued users with nothing.
+            panic!("cannot exit the entire vault while requests are queued");
         }
 
-        if shares > self.total_shares {
-            return Err("Insufficient shares".to_string());
-        }
+        let gross = Self::assets_for_shares(&env, shares);
+        let penalty_bps = Self::emergency_penalty_bps(env.clone());
+        let penalty = gross * penalty_bps as u64 / 10_000;
+        let payout = gross - penalty;
 
-        // Calculate assets to return
-        let assets_to_return = self.calculate_assets_for_shares(shares);
+        Self::burn_shares(&env, &owner, shares);
+        Self::set_total_shares(&env, Self::total_shares(&env) - shares);
+        // `penalty` stays in the vault, so remaining shares are now worth more.
+        Self::set_total_assets(&env, Self::total_assets(&env) - payout);
 
-        // Withdraw from active strategy
-        if !self.strategies.is_empty() {
-            self.withdraw_from_strategy(self.active_strategy_index, assets_to_return)?;
-        }
-
-        // Update state
-        self.total_assets = self.total_assets.saturating_sub(assets_to_return);
-        self.total_shares -= shares;
-
-        Ok(WithdrawResult {
-            withdrawer,
+        let receipt = EmergencyWithdrawReceipt {
+            owner: owner.clone(),
             shares_burned: shares,
-            amount_withdrawn: assets_to_return,
-            share_price: self.get_share_price(),
-        })
+            assets_withdrawn: payout,
+            penalty_amount: penalty,
+            penalty_bps,
+            timestamp: env.ledger().timestamp(),
+        };
+        Self::emit(
+            &env,
+            VaultEvent::EmergencyWithdrawn(owner, shares, payout, penalty, penalty_bps),
+        );
+        receipt
     }
 
-    // ─── Harvest & Compound ───────────────────────────────────────────────────
+    /// Update the emergency withdrawal penalty in basis points.
+    pub fn set_emergency_penalty(env: Env, admin: Address, penalty_bps: u32) {
+        Self::require_admin(&env, &admin);
+        if penalty_bps > MAX_EMERGENCY_PENALTY_BPS {
+            panic!("penalty exceeds maximum");
+        }
+        env.storage().instance().set(&EMERG_PENALTY, &penalty_bps);
+    }
 
-    /// Harvest rewards from the active strategy and auto-compound
-    ///
-    /// 1. Collect rewards from the strategy
-    /// 2. Deduct performance fee
-    /// 3. Reinvest remaining rewards back into the strategy
-    pub fn harvest(&mut self) -> Result<HarvestResult, String> {
-        self.require_not_paused()?;
+    /// Current emergency withdrawal penalty in basis points.
+    pub fn emergency_penalty_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&EMERG_PENALTY)
+            .unwrap_or(DEFAULT_EMERGENCY_PENALTY_BPS)
+    }
 
-        let current_time = self.get_current_timestamp();
-        if current_time < self.last_harvest + MIN_HARVEST_INTERVAL {
-            return Err("Harvest too soon: minimum interval not elapsed".to_string());
+    // ─── Harvest and compounding (issue #150) ────────────────────────────────
+
+    /// Harvest the active strategy and auto-compound the rewards.
+    pub fn harvest(env: Env) -> HarvestResult {
+        Self::require_not_paused(&env);
+        let now = env.ledger().timestamp();
+        let last_harvest = Self::last_harvest(&env);
+        if now < last_harvest + MIN_HARVEST_INTERVAL {
+            panic!("harvest too soon");
         }
 
-        let raw_rewards = self.harvest_from_strategy(self.active_strategy_index)?;
-
+        let mut active = Vec::new(&env);
+        active.push_back(Self::active_strategy_index(&env));
+        let raw_rewards = Self::harvest_from_strategies(&env, &active);
         if raw_rewards == 0 {
-            return Ok(HarvestResult {
+            return HarvestResult {
                 raw_rewards: 0,
                 performance_fee: 0,
                 net_rewards: 0,
                 compounded_amount: 0,
-                new_total_assets: self.total_assets,
-            });
+                new_total_assets: Self::total_assets(&env),
+            };
         }
 
-        // Deduct performance fee
-        let performance_fee = self.calculate_performance_fee(raw_rewards);
+        let fee_bps = Self::performance_fee_bps(&env);
+        let performance_fee = raw_rewards * fee_bps as u64 / 10_000;
         let net_rewards = raw_rewards - performance_fee;
 
-        // Accumulate fees for treasury collection
-        self.accumulated_fees += performance_fee;
+        Self::set_fees(&env, Self::fees(&env) + performance_fee);
+        Self::set_total_assets(&env, Self::total_assets(&env) + net_rewards);
+        Self::set_last_harvest(&env, now);
+        Self::emit(&env, VaultEvent::Compounded(env.current_contract_address(), raw_rewards, 0, net_rewards));
 
-        // Reinvest net rewards (auto-compound)
-        if net_rewards > 0 && !self.strategies.is_empty() {
-            self.deposit_into_strategy(self.active_strategy_index, net_rewards)?;
-            self.total_assets += net_rewards;
-        }
-
-        self.last_harvest = current_time;
-
-        Ok(HarvestResult {
+        HarvestResult {
             raw_rewards,
             performance_fee,
             net_rewards,
             compounded_amount: net_rewards,
-            new_total_assets: self.total_assets,
-        })
+            new_total_assets: Self::total_assets(&env),
+        }
     }
 
-    /// Collect accumulated performance fees to treasury (admin only)
-    pub fn collect_fees(&mut self) -> Result<u64, String> {
-        self.require_admin()?;
-
-        if self.accumulated_fees == 0 {
-            return Err("No fees to collect".to_string());
-        }
-
-        if self.treasury.is_none() {
-            return Err("Treasury address not set".to_string());
-        }
-
-        let fees = self.accumulated_fees;
-        self.accumulated_fees = 0;
-
-        // In a real implementation: transfer `fees` to self.treasury
-        Ok(fees)
-    }
-
-    // ─── Emergency Controls ───────────────────────────────────────────────────
-
-    /// Pause the vault (admin only) — blocks deposits, withdrawals, and harvests
-    pub fn pause(&mut self) -> Result<(), String> {
-        self.require_admin()?;
-        if self.paused {
-            return Err("Vault is already paused".to_string());
-        }
-        self.paused = true;
-        Ok(())
-    }
-
-    /// Unpause the vault (admin only)
-    pub fn unpause(&mut self) -> Result<(), String> {
-        self.require_admin()?;
-        if !self.paused {
-            return Err("Vault is not paused".to_string());
-        }
-        self.paused = false;
-        Ok(())
-    }
-
-    /// Emergency withdraw all assets from the active strategy (admin only)
+    /// Compound one or more strategies on behalf of the vault.
     ///
-    /// Pulls all funds back to the vault without harvesting rewards.
-    /// Useful when a strategy is compromised.
-    pub fn emergency_exit(&mut self) -> Result<u64, String> {
-        self.require_admin()?;
-
-        if self.strategies.is_empty() {
-            return Err("No active strategy".to_string());
+    /// Callable by anyone once the compounding interval has elapsed. The keeper
+    /// is paid `keeper_reward_bps` of the harvested rewards in vault shares, so
+    /// gas costs are covered without draining the asset balance.
+    pub fn compound(env: Env, keeper: Address, strategy_indices: Vec<u32>) -> CompoundReceipt {
+        Self::require_not_paused(&env);
+        let now = env.ledger().timestamp();
+        let interval = Self::compound_interval(env.clone());
+        let last = Self::last_compound(&env);
+        if now < last + interval {
+            panic!("compound too soon");
         }
 
-        let withdrawn = self.withdraw_from_strategy(self.active_strategy_index, self.total_assets)?;
-        // Keep total_assets accurate; strategy balance is now 0
-        Ok(withdrawn)
-    }
+        let strategies = Self::load_strategies(&env);
+        let strategy_count = strategies.len();
 
-    // ─── View Functions ───────────────────────────────────────────────────────
-
-    /// Get current share price: `total_assets / total_shares`
-    pub fn get_share_price(&self) -> f64 {
-        if self.total_shares == 0 {
-            return 1.0; // Initial price is 1:1
+        let mut indices = Vec::new(&env);
+        if strategy_indices.is_empty() {
+            if strategy_count > 0 {
+                indices.push_back(Self::active_strategy_index(&env));
+            }
+        } else {
+            if strategy_indices.len() > MAX_COMPOUND_STRATEGIES {
+                panic!("too many strategies in one call");
+            }
+            for index in strategy_indices.iter() {
+                if index >= strategy_count {
+                    panic!("strategy index out of bounds");
+                }
+                indices.push_back(index);
+            }
         }
-        self.total_assets as f64 / self.total_shares as f64
+
+        let gross_rewards = Self::harvest_from_strategies(&env, &indices);
+        let fee_bps = Self::performance_fee_bps(&env);
+        let performance_fee = gross_rewards * fee_bps as u64 / 10_000;
+        let after_fee = gross_rewards - performance_fee;
+        let keeper_reward = after_fee * Self::keeper_reward_bps(env.clone()) as u64 / 10_000;
+        let net_compounded = after_fee - keeper_reward;
+
+        let mut keeper_shares = 0u64;
+        if keeper_reward > 0 {
+            let total_shares = Self::total_shares(&env);
+            let total_assets = Self::total_assets(&env);
+            keeper_shares = if total_shares == 0 || total_assets == 0 {
+                keeper_reward
+            } else {
+                keeper_reward * total_shares / total_assets
+            };
+            Self::mint_shares(&env, &keeper, keeper_shares);
+            Self::set_total_shares(&env, total_shares + keeper_shares);
+        }
+
+        Self::set_fees(&env, Self::fees(&env) + performance_fee);
+        Self::set_total_assets(&env, Self::total_assets(&env) + gross_rewards);
+        Self::set_last_compound(&env, now);
+        Self::set_last_harvest(&env, now);
+
+        let receipt = CompoundReceipt {
+            keeper: keeper.clone(),
+            strategies: indices,
+            gross_rewards,
+            keeper_reward,
+            keeper_reward_shares: keeper_shares,
+            performance_fee,
+            net_compounded,
+            new_total_assets: Self::total_assets(&env),
+            timestamp: now,
+        };
+        Self::emit(
+            &env,
+            VaultEvent::Compounded(keeper, gross_rewards, keeper_reward, net_compounded),
+        );
+        receipt
     }
 
+    /// Estimated optimal compounding interval, in seconds, given the reward
+    /// rate of `strategy_index`.
+    ///
+    /// The estimate targets a reward pool worth `target_reward_bps` of TVL per
+    /// compound, which keeps the keeper reward meaningful relative to gas.
+    pub fn optimal_compound_interval(env: Env, strategy_index: u32) -> u64 {
+        let strategies = Self::load_strategies(&env);
+        let apy_bps = strategies
+            .get(strategy_index)
+            .map(|s| s.estimated_apy_bps)
+            .unwrap_or(0);
+        Self::optimal_interval_for_apy(apy_bps)
+    }
+
+    /// Set the keeper reward, in basis points of post-fee rewards.
+    pub fn set_keeper_reward(env: Env, admin: Address, reward_bps: u32) {
+        Self::require_admin(&env, &admin);
+        if reward_bps > 2_000 {
+            panic!("keeper reward exceeds maximum");
+        }
+        env.storage().instance().set(&KEEPER_REWARD, &reward_bps);
+    }
+
+    /// Set the minimum interval between compounding calls.
+    pub fn set_compound_interval(env: Env, admin: Address, interval: u64) {
+        Self::require_admin(&env, &admin);
+        if interval == 0 {
+            panic!("interval must be greater than 0");
+        }
+        env.storage().instance().set(&COMPOUND_INTERVAL, &interval);
+    }
+
+    /// Minimum interval between compounding calls, in seconds.
+    pub fn compound_interval(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&COMPOUND_INTERVAL)
+            .unwrap_or(MIN_HARVEST_INTERVAL)
+    }
+
+    /// Whether `compound` may be called at the current ledger time.
+    pub fn can_compound(env: Env) -> bool {
+        let now = env.ledger().timestamp();
+        now >= Self::last_compound(&env).saturating_add(Self::compound_interval(env.clone()))
+    }
+
+    /// Current keeper reward in basis points.
+    pub fn keeper_reward_bps(env: Env) -> u32 {
+        env.storage().instance().get(&KEEPER_REWARD).unwrap_or(0)
+    }
+
+    // ─── Fees and admin ──────────────────────────────────────────────────────
+
+    /// Transfer accumulated performance fees to the treasury.
+    pub fn collect_fees(env: Env, admin: Address) -> u64 {
+        Self::require_admin(&env, &admin);
+        let fees = Self::fees(&env);
+        if fees == 0 {
+            panic!("no fees to collect");
+        }
+        Self::set_fees(&env, 0);
+        fees
+    }
+
+    /// Pause the vault. Emergency withdrawals remain available while paused.
+    pub fn pause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        if Self::paused(&env) {
+            panic!("vault already paused");
     /// Get vault info snapshot
     pub fn get_info(&self, _env: &Env) -> VaultInfo {
         VaultInfo {
@@ -626,67 +1062,114 @@ impl YieldVaultContract {
             last_harvest: self.last_harvest,
             paused: self.paused,
         }
+        env.storage().instance().set(&PAUSED, &true);
+        Self::emit(&env, VaultEvent::PauseChanged(true));
     }
 
-    /// Calculate how many shares a given asset amount would mint
-    pub fn preview_deposit(&self, amount: u64) -> u64 {
-        self.calculate_shares_for_amount(amount)
+    /// Unpause the vault.
+    pub fn unpause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        if !Self::paused(&env) {
+            panic!("vault is not paused");
+        }
+        env.storage().instance().set(&PAUSED, &false);
+        Self::emit(&env, VaultEvent::PauseChanged(false));
     }
 
-    /// Calculate how many assets a given share amount would return
-    pub fn preview_withdraw(&self, shares: u64) -> u64 {
-        self.calculate_assets_for_shares(shares)
+    /// Withdraw all vault capital from the active strategy without harvesting.
+    pub fn emergency_exit(env: Env, admin: Address) -> u64 {
+        Self::require_admin(&env, &admin);
+        let strategies = Self::load_strategies(&env);
+        if strategies.is_empty() {
+            panic!("no active strategy");
+        }
+        Self::total_assets(&env)
     }
 
-    /// Update performance fee configuration (admin only)
-    pub fn set_performance_fee(&mut self, fee_bps: u32) -> Result<(), String> {
-        self.require_admin()?;
+    /// Update the performance fee.
+    pub fn set_performance_fee(env: Env, admin: Address, fee_bps: u32) {
+        Self::require_admin(&env, &admin);
         if fee_bps > MAX_PERFORMANCE_FEE_BPS {
-            return Err(format!(
-                "Fee exceeds maximum of {} bps",
-                MAX_PERFORMANCE_FEE_BPS
-            ));
+            panic!("fee exceeds maximum");
         }
-        self.performance_fee_bps = fee_bps;
-        Ok(())
+        env.storage().instance().set(&PERF_FEE, &fee_bps);
     }
 
-    /// Update treasury address (admin only)
-    pub fn set_treasury(&mut self, treasury: Address) -> Result<(), String> {
-        self.require_admin()?;
-        self.treasury = Some(treasury);
-        Ok(())
+    /// Update the treasury address.
+    pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
+        Self::require_admin(&env, &admin);
+        env.storage().instance().set(&TREASURY, &treasury);
     }
 
-    // ─── Internal Helpers ─────────────────────────────────────────────────────
+    // ─── Views ───────────────────────────────────────────────────────────────
 
-    fn calculate_shares_for_amount(&self, amount: u64) -> u64 {
-        if self.total_shares == 0 || self.total_assets == 0 {
-            return amount; // 1:1 for first deposit
+    /// Vault state snapshot.
+    pub fn get_info(env: Env) -> VaultInfo {
+        let strategies = Self::load_strategies(&env);
+        let summary = Self::queue_summary(env.clone());
+        VaultInfo {
+            asset_token: Self::asset_token(&env),
+            share_token: Self::share_token(&env),
+            total_shares: Self::total_shares(&env),
+            total_assets: Self::total_assets(&env),
+            share_price_bps: Self::share_price_bps(&env),
+            active_strategy_index: if strategies.is_empty() {
+                None
+            } else {
+                Some(Self::active_strategy_index(&env))
+            },
+            strategy_count: strategies.len(),
+            performance_fee_bps: Self::performance_fee_bps(&env),
+            paused: Self::paused(&env),
+            last_harvest: Self::last_harvest(&env),
+            pending_deposits: summary.pending_deposits,
+            pending_withdrawals: summary.pending_withdrawals,
         }
-        amount
-            .checked_mul(self.total_shares)
-            .unwrap_or(u64::MAX)
-            / self.total_assets
     }
 
-    fn calculate_assets_for_shares(&self, shares: u64) -> u64 {
-        if self.total_shares == 0 {
-            return 0;
+    /// Vault runtime statistics.
+    pub fn get_stats(env: Env) -> VaultStats {
+        let strategies = Self::load_strategies(&env);
+        let current_apy_bps = if strategies.is_empty() {
+            0
+        } else {
+            strategies
+                .get(Self::active_strategy_index(&env))
+                .map(|s| s.estimated_apy_bps)
+                .unwrap_or(0)
+        };
+        let summary = Self::queue_summary(env.clone());
+        VaultStats {
+            total_assets: Self::total_assets(&env),
+            total_shares: Self::total_shares(&env),
+            share_price_bps: Self::share_price_bps(&env),
+            current_apy_bps,
+            accumulated_fees: Self::fees(&env),
+            last_harvest: Self::last_harvest(&env),
+            paused: Self::paused(&env),
+            pending_deposits: summary.pending_deposits,
+            pending_withdrawals: summary.pending_withdrawals,
         }
-        shares
-            .checked_mul(self.total_assets)
-            .unwrap_or(u64::MAX)
-            / self.total_shares
     }
 
-    fn calculate_performance_fee(&self, rewards: u64) -> u64 {
-        rewards
-            .checked_mul(self.performance_fee_bps as u64)
-            .unwrap_or(0)
-            / 10000
+    /// Shares a given asset amount would mint right now.
+    pub fn preview_deposit(env: Env, amount: u64) -> u64 {
+        Self::shares_for_assets(&env, amount)
     }
 
+    /// Assets a given share amount would return right now.
+    pub fn preview_withdraw(env: Env, shares: u64) -> u64 {
+        Self::assets_for_shares(&env, shares)
+    }
+
+    /// Current share price in basis points (10000 = 1.0).
+    pub fn share_price(env: Env) -> u32 {
+        Self::share_price_bps(&env)
+    }
+
+    /// Shares owned by `owner`.
+    pub fn balance_of(env: Env, owner: Address) -> u64 {
+        Self::shares_of(&env, &owner)
     /// Simulate depositing into a strategy (cross-contract call in production)
     fn deposit_into_strategy(&self, index: u32, _amount: u64) -> Result<(), String> {
         if index as usize >= self.strategies.len() {
@@ -726,29 +1209,62 @@ impl YieldVaultContract {
         Ok(rewards)
     }
 
-    fn get_current_timestamp(&self) -> u64 {
-        // In production: use Env::ledger().timestamp()
-        0
+    /// Registered strategies.
+    pub fn list_strategies(env: Env) -> Vec<VaultStrategy> {
+        Self::load_strategies(&env)
     }
 
-    fn require_admin(&self) -> Result<(), String> {
-        // In production: verify env.invoker() == self.admin
-        if self.admin.is_none() {
-            return Err("Admin not set".to_string());
+    // ─── Internal: deposit/withdraw mechanics ────────────────────────────────
+
+    fn execute_deposit(env: &Env, owner: Address, amount: u64) -> u64 {
+        let shares = Self::shares_for_assets(env, amount);
+        Self::mint_shares(env, &owner, shares);
+        Self::set_total_shares(env, Self::total_shares(env) + shares);
+        Self::set_total_assets(env, Self::total_assets(env) + amount);
+        shares
+    }
+
+    fn execute_withdraw(env: &Env, owner: Address, shares: u64) -> u64 {
+        let balance = Self::shares_of(env, &owner);
+        if shares > balance {
+            panic!("insufficient shares");
         }
-        Ok(())
+        let assets = Self::assets_for_shares(env, shares);
+        Self::burn_shares(env, &owner, shares);
+        Self::set_total_shares(env, Self::total_shares(env) - shares);
+        Self::set_total_assets(env, Self::total_assets(env).saturating_sub(assets));
+        assets
     }
 
-    fn require_not_paused(&self) -> Result<(), String> {
-        if self.paused {
-            return Err("Vault is paused".to_string());
+    fn shares_for_assets(env: &Env, amount: u64) -> u64 {
+        let total_shares = Self::total_shares(env);
+        let total_assets = Self::total_assets(env);
+        if total_shares == 0 || total_assets == 0 {
+            return amount;
         }
-        Ok(())
+        amount.saturating_mul(total_shares) / total_assets
     }
-}
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+    fn assets_for_shares(env: &Env, shares: u64) -> u64 {
+        let total_shares = Self::total_shares(env);
+        if total_shares == 0 {
+            return 0;
+        }
+        shares.saturating_mul(Self::total_assets(env)) / total_shares
+    }
 
+    fn share_price_bps(env: &Env) -> u32 {
+        let total_shares = Self::total_shares(env);
+        if total_shares == 0 {
+            return 10_000;
+        }
+        let price = Self::total_assets(env).saturating_mul(10_000) / total_shares;
+        if price > u32::MAX as u64 {
+            u32::MAX
+        } else {
+            price as u32
+        }
+    }
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,277 +1272,290 @@ mod tests {
     use soroban_sdk::{Address, Env};
     use soroban_sdk::testutils::Address as _;
 
-    fn make_vault(env: &Env) -> YieldVaultContract {
-        let admin = Address::generate(&env);
-        let treasury = Address::generate(&env);
-        YieldVaultContract::new_std(env, "ASSET_TOKEN".to_string(), "VAULT_SHARE".to_string())
-            .initialize(admin, treasury, DEFAULT_PERFORMANCE_FEE_BPS)
-            .unwrap()
+    fn mint_shares(env: &Env, owner: &Address, shares: u64) {
+        if shares == 0 {
+            return;
+        }
+        let current = Self::shares_of(env, owner);
+        env.storage().persistent().set(&VaultDataKey::Shares(owner.clone()), &(current + shares));
     }
 
-    fn make_strategy(env: &Env, name: &str, apy: f64) -> VaultStrategy {
-        VaultStrategy {
-            name: soroban_sdk::Symbol::new(env, name),
-            contract_address: Address::generate(&env),
-            strategy_type: StrategyType::LiquidityPool,
-            estimated_apy: (apy * 100.0) as u32,
-            allocated_amount: 0,
-            active: true,
+    fn burn_shares(env: &Env, owner: &Address, shares: u64) {
+        let current = Self::shares_of(env, owner);
+        let remaining = current.saturating_sub(shares);
+        env.storage().persistent().set(&VaultDataKey::Shares(owner.clone()), &remaining);
+    }
+
+    fn shares_of(env: &Env, owner: &Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&VaultDataKey::Shares(owner.clone()))
+            .unwrap_or(0)
+    }
+
+    // ─── Internal: queue mechanics ───────────────────────────────────────────
+
+    fn should_queue(env: &Env, amount: u64) -> bool {
+        let threshold_bps = Self::queue_threshold_bps(env.clone());
+        let total_assets = Self::total_assets(env);
+        if total_assets == 0 || threshold_bps == 0 {
+            return false;
+        }
+        let threshold = total_assets.saturating_mul(threshold_bps as u64) / 10_000;
+        amount > threshold
+    }
+
+    fn enqueue(
+        env: &Env,
+        owner: Address,
+        kind: QueueKind,
+        amount: u64,
+        requested_assets: u64,
+    ) -> QueueEntry {
+        let now = env.ledger().timestamp();
+        let id = env.storage().instance().get(&NEXT_REQ_ID).unwrap_or(1);
+        env.storage().instance().set(&NEXT_REQ_ID, &(id + 1));
+
+        let processable_at = Self::next_processing_at(env).max(now);
+        let entry = QueueEntry {
+            id,
+            owner,
+            kind,
+            amount,
+            requested_assets,
+            created_at: now,
+            processable_at,
+        };
+        let mut queue = Self::load_queue(env);
+        queue.push_back(entry.clone());
+        Self::save_queue(env, &queue);
+        entry
+    }
+
+    fn queue_position(env: &Env, kind: QueueKind, request_id: u64) -> u32 {
+        let mut position = 0u32;
+        for entry in Self::load_queue(env).iter() {
+            if entry.kind != kind {
+                continue;
+            }
+            position += 1;
+            if entry.id == request_id {
+                return position;
+            }
+        }
+        0
+    }
+
+    /// Whether a processing window is currently open.
+    fn window_is_open(env: &Env) -> bool {
+        match env.storage().instance().get::<Symbol, u64>(&NEXT_PROCESS) {
+            Some(at) => env.ledger().timestamp() >= at,
+            None => false,
         }
     }
 
-    #[test]
-    fn test_vault_creation() {
-        let env = Env::default();
-        let vault = make_vault(&env);
-        assert_eq!(vault.total_shares, 0);
-        assert_eq!(vault.total_assets, 0);
-        assert_eq!(vault.performance_fee_bps, DEFAULT_PERFORMANCE_FEE_BPS);
-        assert!(!vault.paused);
-    }
-
-    #[test]
-    fn test_deposit_first() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-
-        let result = vault.deposit(user, 1_000_000).unwrap();
-        assert_eq!(result.amount_deposited, 1_000_000);
-        assert_eq!(result.shares_minted, 1_000_000); // 1:1 on first deposit
-        assert_eq!(vault.total_assets, 1_000_000);
-        assert_eq!(vault.total_shares, 1_000_000);
-    }
-
-    #[test]
-    fn test_deposit_subsequent_share_price() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-
-        vault.deposit(user.clone(), 1_000_000).unwrap();
-        // Simulate yield: total_assets grows without new shares
-        vault.total_assets = 1_100_000; // 10% gain
-
-        let result = vault.deposit(user, 1_100_000).unwrap();
-        // share price = 1_100_000 / 1_000_000 = 1.1
-        // new shares = 1_100_000 / 1.1 = 1_000_000
-        assert_eq!(result.shares_minted, 1_000_000);
-    }
-
-    #[test]
-    fn test_withdraw() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-
-        vault.deposit(user.clone(), 1_000_000).unwrap();
-        let result = vault.withdraw(user, 500_000).unwrap();
-
-        assert_eq!(result.shares_burned, 500_000);
-        assert_eq!(result.amount_withdrawn, 500_000);
-        assert_eq!(vault.total_shares, 500_000);
-        assert_eq!(vault.total_assets, 500_000);
-    }
-
-    #[test]
-    fn test_withdraw_zero_fails() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.deposit(user.clone(), 1_000_000).unwrap();
-        assert!(vault.withdraw(user, 0).is_err());
-    }
-
-    #[test]
-    fn test_withdraw_excess_fails() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.deposit(user.clone(), 1_000_000).unwrap();
-        assert!(vault.withdraw(user, 2_000_000).is_err());
-    }
-
-    #[test]
-    fn test_add_strategy() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let idx = vault.add_strategy(make_strategy(&env, "LP_STRATEGY", 12.5)).unwrap();
-        assert_eq!(idx, 0);
-        assert_eq!(vault.strategies.len(), 1);
-    }
-
-    #[test]
-    fn test_switch_strategy() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        vault.add_strategy(make_strategy(&env, "STAKING", 8.0)).unwrap();
-        vault.add_strategy(make_strategy(&env, "LP", 15.0)).unwrap();
-
-        vault.switch_strategy(1).unwrap();
-        assert_eq!(vault.active_strategy_index, 1);
-    }
-
-    #[test]
-    fn test_switch_same_strategy_fails() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        vault.add_strategy(make_strategy(&env, "STAKING", 8.0)).unwrap();
-        assert!(vault.switch_strategy(0).is_err());
-    }
-
-    #[test]
-    fn test_get_optimal_strategy() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        vault.add_strategy(make_strategy(&env, "LOW", 5.0)).unwrap();
-        vault.add_strategy(make_strategy(&env, "MID", 10.0)).unwrap();
-        vault.add_strategy(make_strategy(&env, "HIGH", 20.0)).unwrap();
-
-        assert_eq!(vault.get_optimal_strategy_index(), 2);
-    }
-
-    #[test]
-    fn test_performance_fee_calculation() {
-        let env = Env::default();
-        let vault = make_vault(&env); // 1000 bps = 10%
-        let fee = vault.calculate_performance_fee(100_000);
-        assert_eq!(fee, 10_000); // 10% of 100_000
-    }
-
-    #[test]
-    fn test_set_performance_fee() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        vault.set_performance_fee(500).unwrap(); // 5%
-        assert_eq!(vault.performance_fee_bps, 500);
-    }
-
-    #[test]
-    fn test_set_performance_fee_exceeds_max() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        assert!(vault.set_performance_fee(5000).is_err()); // 50% > 30% max
-    }
-
-    #[test]
-    fn test_pause_unpause() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-
-        vault.pause().unwrap();
-        assert!(vault.paused);
-
-        // Operations should fail while paused
-        let user = Address::generate(&env);
-        assert!(vault.deposit(user.clone(), 1000).is_err());
-        assert!(vault.withdraw(user, 1000).is_err());
-        assert!(vault.harvest().is_err());
-
-        vault.unpause().unwrap();
-        assert!(!vault.paused);
-    }
-
-    #[test]
-    fn test_double_pause_fails() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        vault.pause().unwrap();
-        assert!(vault.pause().is_err());
-    }
-
-    #[test]
-    fn test_unpause_when_not_paused_fails() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        assert!(vault.unpause().is_err());
-    }
-
-    #[test]
-    fn test_share_price_initial() {
-        let env = Env::default();
-        let vault = make_vault(&env);
-        assert_eq!(vault.get_share_price(), 1.0);
-    }
-
-    #[test]
-    fn test_share_price_after_yield() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.deposit(user, 1_000_000).unwrap();
-        vault.total_assets = 1_200_000; // 20% yield
-        assert!((vault.get_share_price() - 1.2).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_preview_deposit() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.deposit(user, 1_000_000).unwrap();
-        vault.total_assets = 1_100_000;
-
-        let shares = vault.preview_deposit(1_100_000);
-        assert_eq!(shares, 1_000_000);
-    }
-
-    #[test]
-    fn test_preview_withdraw() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.deposit(user, 1_000_000).unwrap();
-
-        let assets = vault.preview_withdraw(500_000);
-        assert_eq!(assets, 500_000);
-    }
-
-    #[test]
-    fn test_collect_fees_no_fees() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        assert!(vault.collect_fees().is_err());
-    }
-
-    #[test]
-    fn test_emergency_exit_no_strategy() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        assert!(vault.emergency_exit().is_err());
-    }
-
-    #[test]
-    fn test_emergency_exit_with_strategy() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        let user = Address::generate(&env);
-        vault.add_strategy(make_strategy(&env, "STAKING", 10.0)).unwrap();
-        vault.deposit(user, 1_000_000).unwrap();
-
-        let withdrawn = vault.emergency_exit().unwrap();
-        assert_eq!(withdrawn, 1_000_000);
-    }
-
-    #[test]
-    fn test_max_strategies() {
-        let env = Env::default();
-        let mut vault = make_vault(&env);
-        for i in 0..10 {
-            vault
-                .add_strategy(make_strategy(&env, &format!("S{}", i), i as f64))
-                .unwrap();
+    /// Timestamp of the next window that will accept new requests.
+    ///
+    /// Windows open every `queue_interval` seconds. Requests created while a
+    /// window is open wait for the following one, so a user always gets a full
+    /// interval to cancel before funds move.
+    fn next_processing_at(env: &Env) -> u64 {
+        let interval = Self::queue_interval(env);
+        match env.storage().instance().get::<Symbol, u64>(&NEXT_PROCESS) {
+            Some(at) if env.ledger().timestamp() >= at => at + interval,
+            Some(at) => at,
+            None => env.ledger().timestamp() + interval,
         }
-        assert!(vault.add_strategy(make_strategy(&env, "S11", 99.0)).is_err());
     }
 
-    #[test]
-    fn test_initialize_fee_too_high() {
-        let env = Env::default();
-        let admin = Address::generate(&env);
-        let treasury = Address::generate(&env);
-        let result = YieldVaultContract::new_std(&env, "A".to_string(), "B".to_string())
-            .initialize(admin, treasury, 5000); // 50% > 30% max
-        assert!(result.is_err());
+    fn queue_interval(env: &Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&QUEUE_INTERVAL)
+            .unwrap_or(DEFAULT_QUEUE_INTERVAL)
+    }
+
+    fn load_queue(env: &Env) -> Vec<QueueEntry> {
+        env.storage()
+            .instance()
+            .get(&QUEUE)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn save_queue(env: &Env, queue: &Vec<QueueEntry>) {
+        env.storage().instance().set(&QUEUE, queue);
+    }
+
+    // ─── Internal: strategy mechanics ────────────────────────────────────────
+
+    fn switch_strategy_internal(env: &Env, new_index: u32) {
+        let strategies = Self::load_strategies(env);
+        if new_index >= strategies.len() {
+            panic!("strategy index out of bounds");
+        }
+        if new_index == Self::active_strategy_index(env) {
+            panic!("already using this strategy");
+        }
+        let mut active = Vec::new(env);
+        active.push_back(Self::active_strategy_index(env));
+        Self::harvest_from_strategies(env, &active);
+        env.storage().instance().set(&ACTIVE_IDX, &new_index);
+    }
+
+    fn optimal_strategy_index(strategies: &Vec<VaultStrategy>) -> u32 {
+        let mut best_index = 0;
+        let mut best_apy = 0;
+        for (i, strategy) in strategies.iter().enumerate() {
+            if strategy.estimated_apy_bps > best_apy {
+                best_apy = strategy.estimated_apy_bps;
+                best_index = i as u32;
+            }
+        }
+        best_index
+    }
+
+    fn improvement_bps(current: u32, candidate: u32) -> u32 {
+        if current == 0 {
+            return if candidate > 0 { 10_000 } else { 0 };
+        }
+        if candidate <= current {
+            return 0;
+        }
+        ((candidate - current) as u64 * 10_000 / current as u64) as u32
+    }
+
+    /// Rewards accrued by the given strategies since the last harvest.
+    fn harvest_from_strategies(env: &Env, indices: &Vec<u32>) -> u64 {
+        let strategies = Self::load_strategies(env);
+        let now = env.ledger().timestamp();
+        let last = Self::last_harvest(env);
+        let elapsed = now.saturating_sub(last);
+        if elapsed == 0 {
+            return 0;
+        }
+        let total_assets = Self::total_assets(env);
+        let mut rewards = 0u64;
+        for index in indices.iter() {
+            let strategy = match strategies.get(index) {
+                Some(strategy) => strategy,
+                None => continue,
+            };
+            if !strategy.active {
+                continue;
+            }
+            let annual = total_assets / strategies.len().max(1) as u64
+                * strategy.estimated_apy_bps as u64
+                / 10_000;
+            rewards += annual.saturating_mul(elapsed) / SECONDS_PER_YEAR;
+        }
+        rewards
+    }
+
+    fn optimal_interval_for_apy(apy_bps: u32) -> u64 {
+        if apy_bps == 0 {
+            return SECONDS_PER_YEAR;
+        }
+        // Harvest often enough that each run collects ~10 bps of TVL, which
+        // keeps the keeper reward above the cost of the call.
+        let target_reward_bps = 10u64;
+        let interval = target_reward_bps * SECONDS_PER_YEAR / apy_bps as u64;
+        interval.clamp(MIN_QUEUE_INTERVAL, SECONDS_PER_YEAR)
+    }
+
+    fn load_strategies(env: &Env) -> Vec<VaultStrategy> {
+        env.storage()
+            .instance()
+            .get(&STRATEGIES)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn save_strategies(env: &Env, strategies: &Vec<VaultStrategy>) {
+        env.storage().instance().set(&STRATEGIES, strategies);
+    }
+
+    fn active_strategy_index(env: &Env) -> u32 {
+        env.storage().instance().get(&ACTIVE_IDX).unwrap_or(0)
+    }
+
+    // ─── Internal: scalar storage accessors ──────────────────────────────────
+
+    fn asset_token(env: &Env) -> Address {
+        env.storage().instance().get(&ASSET).unwrap()
+    }
+
+    fn share_token(env: &Env) -> Address {
+        env.storage().instance().get(&SHARE_TOKEN).unwrap()
+    }
+
+    fn total_shares(env: &Env) -> u64 {
+        env.storage().instance().get(&TOTAL_SHARES).unwrap_or(0)
+    }
+
+    fn set_total_shares(env: &Env, value: u64) {
+        env.storage().instance().set(&TOTAL_SHARES, &value);
+    }
+
+    fn total_assets(env: &Env) -> u64 {
+        env.storage().instance().get(&TOTAL_ASSETS).unwrap_or(0)
+    }
+
+    fn set_total_assets(env: &Env, value: u64) {
+        env.storage().instance().set(&TOTAL_ASSETS, &value);
+    }
+
+    fn performance_fee_bps(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&PERF_FEE)
+            .unwrap_or(DEFAULT_PERFORMANCE_FEE_BPS)
+    }
+
+    fn paused(env: &Env) -> bool {
+        env.storage().instance().get(&PAUSED).unwrap_or(false)
+    }
+
+    fn last_harvest(env: &Env) -> u64 {
+        env.storage().instance().get(&LAST_HARVEST).unwrap_or(0)
+    }
+
+    fn set_last_harvest(env: &Env, value: u64) {
+        env.storage().instance().set(&LAST_HARVEST, &value);
+    }
+
+    fn fees(env: &Env) -> u64 {
+        env.storage().instance().get(&FEES).unwrap_or(0)
+    }
+
+    fn set_fees(env: &Env, value: u64) {
+        env.storage().instance().set(&FEES, &value);
+    }
+
+    fn last_compound(env: &Env) -> u64 {
+        env.storage().instance().get(&LAST_COMPOUND).unwrap_or(0)
+    }
+
+    fn set_last_compound(env: &Env, value: u64) {
+        env.storage().instance().set(&LAST_COMPOUND, &value);
+    }
+
+    fn require_admin(env: &Env, admin: &Address) {
+        admin.require_auth();
+        let stored: Address = match env.storage().instance().get(&ADMIN) {
+            Some(stored) => stored,
+            None => panic!("admin not set"),
+        };
+        if &stored != admin {
+            panic!("caller is not the admin");
+        }
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::paused(env) {
+            panic!("vault is paused");
+        }
+    }
+
+    fn emit(env: &Env, event: VaultEvent) {
+        env.events().publish((Symbol::short("VAULT"),), event);
     }
 }

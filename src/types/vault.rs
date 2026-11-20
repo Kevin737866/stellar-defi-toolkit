@@ -1,5 +1,13 @@
-//! Vault-related type definitions for the yield farming vault
+//! Vault-related type definitions for the yield farming vault.
+//!
+//! All types are `#[contracttype]` so they can be stored in Soroban storage and
+//! returned from contract entry points.
 
+use soroban_sdk::{contracttype, Address, Symbol};
+
+/// Strategy type classification
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 use serde::{Deserialize, Serialize};
 use soroban_sdk::{Address, Symbol};
 
@@ -17,7 +25,8 @@ pub enum StrategyType {
 }
 
 /// A yield strategy the vault can allocate funds to
-#[derive(Debug, Clone)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VaultStrategy {
     /// Human-readable strategy name
     pub name: Symbol,
@@ -33,8 +42,72 @@ pub struct VaultStrategy {
     pub active: bool,
 }
 
+/// Kind of request held in the deposit/withdrawal queue
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum QueueKind {
+    Deposit,
+    Withdrawal,
+}
+
+/// A pending deposit or withdrawal larger than the configured queue threshold
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueueEntry {
+    /// Monotonically increasing request identifier
+    pub id: u64,
+    /// Address that owns the request
+    pub owner: Address,
+    /// Whether this is a deposit or a withdrawal
+    pub kind: QueueKind,
+    /// Deposit: asset units to deposit. Withdrawal: shares to burn.
+    pub amount: u64,
+    /// Asset value of the request when it was created. Shares queued for
+    /// withdrawal are priced at request time for display purposes only.
+    pub requested_assets: u64,
+    /// Timestamp the request was created
+    pub created_at: u64,
+    /// Earliest timestamp at which the request may be processed
+    pub processable_at: u64,
+}
+
+/// Aggregate view of both queues
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultQueueSummary {
+    /// Number of pending deposits
+    pub pending_deposits: u32,
+    /// Number of pending withdrawals
+    pub pending_withdrawals: u32,
+    /// Total assets awaiting deposit
+    pub queued_deposit_amount: u64,
+    /// Total shares awaiting withdrawal
+    pub queued_withdrawal_shares: u64,
+    /// Timestamp of the next queue processing window
+    pub next_processing_at: u64,
+    /// Minimum interval between processing windows
+    pub processing_interval: u64,
+}
+
+/// Result of a queue processing run
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueueProcessResult {
+    /// Deposits executed in this run
+    pub deposits_processed: u32,
+    /// Withdrawals executed in this run
+    pub withdrawals_processed: u32,
+    /// Assets added to the vault by processed deposits
+    pub deposited_amount: u64,
+    /// Assets paid out by processed withdrawals
+    pub withdrawn_amount: u64,
+    /// Timestamp the run executed at
+    pub processed_at: u64,
+}
+
 /// Snapshot of vault state
-#[derive(Debug, Clone)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VaultInfo {
     /// Underlying asset token address
     pub asset_token: Address,
@@ -44,52 +117,128 @@ pub struct VaultInfo {
     pub total_shares: u64,
     /// Total assets under management
     pub total_assets: u64,
-    /// Current share price (assets / shares)
-    pub share_price: f64,
-    /// Index of the currently active strategy, or -1 when none is registered
-    pub active_strategy_index: i32,
+    /// Current share price in basis points (10000 = 1.0)
+    pub share_price_bps: u32,
+    /// Currently active strategy index, `None` when no strategy is registered
+    pub active_strategy_index: Option<u32>,
     /// Total number of registered strategies
-    pub strategy_count: usize,
+    pub strategy_count: u32,
     /// Performance fee in basis points
     pub performance_fee_bps: u32,
     /// Whether the vault is paused
     pub paused: bool,
     /// Timestamp of last harvest
     pub last_harvest: u64,
+    /// Number of pending deposits
+    pub pending_deposits: u32,
+    /// Number of pending withdrawals
+    pub pending_withdrawals: u32,
 }
 
 /// Vault runtime statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VaultStats {
     pub total_assets: u64,
     pub total_shares: u64,
-    pub share_price: f64,
-    pub current_apy: f64,
+    /// Current share price in basis points (10000 = 1.0)
+    pub share_price_bps: u32,
+    /// Active strategy APY in basis points
+    pub current_apy_bps: u32,
     pub accumulated_fees: u64,
     pub last_harvest: u64,
     pub paused: bool,
+    pub pending_deposits: u32,
+    pub pending_withdrawals: u32,
 }
 
 /// Result of a deposit operation
-#[derive(Debug, Clone)]
+///
+/// When the deposit is queued, `amount_deposited` and `shares_minted` are `0`
+/// and `queued` is `true`; the request can be tracked with `request_id`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DepositResult {
     pub depositor: Address,
     pub amount_deposited: u64,
     pub shares_minted: u64,
-    pub share_price: f64,
+    pub share_price_bps: u32,
+    /// Whether the deposit was placed in the queue instead of executed
+    pub queued: bool,
+    /// Queue request id when `queued`
+    pub request_id: u64,
+    /// 1-based position in the deposit queue when `queued`
+    pub queue_position: u32,
+    /// Estimated processing timestamp when `queued`
+    pub estimated_processing_at: u64,
 }
 
 /// Result of a withdrawal operation
-#[derive(Debug, Clone)]
+///
+/// When the withdrawal is queued, `shares_burned` and `amount_withdrawn` are
+/// `0` and `queued` is `true`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WithdrawResult {
     pub withdrawer: Address,
     pub shares_burned: u64,
     pub amount_withdrawn: u64,
-    pub share_price: f64,
+    pub share_price_bps: u32,
+    /// Whether the withdrawal was placed in the queue instead of executed
+    pub queued: bool,
+    /// Queue request id when `queued`
+    pub request_id: u64,
+    /// 1-based position in the withdrawal queue when `queued`
+    pub queue_position: u32,
+    /// Estimated processing timestamp when `queued`
+    pub estimated_processing_at: u64,
+}
+
+/// Receipt for an emergency withdrawal
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmergencyWithdrawReceipt {
+    /// Depositor that exited
+    pub owner: Address,
+    /// Shares burned to exit
+    pub shares_burned: u64,
+    /// Assets transferred to the depositor (after penalty)
+    pub assets_withdrawn: u64,
+    /// Penalty retained by the vault and redistributed to remaining depositors
+    pub penalty_amount: u64,
+    /// Penalty applied, in basis points
+    pub penalty_bps: u32,
+    /// Timestamp of the withdrawal
+    pub timestamp: u64,
+}
+
+/// Receipt for a keeper-driven compounding run
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundReceipt {
+    /// Keeper that triggered the compound call
+    pub keeper: Address,
+    /// Strategy indices that were compounded
+    pub strategies: soroban_sdk::Vec<u32>,
+    /// Total rewards harvested before any deductions
+    pub gross_rewards: u64,
+    /// Assets paid to the keeper for covering gas costs
+    pub keeper_reward: u64,
+    /// Vault shares minted to the keeper for `keeper_reward`
+    pub keeper_reward_shares: u64,
+    /// Performance fee deducted for the treasury
+    pub performance_fee: u64,
+    /// Rewards reinvested into the vault
+    pub net_compounded: u64,
+    /// Total assets after compounding
+    pub new_total_assets: u64,
+    /// Timestamp of the compound call
+    pub timestamp: u64,
 }
 
 /// Result of a harvest operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HarvestResult {
     /// Total rewards collected from the strategy
     pub raw_rewards: u64,
@@ -104,7 +253,8 @@ pub struct HarvestResult {
 }
 
 /// Performance fee configuration
-#[derive(Debug, Clone)]
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PerformanceFeeConfig {
     /// Fee in basis points (e.g., 1000 = 10%)
     pub fee_bps: u32,
@@ -112,102 +262,34 @@ pub struct PerformanceFeeConfig {
     pub treasury: Address,
 }
 
-/// Reason a vault rebalance was triggered
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RebalanceReason {
-    /// A candidate strategy yields more than the active one by at least the threshold
-    YieldDifferential,
-    /// The active strategy's risk score moved by at least the threshold
-    RiskScoreChange,
-    /// A candidate strategy's utilization moved by at least the threshold
-    UtilizationChange,
-    /// An operator forced the rebalance, bypassing thresholds
-    ManualOverride,
+/// Keys for per-owner persistent entries
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum VaultDataKey {
+    /// Share balance owned by an address
+    Shares(Address),
 }
 
-/// Market inputs a rebalance decision is evaluated against
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketConditions {
-    /// Yield (APY, in basis points) of each registered strategy
-    pub strategy_yields_bps: Vec<u32>,
-    /// Risk score (0-10000, higher is riskier) of each registered strategy
-    pub strategy_risk_scores: Vec<u32>,
-    /// Utilization (0-10000) of each registered strategy
-    pub strategy_utilization: Vec<u32>,
+/// Events emitted by vault state-changing operations
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum VaultEvent {
+    /// Deposited: owner, assets, shares minted
+    DepositExecuted(Address, u64, u64),
+    /// Queued: owner, assets, request id
+    DepositQueued(Address, u64, u64),
+    /// Withdrawn: owner, shares burned, assets returned
+    WithdrawExecuted(Address, u64, u64),
+    /// Queued: owner, shares, request id
+    WithdrawQueued(Address, u64, u64),
+    /// Cancelled: owner, request id
+    QueueRequestCancelled(Address, u64),
+    /// Processed: deposits executed, withdrawals executed
+    QueueProcessed(u32, u32),
+    /// Emergency exit: owner, shares burned, assets paid, penalty, penalty bps
+    EmergencyWithdrawn(Address, u64, u64, u64, u32),
+    /// Compounded: keeper, gross rewards, keeper reward, net compounded
+    Compounded(Address, u64, u64, u64),
+    /// Pause state changed
+    PauseChanged(bool),
 }
-
-impl MarketConditions {
-    /// Empty market snapshot sized for `strategy_count` strategies
-    pub fn empty(strategy_count: usize) -> Self {
-        Self {
-            strategy_yields_bps: vec![0; strategy_count],
-            strategy_risk_scores: vec![0; strategy_count],
-            strategy_utilization: vec![0; strategy_count],
-        }
-    }
-}
-
-/// Thresholds that decide when a rebalance fires
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RebalanceThresholds {
-    /// Minimum yield improvement, in basis points, to trigger a rebalance
-    pub yield_differential_bps: u32,
-    /// Minimum change in risk score, in basis points, to trigger a rebalance
-    pub risk_score_change_bps: u32,
-    /// Minimum change in utilization, in basis points, to trigger a rebalance
-    pub utilization_change_bps: u32,
-    /// Whether yield-based rebalancing is enabled
-    pub yield_enabled: bool,
-    /// Whether risk-based rebalancing is enabled
-    pub risk_enabled: bool,
-    /// Whether utilization-based rebalancing is enabled
-    pub utilization_enabled: bool,
-}
-
-impl Default for RebalanceThresholds {
-    fn default() -> Self {
-        Self {
-            yield_differential_bps: 200,
-            risk_score_change_bps: 1_000,
-            utilization_change_bps: 2_000,
-            yield_enabled: true,
-            risk_enabled: true,
-            utilization_enabled: true,
-        }
-    }
-}
-
-/// A rebalance trigger that was evaluated, with the rationale behind it
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RebalanceTrigger {
-    /// Which condition fired
-    pub reason: RebalanceReason,
-    /// Strategy the vault would move into
-    pub target_strategy_index: u32,
-    /// Strategy the vault would move out of
-    pub current_strategy_index: u32,
-    /// Observed value for the active strategy (bps)
-    pub current_value: u32,
-    /// Observed value for the target strategy (bps)
-    pub target_value: u32,
-    /// Threshold that was crossed (bps)
-    pub threshold_bps: u32,
-    /// Human-readable rationale, e.g. `yield 850 -> 1200 exceeds 200bps`
-    pub rationale: String,
-    /// Whether the trigger actually fired
-    pub triggered: bool,
-}
-
-/// Result of a triggered rebalance
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RebalanceOutcome {
-    /// Trigger that caused the rebalance
-    pub trigger: RebalanceTrigger,
-    /// Strategy index the vault moved from
-    pub previous_strategy_index: u32,
-    /// Strategy index the vault moved into
-    pub new_strategy_index: u32,
-    /// Assets moved between strategies
-    pub assets_moved: u64,
-}
-
