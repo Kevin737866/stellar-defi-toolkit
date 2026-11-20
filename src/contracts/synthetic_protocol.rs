@@ -23,9 +23,9 @@
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use crate::types::synthetic::{
-    SyntheticAsset, SyntheticPosition, LiquidationEvent, OraclePrice, FeeDistribution,
-    RiskParameters, ProtocolStats, AssetProposal, AssetProposalType, AssetUpdateParams,
-    StakingPosition, MarketData, AssetType
+    DebtPool, DebtPoolEvent, DebtPoolKey, DebtShare, DebtSnapshot, FeeDistribution,
+    LiquidationEvent, OraclePrice, ProtocolStats, RiskParameters, StakingPosition,
+    SyntheticAsset, SyntheticPosition, DEBT_INDEX_SCALE,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -35,7 +35,6 @@ const MIN_COLLATERAL_RATIO: u32 = 15000;
 /// Maximum collateral ratio (1000%)
 const MAX_COLLATERAL_RATIO: u32 = 100000;
 /// Default minting fee (0.5%)
-const DEFAULT_MINTING_FEE_BPS: u32 = 50;
 /// Liquidation penalty (10%)
 const LIQUIDATION_PENALTY_BPS: u32 = 1000;
 /// Minimum oracle confidence (80%)
@@ -50,12 +49,12 @@ const PAUSED: Symbol = Symbol::short("PAUSED");
 const ASSETS: Symbol = Symbol::short("ASSETS");
 const POSITIONS: Symbol = Symbol::short("POSITIONS");
 const ORACLES: Symbol = Symbol::short("ORACLES");
-const RISK_PARAMS: Symbol = Symbol::short("RISK_PARAMS");
+const RISK_PARAMS: Symbol = Symbol::short("RISKPARAM");
 const FEE_DIST: Symbol = Symbol::short("FEE_DIST");
 const STAKING: Symbol = Symbol::short("STAKING");
-const PROTOCOL_STATS: Symbol = Symbol::short("PROTOCOL_STATS");
-const NEXT_ASSET_ID: Symbol = Symbol::short("NEXT_ASSET_ID");
-const NEXT_PROPOSAL_ID: Symbol = Symbol::short("NEXT_PROPOSAL_ID");
+const PROTOCOL_STATS: Symbol = Symbol::short("PSTATS");
+const NEXT_ASSET_ID: Symbol = Symbol::short("NEXTASSET");
+const NEXT_PROPOSAL_ID: Symbol = Symbol::short("NEXTPROP");
 
 // ─── Synthetic Protocol Contract ───────────────────────────────────────────
 
@@ -125,8 +124,22 @@ impl SyntheticProtocolContract {
         let staking: Map<Address, StakingPosition> = Map::new(&env);
         env.storage().instance().set(&STAKING, &staking);
 
+        // Shared debt pool (#156). Starts empty and is extended by every mint,
+        // burn, and price update.
+        env.storage().persistent().set(
+            &DebtPoolKey::Pool,
+            &DebtPool {
+                total_debt: 0,
+                settled_debt: 0,
+                total_synth_supply: 0,
+                debt_index: DEBT_INDEX_SCALE,
+                active_positions: 0,
+                last_updated: env.ledger().timestamp(),
+            },
+        );
+
         env.events().publish(
-            Symbol::short("SYNTHETIC_PROTOCOL_INITIALIZED"),
+            (Symbol::new(&env, "SYNTH_INIT"),),
             admin,
         );
     }
@@ -135,8 +148,9 @@ impl SyntheticProtocolContract {
     /// 
     /// # Arguments
     /// * `asset` - Synthetic asset configuration
-    pub fn list_asset(env: Env, asset: SyntheticAsset) {
-        Self::require_admin(&env);
+    /// Returns the id assigned to the new asset.
+    pub fn list_asset(env: Env, admin: Address, asset: SyntheticAsset) -> u32 {
+        Self::require_admin(&env, &admin);
         Self::require_not_paused(&env);
 
         // Validate asset parameters
@@ -160,15 +174,17 @@ impl SyntheticProtocolContract {
 
         // Initialize oracle list for this asset
         let mut oracles = Self::get_oracles(&env);
-        let oracle_list = Vec::new(&env);
+        let mut oracle_list = Vec::new(&env);
         oracle_list.push_back(asset.oracle_address);
         oracles.set(asset_id, oracle_list);
         env.storage().instance().set(&ORACLES, &oracles);
 
         env.events().publish(
-            Symbol::short("ASSET_LISTED"),
+            (Symbol::new(&env, "ASSET_LISTED"),),
             (asset_id, asset.symbol),
         );
+
+        asset_id
     }
 
     /// Mint synthetic tokens
@@ -190,13 +206,13 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         // Get asset info
-        let asset = Self::get_asset(&env, asset_id);
+        let asset = Self::get_asset(env.clone(), asset_id);
         if !asset.active {
             panic!("Asset is not active");
         }
 
         // Get current price
-        let price = Self::get_asset_price(&env, asset_id);
+        let price = Self::get_asset_price(env.clone(), asset_id);
         if price.confidence < MIN_ORACLE_CONFIDENCE {
             panic!("Oracle confidence too low");
         }
@@ -247,31 +263,23 @@ impl SyntheticProtocolContract {
             let mut collateral_deposits = Map::new(&env);
             collateral_deposits.set(collateral_token.clone(), collateral_amount);
             
-            let new_position = SyntheticPosition {
+            let now = env.ledger().timestamp();
+            let mut new_position = SyntheticPosition {
                 owner: user.clone(),
                 asset_id,
                 synthetic_amount: mint_amount,
                 collateral_deposits,
                 debt_amount: synthetic_amount,
-                collateral_ratio: Self::calculate_collateral_ratio(&env, &SyntheticPosition {
-                    owner: user.clone(),
-                    asset_id,
-                    synthetic_amount: mint_amount,
-                    collateral_deposits: collateral_deposits.clone(),
-                    debt_amount: synthetic_amount,
-                    collateral_ratio: 0,
-                    created_at: env.ledger().timestamp(),
-                    last_updated: env.ledger().timestamp(),
-                    liquidating: false,
-                }),
-                created_at: env.ledger().timestamp(),
-                last_updated: env.ledger().timestamp(),
+                collateral_ratio: 0,
+                created_at: now,
+                last_updated: now,
                 liquidating: false,
             };
+            new_position.collateral_ratio = Self::calculate_collateral_ratio(&env, &new_position);
             updated_positions.push_back(new_position);
         }
 
-        positions.set(user, updated_positions);
+        positions.set(user.clone(), updated_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Update asset totals
@@ -282,6 +290,9 @@ impl SyntheticProtocolContract {
         assets.set(asset_id, asset_info);
         env.storage().instance().set(&ASSETS, &assets);
 
+        // Track the new debt in the shared pool
+        Self::increase_debt(&env, user.clone(), asset_id, synthetic_amount);
+
         // Update protocol stats
         Self::update_protocol_stats(&env, mint_amount, collateral_value, 0);
 
@@ -289,7 +300,7 @@ impl SyntheticProtocolContract {
         Self::distribute_fees(&env, minting_fee);
 
         env.events().publish(
-            Symbol::short("SYNTHETIC_MINTED"),
+            (Symbol::new(&env, "SYNTH_MINTED"),),
             (user, asset_id, mint_amount, collateral_amount),
         );
     }
@@ -313,7 +324,7 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         let mut positions = Self::get_positions(&env);
-        let user_positions = positions.get(user.clone())
+        let mut user_positions = positions.get(user.clone())
             .unwrap_or_else(|| panic!("No positions found for user"));
 
         // Find and update position
@@ -351,7 +362,7 @@ impl SyntheticProtocolContract {
             panic!("Position not found for asset");
         }
 
-        positions.set(user, user_positions);
+        positions.set(user.clone(), user_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Update asset totals
@@ -362,12 +373,15 @@ impl SyntheticProtocolContract {
         assets.set(asset_id, asset_info);
         env.storage().instance().set(&ASSETS, &assets);
 
+        // Remove the repaid debt from the shared pool
+        Self::decrease_debt(&env, user.clone(), asset_id, synthetic_amount);
+
         // Update protocol stats
         Self::update_protocol_stats(&env, 0, 0, synthetic_amount);
 
         env.events().publish(
-            Symbol::short("SYNTHETIC_BURNED"),
-            (user, asset_id, synthetic_amount, collateral_amount),
+            (Symbol::new(&env, "SYNTH_BURNED"),),
+            (user.clone(), asset_id, synthetic_amount, collateral_amount),
         );
     }
 
@@ -386,7 +400,7 @@ impl SyntheticProtocolContract {
         Self::require_not_paused(&env);
 
         let risk_params = Self::get_risk_params(&env);
-        let positions = Self::get_positions(&env);
+        let mut positions = Self::get_positions(&env);
         let user_positions = positions.get(user.clone())
             .unwrap_or_else(|| panic!("No positions found for user"));
 
@@ -417,23 +431,23 @@ impl SyntheticProtocolContract {
         // Mark as liquidating
         position.liquidating = true;
         let mut updated_positions = user_positions;
-        updated_positions.set(position_index, position);
+        updated_positions.set(position_index, position.clone());
         positions.set(user.clone(), updated_positions);
         env.storage().instance().set(&POSITIONS, &positions);
 
         // Calculate liquidation
-        let price = Self::get_asset_price(&env, asset_id);
+        let price = Self::get_asset_price(env.clone(), asset_id);
         let debt_value = Self::calculate_usd_value(position.debt_amount, &price);
         let liquidation_penalty = (debt_value * LIQUIDATION_PENALTY_BPS as u64) / 10000;
         
         // Distribute collateral
         let total_collateral_value = Self::get_position_collateral_value(&env, &position);
         let liquidator_share = (total_collateral_value * 9000) / 10000; // 90% to liquidator
-        let user_share = total_collateral_value - liquidator_share;
+        let _user_share = total_collateral_value - liquidator_share;
 
         // Create liquidation event
-        let event_id = env.ledger().seq_num();
-        let liquidation_event = LiquidationEvent {
+        let event_id = env.ledger().timestamp();
+        let _liquidation_event = LiquidationEvent {
             event_id,
             position_owner: user.clone(),
             asset_id,
@@ -465,8 +479,11 @@ impl SyntheticProtocolContract {
                 break;
             }
         }
-        positions.set(user, final_positions);
+        positions.set(user.clone(), final_positions);
         env.storage().instance().set(&POSITIONS, &positions);
+
+        // The liquidated position no longer contributes debt to the pool
+        Self::decrease_debt(&env, user.clone(), asset_id, position.debt_amount);
 
         // Update protocol stats
         Self::update_protocol_stats(&env, 0, 0, position.synthetic_amount);
@@ -475,8 +492,8 @@ impl SyntheticProtocolContract {
         Self::distribute_fees(&env, liquidation_penalty);
 
         env.events().publish(
-            Symbol::short("POSITION_LIQUIDATED"),
-            (user, asset_id, liquidator, position.synthetic_amount),
+            (Symbol::new(&env, "POS_LIQUIDATED"),),
+            (user.clone(), asset_id, liquidator, position.synthetic_amount),
         );
     }
 
@@ -499,7 +516,7 @@ impl SyntheticProtocolContract {
         let asset_oracles = oracles.get(asset_id)
             .unwrap_or_else(|| panic!("Asset not found"));
 
-        let oracle_authorized = asset_oracles.iter().any(|addr| *addr == oracle_address);
+        let oracle_authorized = asset_oracles.iter().any(|addr| addr == oracle_address);
         if !oracle_authorized {
             panic!("Oracle not authorized for this asset");
         }
@@ -508,7 +525,6 @@ impl SyntheticProtocolContract {
             panic!("Confidence too low");
         }
 
-        // Update price
         let price_data = OraclePrice {
             asset_id,
             price,
@@ -517,10 +533,13 @@ impl SyntheticProtocolContract {
             timestamp: env.ledger().timestamp(),
             source_address: oracle_address,
         };
+        Self::save_price(&env, &price_data);
 
-        // In production, store price data with timestamp
+        // Revalue every position on this asset so pool shares stay accurate
+        Self::revalue_asset_debt(&env, asset_id);
+
         env.events().publish(
-            Symbol::short("PRICE_UPDATED"),
+            (Symbol::new(&env, "PRICE_UPDATED"),),
             (asset_id, price, confidence),
         );
     }
@@ -548,12 +567,12 @@ impl SyntheticProtocolContract {
         });
 
         staking_pos.staked_amount += amount;
-        staking.set(user, staking_pos);
+        staking.set(user.clone(), staking_pos);
         env.storage().instance().set(&STAKING, &staking);
 
         env.events().publish(
-            Symbol::short("STAKED"),
-            (user, amount),
+            (Symbol::new(&env, "STAKED"),),
+            (user.clone(), amount),
         );
     }
 
@@ -579,12 +598,12 @@ impl SyntheticProtocolContract {
         staking_pos.total_rewards_claimed += current_rewards;
         staking_pos.last_claim = env.ledger().timestamp();
 
-        staking.set(user, staking_pos);
+        staking.set(user.clone(), staking_pos);
         env.storage().instance().set(&STAKING, &staking);
 
         env.events().publish(
-            Symbol::short("UNSTAKED"),
-            (user, amount, current_rewards),
+            (Symbol::new(&env, "UNSTAKED"),),
+            (user.clone(), amount, current_rewards),
         );
     }
 
@@ -609,22 +628,86 @@ impl SyntheticProtocolContract {
     }
 
     /// Get current asset price
+    /// Latest price for an asset, falling back to the seeded quote until an
+    /// authorized oracle reports one.
     pub fn get_asset_price(env: Env, asset_id: u32) -> OraclePrice {
-        // In production, this would aggregate from multiple oracles
-        // For now, return mock price
-        OraclePrice {
+        Self::load_price(&env, asset_id).unwrap_or(OraclePrice {
             asset_id,
-            price: 100_000_000, // $1.00 with 6 decimals
+            price: 100_000_000, // $100.00 with 6 decimals
             decimals: 6,
             confidence: 9500, // 95% confidence
             timestamp: env.ledger().timestamp(),
-            source_address: Address::generate(&env),
-        }
+            source_address: env.current_contract_address(),
+        })
+    }
+
+    fn load_price(env: &Env, asset_id: u32) -> Option<OraclePrice> {
+        env.storage()
+            .persistent()
+            .get(&DebtPoolKey::Price(asset_id))
+    }
+
+    fn save_price(env: &Env, price: &OraclePrice) {
+        env.storage()
+            .persistent()
+            .set(&DebtPoolKey::Price(price.asset_id), price);
     }
 
     /// Get protocol statistics
     pub fn get_protocol_stats(env: Env) -> ProtocolStats {
-        Self::get_protocol_stats(&env)
+        Self::load_protocol_stats(&env)
+    }
+
+    // ─── Shared debt pool (#156) ─────────────────────────────────────────────
+
+    /// Current state of the global debt pool.
+    pub fn get_debt_pool(env: Env) -> DebtPool {
+        Self::load_debt_pool(&env)
+    }
+
+    /// Debt share owned by `owner` for `asset_id`, if the position has debt.
+    pub fn get_debt_share(env: Env, owner: Address, asset_id: u32) -> Option<DebtShare> {
+        Self::load_debt_share(&env, asset_id, owner)
+    }
+
+    /// Fraction of the global pool owned by `owner` for `asset_id`, in basis
+    /// points. Returns `0` when the position carries no debt.
+    pub fn debt_share_bps(env: Env, owner: Address, asset_id: u32) -> u32 {
+        let pool = Self::load_debt_pool(&env);
+        if pool.total_debt == 0 {
+            return 0;
+        }
+        let base_debt = match Self::load_debt_share(&env, asset_id, owner) {
+            Some(share) => share.base_debt,
+            None => return 0,
+        };
+        (base_debt.saturating_mul(10_000) / pool.total_debt) as u32
+    }
+
+    /// Take a snapshot of the pool for global settlement.
+    ///
+    /// The snapshot freezes `settled_debt` at the current total so settlement
+    /// can proceed against a fixed number while trading continues.
+    pub fn take_debt_snapshot(env: Env, admin: Address) -> DebtSnapshot {
+        Self::require_admin(&env, &admin);
+
+        let mut pool = Self::load_debt_pool(&env);
+        let snapshot = DebtSnapshot {
+            id: Self::next_snapshot_id(&env),
+            total_debt: pool.total_debt,
+            debt_index: pool.debt_index,
+            total_synth_supply: pool.total_synth_supply,
+            timestamp: env.ledger().timestamp(),
+        };
+        pool.settled_debt = pool.total_debt;
+        pool.last_updated = env.ledger().timestamp();
+        Self::save_debt_pool(&env, &pool);
+
+        env.events().publish(
+            (Symbol::new(&env, "DEBT_POOL"),),
+            DebtPoolEvent::DebtSnapshotTaken(snapshot.id, snapshot.total_debt),
+        );
+        snapshot
     }
 
     /// Get all listed assets
@@ -644,22 +727,24 @@ impl SyntheticProtocolContract {
     // ─── Admin Functions ─────────────────────────────────────────────────────
 
     /// Pause the protocol (admin only)
-    pub fn pause(env: Env) {
-        Self::require_admin(&env);
+    pub fn pause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
         env.storage().instance().set(&PAUSED, &true);
-        env.events().publish(Symbol::short("PAUSED"), true);
+        env.events().publish(
+            (Symbol::new(&env, "PAUSED"),), true);
     }
 
     /// Unpause the protocol (admin only)
-    pub fn unpause(env: Env) {
-        Self::require_admin(&env);
+    pub fn unpause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
         env.storage().instance().set(&PAUSED, &false);
-        env.events().publish(Symbol::short("PAUSED"), false);
+        env.events().publish(
+            (Symbol::new(&env, "PAUSED"),), false);
     }
 
     /// Update risk parameters (admin only)
-    pub fn update_risk_params(env: Env, new_params: RiskParameters) {
-        Self::require_admin(&env);
+    pub fn update_risk_params(env: Env, admin: Address, new_params: RiskParameters) {
+        Self::require_admin(&env, &admin);
         
         if new_params.global_min_ratio < MIN_COLLATERAL_RATIO {
             panic!("Invalid minimum ratio");
@@ -669,7 +754,8 @@ impl SyntheticProtocolContract {
         }
         
         env.storage().instance().set(&RISK_PARAMS, &new_params);
-        env.events().publish(Symbol::short("RISK_PARAMS_UPDATED"), ());
+        env.events().publish(
+            (Symbol::new(&env, "RISK_UPDATED"),), ());
     }
 
     // ─── Internal Helpers ─────────────────────────────────────────────────────
@@ -686,9 +772,9 @@ impl SyntheticProtocolContract {
         (amount * price.price) / (10_u64.pow(price.decimals))
     }
 
-    fn get_position_collateral_value(env: &Env, position: &SyntheticPosition) -> u64 {
+    fn get_position_collateral_value(_env: &Env, position: &SyntheticPosition) -> u64 {
         let mut total_value = 0u64;
-        for (collateral_token, amount) in position.collateral_deposits.iter() {
+        for (_collateral_token, amount) in position.collateral_deposits.iter() {
             // In production, get price for each collateral token
             // For now, assume 1:1 with USD
             total_value += amount;
@@ -707,7 +793,6 @@ impl SyntheticProtocolContract {
     }
 
     fn calculate_staking_rewards(env: &Env, staking_pos: &StakingPosition) -> u64 {
-        let fee_dist = Self::get_fee_distribution(env);
         let time_elapsed = env.ledger().timestamp() - staking_pos.staked_at;
         let rewards = (staking_pos.staked_amount * STAKING_REWARD_RATE_BPS as u64 * time_elapsed) 
             / (10000 * 365 * 24 * 3600);
@@ -715,9 +800,12 @@ impl SyntheticProtocolContract {
     }
 
     fn update_protocol_stats(env: &Env, minted: u64, collateral_added: u64, burned: u64) {
-        let mut stats = Self::get_protocol_stats(env);
-        stats.total_synthetic_supply += minted - burned;
-        stats.total_value_locked += collateral_added;
+        let mut stats = Self::load_protocol_stats(env);
+        stats.total_synthetic_supply = stats
+            .total_synthetic_supply
+            .saturating_add(minted)
+            .saturating_sub(burned);
+        stats.total_value_locked = stats.total_value_locked.saturating_add(collateral_added);
         
         // Recalculate average collateral ratio
         let positions = Self::get_positions(env);
@@ -726,7 +814,7 @@ impl SyntheticProtocolContract {
         
         for user_positions in positions.values() {
             for pos in user_positions.iter() {
-                total_ratio += Self::calculate_collateral_ratio(env, pos);
+                total_ratio += Self::calculate_collateral_ratio(env, &pos);
                 position_count += 1;
             }
         }
@@ -750,9 +838,10 @@ impl SyntheticProtocolContract {
         env.storage().instance().set(&FEE_DIST, &fee_dist);
     }
 
-    fn require_admin(env: &Env) {
-        let admin = env.storage().instance().get(&ADMIN).unwrap_optimized();
-        if env.current_contract_address() != admin {
+    fn require_admin(env: &Env, admin: &Address) {
+        admin.require_auth();
+        let stored: Address = env.storage().instance().get(&ADMIN).unwrap();
+        if &stored != admin {
             panic!("Not authorized");
         }
     }
@@ -785,11 +874,208 @@ impl SyntheticProtocolContract {
         env.storage().instance().get(&FEE_DIST).unwrap()
     }
 
-    fn get_protocol_stats(env: &Env) -> ProtocolStats {
+    fn load_protocol_stats(env: &Env) -> ProtocolStats {
         env.storage().instance().get(&PROTOCOL_STATS).unwrap()
     }
 
     fn get_staking(env: &Env) -> Map<Address, StakingPosition> {
         env.storage().instance().get(&STAKING).unwrap()
+    }
+
+    // ─── Shared debt pool (#156) ─────────────────────────────────────────────
+
+    fn load_debt_pool(env: &Env) -> DebtPool {
+        env.storage()
+            .persistent()
+            .get(&DebtPoolKey::Pool)
+            .unwrap_or(DebtPool {
+                total_debt: 0,
+                settled_debt: 0,
+                total_synth_supply: 0,
+                debt_index: DEBT_INDEX_SCALE,
+                active_positions: 0,
+                last_updated: env.ledger().timestamp(),
+            })
+    }
+
+    fn save_debt_pool(env: &Env, pool: &DebtPool) {
+        env.storage().persistent().set(&DebtPoolKey::Pool, pool);
+    }
+
+    /// Base-currency value of `synthetic_amount` units of an asset.
+    fn base_currency_value(amount: u64, price: &OraclePrice) -> u64 {
+        Self::calculate_usd_value(amount, price)
+    }
+
+    /// Record debt added to the pool and refresh the owner's share.
+    fn increase_debt(env: &Env, owner: Address, asset_id: u32, synthetic_amount: u64) {
+        let price = Self::get_asset_price(env.clone(), asset_id);
+        let added = Self::base_currency_value(synthetic_amount, &price);
+        let mut pool = Self::load_debt_pool(env);
+
+        let existing = Self::load_debt_share(env, asset_id, owner.clone());
+        let was_active = existing.is_some();
+        let previous = existing.map(|share| share.base_debt).unwrap_or(0);
+        let base_debt = previous + added;
+
+        pool.total_debt += added;
+        pool.total_synth_supply += synthetic_amount;
+        if !was_active {
+            pool.active_positions += 1;
+        }
+        pool.last_updated = env.ledger().timestamp();
+        // The index tracks debt per synth unit so shares can be recomputed
+        // after a burn or revaluation.
+        pool.debt_index = Self::index_for(&pool);
+
+        Self::store_debt_share(env, &mut pool, owner.clone(), asset_id, base_debt);
+        Self::save_debt_pool(env, &pool);
+        env.events().publish(
+            (Symbol::new(&env, "DEBT_POOL"),),
+            DebtPoolEvent::DebtIncreased(owner, asset_id, added, pool.total_debt),
+        );
+    }
+
+    /// Record debt repaid from the pool and refresh the owner's share.
+    fn decrease_debt(env: &Env, owner: Address, asset_id: u32, synthetic_amount: u64) {
+        let price = Self::get_asset_price(env.clone(), asset_id);
+        let removed = Self::base_currency_value(synthetic_amount, &price);
+        let mut pool = Self::load_debt_pool(env);
+
+        let existing = Self::load_debt_share(env, asset_id, owner.clone());
+        let had_share = existing.is_some();
+        let previous = existing.map(|share| share.base_debt).unwrap_or(0);
+        let base_debt = previous.saturating_sub(removed);
+
+        pool.total_debt = pool.total_debt.saturating_sub(removed);
+        pool.total_synth_supply = pool.total_synth_supply.saturating_sub(synthetic_amount);
+        if base_debt == 0 && had_share {
+            pool.active_positions = pool.active_positions.saturating_sub(1);
+            env.storage()
+                .persistent()
+                .remove(&DebtPoolKey::Share(asset_id, owner.clone()));
+        } else {
+            Self::store_debt_share(env, &mut pool, owner.clone(), asset_id, base_debt);
+        }
+        pool.last_updated = env.ledger().timestamp();
+        pool.debt_index = Self::index_for(&pool);
+
+        Self::save_debt_pool(env, &pool);
+        env.events().publish(
+            (Symbol::new(&env, "DEBT_POOL"),),
+            DebtPoolEvent::DebtDecreased(owner, asset_id, removed, pool.total_debt),
+        );
+    }
+
+    /// Revalue every position holding `asset_id` after a price update.
+    fn revalue_asset_debt(env: &Env, asset_id: u32) {
+        let mut pool = Self::load_debt_pool(env);
+        let old_total = pool.total_debt;
+        if old_total == 0 {
+            return;
+        }
+
+        let quote = Self::get_asset_price(env.clone(), asset_id);
+
+        let positions = Self::get_positions(env);
+        let mut new_total = 0u64;
+        let mut updates: Vec<(Address, u64)> = Vec::new(env);
+
+        for (owner, user_positions) in positions.iter() {
+            let mut owner_debt = 0u64;
+            for position in user_positions.iter() {
+                if position.asset_id == asset_id && position.debt_amount > 0 {
+                    owner_debt += Self::base_currency_value(position.debt_amount, &quote);
+                }
+            }
+            if owner_debt > 0 {
+                new_total += owner_debt;
+                updates.push_back((owner, owner_debt));
+            }
+        }
+
+        // Positions on other assets keep the value recorded at their last sync.
+        let other_assets = Self::other_assets_debt(env, asset_id);
+        new_total += other_assets;
+
+        pool.total_debt = new_total;
+        pool.debt_index = Self::index_for(&pool);
+        pool.last_updated = env.ledger().timestamp();
+        Self::save_debt_pool(env, &pool);
+
+        for (owner, base_debt) in updates.iter() {
+            Self::store_debt_share(env, &mut pool, owner, asset_id, base_debt);
+        }
+        Self::save_debt_pool(env, &pool);
+
+        env.events().publish(
+            (Symbol::new(&env, "DEBT_POOL"),),
+            DebtPoolEvent::DebtRevalued(old_total, new_total),
+        );
+    }
+
+    /// Total debt held by positions on assets other than `asset_id`.
+    fn other_assets_debt(env: &Env, asset_id: u32) -> u64 {
+        let positions = Self::get_positions(env);
+        let mut total = 0u64;
+        for (_owner, user_positions) in positions.iter() {
+            for position in user_positions.iter() {
+                if position.asset_id != asset_id && position.debt_amount > 0 {
+                    let price = Self::get_asset_price(env.clone(), position.asset_id);
+                    total += Self::base_currency_value(position.debt_amount, &price);
+                }
+            }
+        }
+        total
+    }
+
+    fn index_for(pool: &DebtPool) -> u64 {
+        if pool.total_synth_supply == 0 {
+            return DEBT_INDEX_SCALE;
+        }
+        pool.total_debt.saturating_mul(DEBT_INDEX_SCALE) / pool.total_synth_supply
+    }
+
+    fn load_debt_share(env: &Env, asset_id: u32, owner: Address) -> Option<DebtShare> {
+        env.storage()
+            .persistent()
+            .get(&DebtPoolKey::Share(asset_id, owner))
+    }
+
+    fn store_debt_share(
+        env: &Env,
+        pool: &mut DebtPool,
+        owner: Address,
+        asset_id: u32,
+        base_debt: u64,
+    ) {
+        let share_bps = if pool.total_debt == 0 {
+            0
+        } else {
+            (base_debt.saturating_mul(10_000) / pool.total_debt) as u32
+        };
+        let share = DebtShare {
+            owner: owner.clone(),
+            asset_id,
+            base_debt,
+            debt_index_entry: pool.debt_index,
+            share_bps,
+            updated_at: env.ledger().timestamp(),
+        };
+        env.storage()
+            .persistent()
+            .set(&DebtPoolKey::Share(asset_id, owner), &share);
+    }
+
+    fn next_snapshot_id(env: &Env) -> u64 {
+        let id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DebtPoolKey::SnapshotCount)
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&DebtPoolKey::SnapshotCount, &(id + 1));
+        id + 1
     }
 }

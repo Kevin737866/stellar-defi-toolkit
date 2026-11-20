@@ -1,9 +1,9 @@
 //! Type definitions for Synthetic Asset Protocol
 
-use soroban_sdk::{Address, Map, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Map, Symbol};
 
 /// Synthetic asset information and configuration
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct SyntheticAsset {
     /// Unique identifier for the synthetic asset
@@ -35,7 +35,7 @@ pub struct SyntheticAsset {
 }
 
 /// Types of underlying assets
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub enum AssetType {
     /// Stock/Equity
@@ -135,7 +135,7 @@ pub struct FeeDistribution {
 }
 
 /// Risk parameters for the protocol
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct RiskParameters {
     /// Global minimum collateral ratio
@@ -199,34 +199,23 @@ pub struct AssetProposal {
 }
 
 /// Types of asset governance proposals
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub enum AssetProposalType {
     /// List new synthetic asset
-    ListAsset {
-        asset: SyntheticAsset,
-    },
-    /// Update asset parameters
-    UpdateAsset {
-        asset_id: u32,
-        new_params: AssetUpdateParams,
-    },
+    ListAsset(SyntheticAsset),
+    /// Update asset parameters: asset id, new parameters
+    UpdateAsset(u32, AssetUpdateParams),
     /// Delist asset
-    DelistAsset {
-        asset_id: u32,
-    },
+    DelistAsset(u32),
     /// Update risk parameters
-    UpdateRiskParams {
-        new_params: RiskParameters,
-    },
+    UpdateRiskParams(RiskParameters),
     /// Emergency pause
-    EmergencyPause {
-        reason: Symbol,
-    },
+    EmergencyPause(Symbol),
 }
 
 /// Asset update parameters
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct AssetUpdateParams {
     /// New minimum collateral ratio
@@ -278,3 +267,93 @@ pub struct MarketData {
     /// Last updated
     pub last_updated: u64,
 }
+
+/// Global debt pool tracking all synthetic debt denominated in the base
+/// currency (USD, 6 decimals).
+///
+/// Every mint or burn adjusts the pool, and every price update revalues the
+/// outstanding synth debt. Each position's share of the pool is derived from
+/// the per-position `DebtShare` record, which stores the base-currency value of
+/// that position's debt as of the last time the pool touched it.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebtPool {
+    /// Total synth debt valued in base currency
+    pub total_debt: u64,
+    /// Total debt recorded at the last global settlement snapshot
+    pub settled_debt: u64,
+    /// Synthetic supply represented by the pool, in synthetic units
+    pub total_synth_supply: u64,
+    /// Cumulative debt index, scaled by `DEBT_INDEX_SCALE`. Every position's
+    /// share of the pool is `position_debt_index_value / debt_index`.
+    pub debt_index: u64,
+    /// Number of positions currently contributing debt
+    pub active_positions: u32,
+    /// Timestamp of the last update
+    pub last_updated: u64,
+}
+
+/// Per-position bookkeeping inside the debt pool
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebtShare {
+    /// Owner of the position
+    pub owner: Address,
+    /// Asset the position is denominated in
+    pub asset_id: u32,
+    /// Debt in base currency at the last sync
+    pub base_debt: u64,
+    /// Debt index value when `base_debt` was recorded
+    pub debt_index_entry: u64,
+    /// Fraction of the pool owned by this position, in basis points
+    pub share_bps: u32,
+    /// Last time the share was written
+    pub updated_at: u64,
+}
+
+/// Immutable record of a global settlement calculation
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebtSnapshot {
+    /// Snapshot sequence number
+    pub id: u64,
+    /// Total pool debt in base currency
+    pub total_debt: u64,
+    /// Debt index at snapshot time
+    pub debt_index: u64,
+    /// Synthetic supply backing the pool
+    pub total_synth_supply: u64,
+    /// Timestamp the snapshot was taken
+    pub timestamp: u64,
+}
+
+/// Debt pool lifecycle events
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum DebtPoolEvent {
+    /// Debt added: owner, asset id, base-currency amount, new total debt
+    DebtIncreased(Address, u32, u64, u64),
+    /// Debt removed: owner, asset id, base-currency amount, new total debt
+    DebtDecreased(Address, u32, u64, u64),
+    /// Pool revalued after a price change: old total, new total
+    DebtRevalued(u64, u64),
+    /// Global settlement snapshot taken: snapshot id, total debt
+    DebtSnapshotTaken(u64, u64),
+}
+
+/// Keys for debt pool storage
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum DebtPoolKey {
+    /// Singleton pool record
+    Pool,
+    /// Per-position share, keyed by asset and owner
+    Share(u32, Address),
+    /// Number of settlement snapshots taken so far
+    SnapshotCount,
+    /// Latest oracle price reported for an asset
+    Price(u32),
+}
+
+/// Scale applied to the debt index so integer division keeps precision
+pub const DEBT_INDEX_SCALE: u64 = 1_000_000;
