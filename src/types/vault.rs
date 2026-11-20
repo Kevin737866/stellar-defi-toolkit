@@ -8,6 +8,11 @@ use soroban_sdk::{contracttype, Address, Symbol};
 /// Strategy type classification
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
+use serde::{Deserialize, Serialize};
+use soroban_sdk::{Address, Symbol};
+
+/// Strategy type classification
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrategyType {
     /// AMM liquidity provision
     LiquidityPool,
@@ -29,8 +34,8 @@ pub struct VaultStrategy {
     pub contract_address: Address,
     /// Strategy classification
     pub strategy_type: StrategyType,
-    /// Estimated annual percentage yield, in basis points (1200 = 12%)
-    pub estimated_apy_bps: u32,
+    /// Estimated annual percentage yield (basis points)
+    pub estimated_apy: u32,
     /// Amount currently allocated to this strategy
     pub allocated_amount: u64,
     /// Whether this strategy is currently active

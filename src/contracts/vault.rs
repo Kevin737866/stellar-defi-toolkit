@@ -22,6 +22,24 @@
 //!
 //! Shares are tracked in a per-owner ledger (`SHARES`), so a withdrawal is
 //! always capped by the shares the caller actually owns.
+//! ## Access Control
+//! - **Admin**: `add_strategy`, `switch_strategy`, `optimize_strategy`,
+//!   `collect_fees`, `pause`, `unpause`, `emergency_exit`, `set_performance_fee`,
+//!   `set_treasury` — `require_admin()` only checks that an admin has been
+//!   configured, not that the caller *is* the admin (the source even flags this:
+//!   `// In production: verify env.invoker() == self.admin`). See
+//!   `docs/ACCESS_CONTROL_MATRIX.md`.
+//! - **Keeper**: `harvest` — open to any caller, rate-limited only by
+//!   `MIN_HARVEST_INTERVAL`, not by auth.
+//! - **User**: `deposit`, `withdraw` — no identity check at all, compounded by the
+//!   lack of a per-user share ledger (only a single aggregate `total_shares`).
+
+use soroban_sdk::{contract, Address, Env};
+use crate::types::vault::{
+    VaultInfo, VaultStrategy, VaultStats, HarvestResult, DepositResult,
+    WithdrawResult, MarketConditions, RebalanceOutcome, RebalanceReason,
+    RebalanceThresholds, RebalanceTrigger,
+};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
@@ -85,6 +103,36 @@ const LAST_COMPOUND: Symbol = Symbol::short("LASTCMP");
 /// Automated yield farming vault with multi-strategy optimisation.
 #[contract]
 pub struct YieldVaultContract;
+pub struct YieldVaultContract {
+    /// Underlying asset token address (what users deposit)
+    pub asset_token: Address,
+    /// Vault share token address (SEP-41 compliant)
+    pub share_token: Address,
+    /// Total shares issued
+    pub total_shares: u64,
+    /// Total assets under management
+    pub total_assets: u64,
+    /// Active strategies
+    pub strategies: Vec<VaultStrategy>,
+    /// Active strategy index
+    pub active_strategy_index: u32,
+    /// Performance fee in basis points
+    pub performance_fee_bps: u32,
+    /// Treasury address for fee collection
+    pub treasury: Option<Address>,
+    /// Admin address
+    pub admin: Option<Address>,
+    /// Whether the vault is paused
+    pub paused: bool,
+    /// Last harvest timestamp
+    pub last_harvest: u64,
+    /// Accumulated uncollected fees
+    pub accumulated_fees: u64,
+    /// Rebalance history, most recent last
+    pub rebalance_log: Vec<RebalanceOutcome>,
+    /// Contract address
+    pub address: Option<Address>,
+}
 
 #[contractimpl]
 impl YieldVaultContract {
@@ -93,6 +141,36 @@ impl YieldVaultContract {
     /// Initialize the vault.
     ///
     /// `performance_fee_bps` must not exceed [`MAX_PERFORMANCE_FEE_BPS`].
+    /// Create a new yield vault
+    pub fn new(_env: &Env, asset_token: Address, share_token: Address) -> Self {
+        Self {
+            asset_token,
+            share_token,
+            total_shares: 0,
+            total_assets: 0,
+            strategies: Vec::new(),
+            active_strategy_index: 0,
+            performance_fee_bps: DEFAULT_PERFORMANCE_FEE_BPS,
+            treasury: None,
+            admin: None,
+            paused: false,
+            last_harvest: 0,
+            accumulated_fees: 0,
+            rebalance_log: Vec::new(),
+            address: None,
+        }
+    }
+
+    /// Create from std string
+    pub fn new_std(env: &Env, _asset_token: String, _share_token: String) -> Self {
+        Self::new(
+            env,
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
+            Address::from_string(&soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")),
+        )
+    }
+
+    /// Initialize vault with admin and treasury
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -173,6 +251,42 @@ impl YieldVaultContract {
         let optimal = Self::optimal_strategy_index(&strategies);
         if optimal == active || strategies.is_empty() {
             return active;
+        self.strategies.push(strategy);
+        Ok((self.strategies.len() - 1) as u32)
+    }
+
+    /// Switch to a different strategy (admin only)
+    ///
+    /// Withdraws all funds from the current strategy, then deposits into the new one.
+    pub fn switch_strategy(&mut self, new_index: u32) -> Result<(), String> {
+        self.require_admin()?;
+        self.require_not_paused()?;
+ 
+        if new_index as usize >= self.strategies.len() {
+            return Err("Strategy index out of bounds".to_string());
+        }
+ 
+        if new_index == self.active_strategy_index {
+            return Err("Already using this strategy".to_string());
+        }
+ 
+        // 1. Harvest pending rewards from current strategy before switching
+        let _ = self.harvest_from_strategy(self.active_strategy_index);
+ 
+        // 2. Withdraw all assets from current strategy
+        let withdrawn = self.withdraw_from_strategy(self.active_strategy_index, self.total_assets)?;
+ 
+        // 3. Deposit into new strategy
+        self.deposit_into_strategy(new_index, withdrawn)?;
+ 
+        self.active_strategy_index = new_index;
+        Ok(())
+    }
+
+    /// Get the best strategy by estimated APY
+    pub fn get_optimal_strategy_index(&self) -> u32 {
+        if self.strategies.is_empty() {
+            return 0;
         }
 
         let current_apy = strategies
@@ -238,6 +352,17 @@ impl YieldVaultContract {
             estimated_processing_at: 0,
         }
     }
+        let current_apy = self
+            .strategies
+            .get(self.active_strategy_index as usize)
+            .map(|s| s.estimated_apy)
+            .unwrap_or(0);
+
+        let optimal_apy = self
+            .strategies
+            .get(optimal as usize)
+            .map(|s| s.estimated_apy)
+            .unwrap_or(0);
 
     /// Withdraw assets by burning shares.
     ///
@@ -316,6 +441,189 @@ impl YieldVaultContract {
         Self::save_queue(&env, &queue);
         Self::emit(&env, VaultEvent::QueueRequestCancelled(owner, request_id));
     }
+    // ─── Rebalancing Triggers ─────────────────────────────────────────────────
+
+    /// Evaluate every enabled market-condition trigger without moving funds
+    ///
+    /// Returns one entry per condition that was checked. Entries with
+    /// `triggered == false` record why the threshold was not crossed, so callers
+    /// can log a full rationale either way.
+    pub fn evaluate_rebalance(
+        &self,
+        conditions: &MarketConditions,
+        thresholds: &RebalanceThresholds,
+    ) -> Result<Vec<RebalanceTrigger>, String> {
+        if self.strategies.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let strategy_count = self.strategies.len();
+        Self::validate_conditions(conditions, strategy_count)?;
+
+        let current = self.active_strategy_index as usize;
+        let current_yield = Self::series_value(&conditions.strategy_yields_bps, current);
+        let current_risk = Self::series_value(&conditions.strategy_risk_scores, current);
+        let current_util = Self::series_value(&conditions.strategy_utilization, current);
+
+        let mut triggers = Vec::new();
+
+        for candidate in 0..strategy_count {
+            if candidate == current {
+                continue;
+            }
+
+            let candidate_yield = Self::series_value(&conditions.strategy_yields_bps, candidate);
+            let candidate_risk = Self::series_value(&conditions.strategy_risk_scores, candidate);
+            let candidate_util = Self::series_value(&conditions.strategy_utilization, candidate);
+
+            if thresholds.yield_enabled {
+                let delta = candidate_yield.saturating_sub(current_yield);
+                triggers.push(RebalanceTrigger {
+                    reason: RebalanceReason::YieldDifferential,
+                    target_strategy_index: candidate as u32,
+                    current_strategy_index: current as u32,
+                    current_value: current_yield,
+                    target_value: candidate_yield,
+                    threshold_bps: thresholds.yield_differential_bps,
+                    rationale: format!(
+                        "yield {} -> {}bps delta {}bps vs threshold {}bps",
+                        current_yield, candidate_yield, delta, thresholds.yield_differential_bps
+                    ),
+                    triggered: delta >= thresholds.yield_differential_bps,
+                });
+            }
+
+            if thresholds.risk_enabled {
+                let delta = current_risk.saturating_sub(candidate_risk);
+                triggers.push(RebalanceTrigger {
+                    reason: RebalanceReason::RiskScoreChange,
+                    target_strategy_index: candidate as u32,
+                    current_strategy_index: current as u32,
+                    current_value: current_risk,
+                    target_value: candidate_risk,
+                    threshold_bps: thresholds.risk_score_change_bps,
+                    rationale: format!(
+                        "risk {} -> {}bps reduction {}bps vs threshold {}bps",
+                        current_risk, candidate_risk, delta, thresholds.risk_score_change_bps
+                    ),
+                    triggered: delta >= thresholds.risk_score_change_bps,
+                });
+            }
+
+            if thresholds.utilization_enabled {
+                let delta = current_util.saturating_sub(candidate_util);
+                triggers.push(RebalanceTrigger {
+                    reason: RebalanceReason::UtilizationChange,
+                    target_strategy_index: candidate as u32,
+                    current_strategy_index: current as u32,
+                    current_value: current_util,
+                    target_value: candidate_util,
+                    threshold_bps: thresholds.utilization_change_bps,
+                    rationale: format!(
+                        "utilization {} -> {}bps reduction {}bps vs threshold {}bps",
+                        current_util, candidate_util, delta, thresholds.utilization_change_bps
+                    ),
+                    triggered: delta >= thresholds.utilization_change_bps,
+                });
+            }
+        }
+
+        Ok(triggers)
+    }
+
+    /// Rebalance into the first strategy whose condition crosses its threshold
+    ///
+    /// Triggers are evaluated in priority order: yield, then risk, then
+    /// utilization. Returns `Ok(None)` when no threshold is crossed.
+    pub fn rebalance(
+        &mut self,
+        conditions: &MarketConditions,
+        thresholds: &RebalanceThresholds,
+    ) -> Result<Option<RebalanceOutcome>, String> {
+        self.require_admin()?;
+        self.require_not_paused()?;
+
+        let triggers = self.evaluate_rebalance(conditions, thresholds)?;
+        let trigger = match triggers.iter().find(|t| t.triggered) {
+            Some(t) => t.clone(),
+            None => return Ok(None),
+        };
+
+        let outcome = self.apply_rebalance(&trigger)?;
+        Ok(Some(outcome))
+    }
+
+    /// Force a rebalance into `target_index`, bypassing every threshold
+    ///
+    /// Manual override is always available to the admin, including when market
+    /// conditions would not otherwise justify a move.
+    pub fn manual_rebalance(&mut self, target_index: u32) -> Result<RebalanceOutcome, String> {
+        self.require_admin()?;
+        self.require_not_paused()?;
+
+        if target_index as usize >= self.strategies.len() {
+            return Err("Strategy index out of bounds".to_string());
+        }
+        if target_index == self.active_strategy_index {
+            return Err("Already using this strategy".to_string());
+        }
+
+        let current = self.active_strategy_index;
+        let trigger = RebalanceTrigger {
+            reason: RebalanceReason::ManualOverride,
+            target_strategy_index: target_index,
+            current_strategy_index: current,
+            current_value: Self::strategy_yield(&self.strategies, current as usize),
+            target_value: Self::strategy_yield(&self.strategies, target_index as usize),
+            threshold_bps: 0,
+            rationale: format!("manual override {} -> {}", current, target_index),
+            triggered: true,
+        };
+
+        self.apply_rebalance(&trigger)
+    }
+
+    /// Rebalance log, most recent last
+    pub fn get_rebalance_log(&self) -> Vec<RebalanceOutcome> {
+        self.rebalance_log.clone()
+    }
+
+    fn apply_rebalance(&mut self, trigger: &RebalanceTrigger) -> Result<RebalanceOutcome, String> {
+        let previous = self.active_strategy_index;
+        let assets_moved = self.total_assets;
+
+        self.switch_strategy(trigger.target_strategy_index)?;
+
+        let outcome = RebalanceOutcome {
+            trigger: trigger.clone(),
+            previous_strategy_index: previous,
+            new_strategy_index: self.active_strategy_index,
+            assets_moved,
+        };
+        self.rebalance_log.push(outcome.clone());
+
+        Ok(outcome)
+    }
+
+    fn validate_conditions(conditions: &MarketConditions, strategy_count: usize) -> Result<(), String> {
+        if conditions.strategy_yields_bps.len() != strategy_count
+            || conditions.strategy_risk_scores.len() != strategy_count
+            || conditions.strategy_utilization.len() != strategy_count
+        {
+            return Err("Market conditions length must match strategy count".to_string());
+        }
+        Ok(())
+    }
+
+    fn series_value(series: &[u32], index: usize) -> u32 {
+        series.get(index).copied().unwrap_or(0)
+    }
+
+    fn strategy_yield(strategies: &[VaultStrategy], index: usize) -> u32 {
+        strategies.get(index).map(|s| s.estimated_apy).unwrap_or(0)
+    }
+
+    // ─── Deposit / Withdrawal ─────────────────────────────────────────────────
 
     /// Process every pending request whose delay has elapsed.
     ///
@@ -721,6 +1029,38 @@ impl YieldVaultContract {
         Self::require_admin(&env, &admin);
         if Self::paused(&env) {
             panic!("vault already paused");
+    /// Get vault info snapshot
+    pub fn get_info(&self, _env: &Env) -> VaultInfo {
+        VaultInfo {
+            asset_token: self.asset_token.clone(),
+            share_token: self.share_token.clone(),
+            total_shares: self.total_shares,
+            total_assets: self.total_assets,
+            share_price: self.get_share_price(),
+            active_strategy_index: if self.strategies.len() > 0 { self.active_strategy_index as i32 } else { -1 },
+            strategy_count: self.strategies.len(),
+            performance_fee_bps: self.performance_fee_bps,
+            paused: self.paused,
+            last_harvest: self.last_harvest,
+        }
+    }
+
+    /// Get vault statistics
+    pub fn get_stats(&self) -> VaultStats {
+        let current_apy = self
+            .strategies
+            .get(self.active_strategy_index as usize)
+            .map(|s| s.estimated_apy)
+            .unwrap_or(0);
+
+        VaultStats {
+            total_assets: self.total_assets,
+            total_shares: self.total_shares,
+            share_price: self.get_share_price(),
+            current_apy: current_apy as f64,
+            accumulated_fees: self.accumulated_fees,
+            last_harvest: self.last_harvest,
+            paused: self.paused,
         }
         env.storage().instance().set(&PAUSED, &true);
         Self::emit(&env, VaultEvent::PauseChanged(true));
@@ -830,6 +1170,43 @@ impl YieldVaultContract {
     /// Shares owned by `owner`.
     pub fn balance_of(env: Env, owner: Address) -> u64 {
         Self::shares_of(&env, &owner)
+    /// Simulate depositing into a strategy (cross-contract call in production)
+    fn deposit_into_strategy(&self, index: u32, _amount: u64) -> Result<(), String> {
+        if index as usize >= self.strategies.len() {
+            return Err("Strategy index out of bounds".to_string());
+        }
+        // In production: invoke strategy contract via cross-contract call
+        // soroban_sdk::invoke_contract(&strategy.contract_address, "deposit", (amount,))
+        Ok(())
+    }
+
+    /// Simulate withdrawing from a strategy (cross-contract call in production)
+    fn withdraw_from_strategy(&self, index: u32, amount: u64) -> Result<u64, String> {
+        if index as usize >= self.strategies.len() {
+            return Err("Strategy index out of bounds".to_string());
+        }
+        // In production: invoke strategy contract via cross-contract call
+        // soroban_sdk::invoke_contract(&strategy.contract_address, "withdraw", (amount,))
+        Ok(amount)
+    }
+
+    /// Simulate harvesting rewards from a strategy (cross-contract call in production)
+    fn harvest_from_strategy(&self, index: u32) -> Result<u64, String> {
+        if index as usize >= self.strategies.len() {
+            return Ok(0);
+        }
+        let strategy = self.strategies.get(index as usize).unwrap();
+        // Estimate rewards based on APY and time since last harvest
+        let elapsed = self
+            .get_current_timestamp()
+            .saturating_sub(self.last_harvest);
+        let annual_rewards =
+            (self.total_assets as f64 * (strategy.estimated_apy as f64 / 10000.0)) as u64;
+        let rewards = annual_rewards
+            .checked_mul(elapsed)
+            .unwrap_or(0)
+            / (365 * 24 * 3600);
+        Ok(rewards)
     }
 
     /// Registered strategies.
@@ -888,6 +1265,12 @@ impl YieldVaultContract {
             price as u32
         }
     }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::vault::{StrategyType, VaultStrategy};
+    use soroban_sdk::{Address, Env};
+    use soroban_sdk::testutils::Address as _;
 
     fn mint_shares(env: &Env, owner: &Address, shares: u64) {
         if shares == 0 {

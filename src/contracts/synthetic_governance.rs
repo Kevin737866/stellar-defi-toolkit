@@ -472,7 +472,7 @@ impl SyntheticGovernanceContract {
         let emergency_proposal = AssetProposal {
             proposal_id,
             proposer: env.storage().instance().get(&ADMIN).unwrap(),
-            proposal_type: AssetProposalType::EmergencyPause { reason },
+            proposal_type: AssetProposalType::EmergencyPause(reason),
             asset_id: None,
             details: Symbol::short("EMERGENCY_PAUSE"),
             created_at: env.ledger().timestamp(),
@@ -496,35 +496,35 @@ impl SyntheticGovernanceContract {
 
     fn execute_proposal_logic(env: &Env, proposal: &AssetProposal) {
         match &proposal.proposal_type {
-            AssetProposalType::ListAsset { asset } => {
+            AssetProposalType::ListAsset(asset) => {
                 // In production, call synthetic protocol to list asset
                 env.events().publish(
                     Symbol::short("ASSET_LISTING_APPROVED"),
                     (proposal.asset_id.unwrap_or(0), asset.symbol),
                 );
             },
-            AssetProposalType::UpdateAsset { asset_id, new_params } => {
+            AssetProposalType::UpdateAsset(asset_id, new_params) => {
                 // In production, call synthetic protocol to update asset
                 env.events().publish(
                     Symbol::short("ASSET_UPDATE_APPROVED"),
                     (asset_id, new_params.min_collateral_ratio.unwrap_or(0)),
                 );
             },
-            AssetProposalType::DelistAsset { asset_id } => {
+            AssetProposalType::DelistAsset(asset_id) => {
                 // In production, call synthetic protocol to delist asset
                 env.events().publish(
                     Symbol::short("ASSET_DELISTED"),
                     asset_id,
                 );
             },
-            AssetProposalType::UpdateRiskParams { new_params } => {
+            AssetProposalType::UpdateRiskParams(new_params) => {
                 // In production, call synthetic protocol to update risk params
                 env.events().publish(
                     Symbol::short("RISK_PARAMS_UPDATED"),
                     (),
                 );
             },
-            AssetProposalType::EmergencyPause { reason } => {
+            AssetProposalType::EmergencyPause(reason) => {
                 // In production, pause the synthetic protocol
                 env.events().publish(
                     Symbol::short("EMERGENCY_PAUSE_EXECUTED"),
@@ -536,9 +536,9 @@ impl SyntheticGovernanceContract {
 
     fn extract_asset_id(proposal_type: &AssetProposalType) -> Option<u32> {
         match proposal_type {
-            AssetProposalType::ListAsset { asset } => Some(asset.asset_id),
-            AssetProposalType::UpdateAsset { asset_id, .. } => Some(*asset_id),
-            AssetProposalType::DelistAsset { asset_id } => Some(*asset_id),
+            AssetProposalType::ListAsset(asset) => Some(asset.asset_id),
+            AssetProposalType::UpdateAsset(asset_id, _) => Some(*asset_id),
+            AssetProposalType::DelistAsset(asset_id) => Some(*asset_id),
             _ => None,
         }
     }

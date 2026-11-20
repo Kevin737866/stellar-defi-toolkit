@@ -16,7 +16,8 @@ use stellar_defi_toolkit::contracts::{
     SyntheticProtocolContract, OracleManagerContract, SyntheticGovernanceContract, PositionManagerContract
 };
 use stellar_defi_toolkit::types::synthetic::{
-    SyntheticAsset, AssetType, AssetProposalType, BatchOperationType, AlertSeverity
+    SyntheticAsset, AssetType, AssetProposalType, BatchOperationType, AlertSeverity,
+    ExchangeRequest, MintRequest, RedemptionRequest,
 };
 
 fn main() {
@@ -110,6 +111,9 @@ impl SyntheticProtocolDemo {
         
         // 8. Risk management demonstration
         self.demonstrate_risk_management();
+        
+        // 9. Mint, redeem and exchange synths
+        self.demonstrate_synth_lifecycle();
         
         println!("✅ Synthetic Asset Protocol Demo completed successfully!");
     }
@@ -221,19 +225,19 @@ impl SyntheticProtocolDemo {
         let stsla_proposal_id = SyntheticGovernanceContract::create_proposal(
             self.env.clone(),
             self.admin,
-            AssetProposalType::ListAsset { asset: stsla_asset },
+            AssetProposalType::ListAsset(stsla_asset),
         );
         
         let sbtc_proposal_id = SyntheticGovernanceContract::create_proposal(
             self.env.clone(),
             self.admin,
-            AssetProposalType::ListAsset { asset: sbtc_asset },
+            AssetProposalType::ListAsset(sbtc_asset),
         );
         
         let sgold_proposal_id = SyntheticGovernanceContract::create_proposal(
             self.env.clone(),
             self.admin,
-            AssetProposalType::ListAsset { asset: sgold_asset },
+            AssetProposalType::ListAsset(sgold_asset),
         );
         
         println!("   📜 Created 3 asset listing proposals: sTSLA ({}), sBTC ({}), sGOLD ({})", 
@@ -497,6 +501,85 @@ impl SyntheticProtocolDemo {
         
         // In a real system, this would call:
         // SyntheticGovernanceContract::execute_proposal(env, executor, proposal_id)
+    }
+
+    /// Demonstrate the mint -> redeem -> exchange lifecycle
+    ///
+    /// Shows how a user backs a synth with collateral at the oracle price, burns
+    /// part of it to reclaim collateral, and swaps the rest into another synth.
+    fn demonstrate_synth_lifecycle(&self) {
+        println!("\n\u{1f504} 9. Demonstrating mint / redeem / exchange...");
+
+        let collateral_token = Address::generate(&self.env);
+
+        // 1. Mint sBTC against 15,000 USDC of collateral (150% minimum ratio).
+        let mint_receipt = SyntheticProtocolContract::mint(
+            self.env.clone(),
+            MintRequest {
+                user: self.user1.clone(),
+                asset_id: self.s_btc_id,
+                collateral_token: collateral_token.clone(),
+                collateral_amount: 15_000_000_000,
+                synthetic_amount: 10_000_000_000,
+            },
+        );
+        println!(
+            "   \u{1f4b0} Minted {} sBTC at ${:.2} (fee {}, ratio {} bps)",
+            mint_receipt.synthetic_minted,
+            mint_receipt.price as f64 / 1_000_000.0,
+            mint_receipt.minting_fee,
+            mint_receipt.collateral_ratio,
+        );
+
+        // 2. Redeem part of the position back into collateral.
+        let redemption_receipt = SyntheticProtocolContract::redeem(
+            self.env.clone(),
+            RedemptionRequest {
+                user: self.user1.clone(),
+                asset_id: self.s_btc_id,
+                synthetic_amount: 2_000_000_000,
+                collateral_token: collateral_token.clone(),
+            },
+        );
+        println!(
+            "   \u{1f525} Burned {} sBTC for {} collateral (fee {})",
+            redemption_receipt.synthetic_burned,
+            redemption_receipt.collateral_released,
+            redemption_receipt.redemption_fee,
+        );
+
+        // 3. Exchange the remaining sBTC into sGOLD through a direct route.
+        let mut route = soroban_sdk::Vec::new(&self.env);
+        route.push_back(self.s_btc_id);
+        route.push_back(self.s_gold_id);
+
+        let exchange_receipt = SyntheticProtocolContract::exchange(
+            self.env.clone(),
+            ExchangeRequest {
+                user: self.user1.clone(),
+                from_asset_id: self.s_btc_id,
+                to_asset_id: self.s_gold_id,
+                synthetic_amount: 1_000_000_000,
+            },
+            route,
+        );
+        println!(
+            "   \u{1f501} Swapped {} sBTC for {} sGOLD in {} hop(s) (fee {})",
+            exchange_receipt.amount_in,
+            exchange_receipt.amount_out,
+            exchange_receipt.hops,
+            exchange_receipt.exchange_fee,
+        );
+
+        let position = SyntheticProtocolContract::get_user_position(
+            self.env.clone(),
+            self.user1.clone(),
+            self.s_btc_id,
+        );
+        println!(
+            "   \u{1f4ca} Remaining sBTC position: {} synths, {} debt, ratio {} bps",
+            position.synthetic_amount, position.debt_amount, position.collateral_ratio,
+        );
     }
 }
 

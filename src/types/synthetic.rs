@@ -1,6 +1,6 @@
 //! Type definitions for Synthetic Asset Protocol
 
-use soroban_sdk::{contracttype, Address, Map, Symbol};
+use soroban_sdk::{contracttype, Address, Map, Symbol, Vec};
 
 /// Synthetic asset information and configuration
 #[derive(Clone, Debug, PartialEq)]
@@ -97,6 +97,128 @@ pub struct LiquidationEvent {
     /// Liquidation penalty in basis points
     pub penalty_bps: u32,
     /// When liquidation occurred
+    pub timestamp: u64,
+}
+
+/// Request to mint synthetic tokens against deposited collateral
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct MintRequest {
+    /// User minting the synthetic asset
+    pub user: Address,
+    /// Synthetic asset to mint
+    pub asset_id: u32,
+    /// Collateral token deposited
+    pub collateral_token: Address,
+    /// Amount of collateral deposited (token units)
+    pub collateral_amount: u64,
+    /// Amount of synthetic tokens requested (token units)
+    pub synthetic_amount: u64,
+}
+
+/// Receipt emitted for a completed mint
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct MintReceipt {
+    /// User that minted
+    pub user: Address,
+    /// Synthetic asset minted
+    pub asset_id: u32,
+    /// Collateral token deposited
+    pub collateral_token: Address,
+    /// Collateral amount deposited
+    pub collateral_amount: u64,
+    /// Synthetic tokens credited (net of fee)
+    pub synthetic_minted: u64,
+    /// Minting fee charged (token units)
+    pub minting_fee: u64,
+    /// Collateral value in USD (6 decimals)
+    pub collateral_value_usd: u64,
+    /// Debt value in USD (6 decimals)
+    pub debt_value_usd: u64,
+    /// Resulting collateral ratio (basis points)
+    pub collateral_ratio: u32,
+    /// Oracle price used for the mint (6 decimals)
+    pub price: u64,
+    /// Timestamp of the mint
+    pub timestamp: u64,
+}
+
+/// Request to redeem synthetic tokens for the underlying collateral
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RedemptionRequest {
+    /// User redeeming
+    pub user: Address,
+    /// Synthetic asset to burn
+    pub asset_id: u32,
+    /// Amount of synthetic tokens to burn (token units)
+    pub synthetic_amount: u64,
+    /// Collateral token to receive
+    pub collateral_token: Address,
+}
+
+/// Receipt emitted for a completed redemption
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct RedemptionReceipt {
+    /// User that redeemed
+    pub user: Address,
+    /// Synthetic asset burned
+    pub asset_id: u32,
+    /// Collateral token released
+    pub collateral_token: Address,
+    /// Synthetic tokens burned
+    pub synthetic_burned: u64,
+    /// Collateral released to the user (net of fee)
+    pub collateral_released: u64,
+    /// Redemption fee charged, denominated in collateral
+    pub redemption_fee: u64,
+    /// Oracle price used for the redemption (6 decimals)
+    pub price: u64,
+    /// Collateral ratio after redemption (basis points)
+    pub collateral_ratio: u32,
+    /// Timestamp of the redemption
+    pub timestamp: u64,
+}
+
+/// Request to exchange one synthetic asset for another
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ExchangeRequest {
+    /// User exchanging
+    pub user: Address,
+    /// Synthetic asset sold
+    pub from_asset_id: u32,
+    /// Synthetic asset bought
+    pub to_asset_id: u32,
+    /// Amount of the source synthetic to sell (token units)
+    pub synthetic_amount: u64,
+}
+
+/// Receipt emitted for a completed exchange
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ExchangeReceipt {
+    /// User that exchanged
+    pub user: Address,
+    /// Synthetic asset sold
+    pub from_asset_id: u32,
+    /// Synthetic asset bought
+    pub to_asset_id: u32,
+    /// Amount of source synthetic sold
+    pub amount_in: u64,
+    /// Amount of destination synthetic received (net of fee)
+    pub amount_out: u64,
+    /// Exchange fee charged, denominated in the destination synthetic
+    pub exchange_fee: u64,
+    /// Oracle price of the source synthetic (6 decimals)
+    pub from_price: u64,
+    /// Oracle price of the destination synthetic (6 decimals)
+    pub to_price: u64,
+    /// Number of hops executed
+    pub hops: u32,
+    /// Timestamp of the exchange
     pub timestamp: u64,
 }
 
@@ -200,11 +322,12 @@ pub struct AssetProposal {
 
 /// Types of asset governance proposals
 #[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 #[contracttype]
 pub enum AssetProposalType {
     /// List new synthetic asset
     ListAsset(SyntheticAsset),
-    /// Update asset parameters: asset id, new parameters
+    /// Update asset parameters: (asset_id, new_params)
     UpdateAsset(u32, AssetUpdateParams),
     /// Delist asset
     DelistAsset(u32),
