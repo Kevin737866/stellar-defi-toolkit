@@ -84,6 +84,29 @@ Identical in `governance_v2.rs` and `synthetic_governance.rs`:
 Adjustable at runtime through `update_params`, within the min/max bounds. Raising
 them is itself a governance action — a C5 change under the process document.
 
+## Legacy proposal categories and sub-governance
+
+The legacy [`governance.rs`](../src/contracts/governance.rs) API supports
+`Parameter`, `Upgrade`, `Treasury`, and `Emergency` proposal categories.
+`create_proposal` remains compatible and creates a `Parameter` proposal using
+the constructor's quorum and voting period. Categorized proposals can be
+created with `create_proposal_with_category`.
+
+Default requirements are 20 % quorum / 14 days for upgrades, 33 % / 30 days
+for treasury proposals, and 5 % / 3 days for emergency ratification proposals.
+The Parameter requirements come from the constructor and can be changed through
+`update_parameters`; category-specific values can be configured through
+`update_category_requirements`. The emergency proposal category is not a
+replacement for the immediate pause and 72-hour ratification process described
+above.
+
+Passing a module name when creating a categorized proposal scopes it to that
+module's sub-governance. `update_module_requirements` can override that
+module/category's quorum and period. `get_proposals_by_category` and
+`get_proposals_by_module` provide category and module listing filters. Each
+proposal stores its quorum at creation, so a later requirements update does not
+change the voting rules for an already active proposal.
+
 ---
 
 ## Proposal types
