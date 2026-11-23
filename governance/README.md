@@ -17,13 +17,18 @@ authority path applies to which change.
 | Timelock crate | [governance/](.) | Standalone proposal queue with a configurable timelock delay |
 | Stablecoin governance | [src/contracts/governance_v2.rs](../src/contracts/governance_v2.rs) | Token-weighted voting over stablecoin parameters |
 | Synthetic governance | [src/contracts/synthetic_governance.rs](../src/contracts/synthetic_governance.rs) | Token-weighted voting over synthetic protocol parameters |
-| Legacy governance | [src/contracts/governance.rs](../src/contracts/governance.rs) | Earlier proposal/vote implementation with `cancel_proposal` |
+| Legacy governance | [src/contracts/governance.rs](../src/contracts/governance.rs) | Proposal/vote simulation with transitive delegation and `cancel_proposal` |
 | Lending multisig | [src/types/lending.rs](../src/types/lending.rs) | `MultiSigConfig` + `AdminProposal` — threshold approval, no timelock |
 
 There is no single governance contract. Each protocol carries its own authority
 path, and they do not share a voting token or a proposal registry. Any change
 spanning modules requires a coordinated proposal in each — track them under one
 `SDT-YYYY-NNN` identifier.
+
+The legacy simulation routes up to three delegation links and aggregates the
+holders' simulated token balances at the final delegate when voting. Its
+`set_token_balance_for_simulation` method is a test seam, not an authenticated
+token-balance integration; production use must query the governance token.
 
 ---
 
