@@ -159,6 +159,58 @@ impl SyntheticProtocolContract {
         );
     }
 
+    /// Record protocol fees (mint/burn/exchange/redemption) into the fee pool.
+    /// Fees accrue to the shared fee pool and are distributed to SNX stakers
+    /// proportionally to their governance-token stake on weekly epochs.
+    pub fn accrue_protocol_fee(env: Env, amount: u64) {
+        let mut fee_dist: FeeDistribution = env.storage().instance().get(&FEE_DIST).unwrap_optimized();
+        fee_dist.total_fees += amount;
+        fee_dist.fees_to_stakers += amount;
+        env.storage().instance().set(&FEE_DIST, &fee_dist);
+
+        let mut stats: ProtocolStats = env.storage().instance().get(&PROTOCOL_STATS).unwrap_optimized();
+        stats.total_fees_collected += amount;
+        env.storage().instance().set(&PROTOCOL_STATS, &stats);
+
+        env.events().publish(
+            (Symbol::short("FEEACCRU"),),
+            amount,
+        );
+    }
+
+    /// Distribute the accumulated staker fee pool on a weekly epoch.
+    /// Updates the staking share price so each staker's share is proportional
+    /// to their governance-token stake.
+    pub fn distribute_staker_fees(env: Env) -> u64 {
+        const WEEK_SECS: u64 = 7 * 24 * 60 * 60;
+        let mut fee_dist: FeeDistribution = env.storage().instance().get(&FEE_DIST).unwrap_optimized();
+        let now = env.ledger().timestamp();
+        if now < fee_dist.last_distribution + WEEK_SECS {
+            panic!("Distribution epoch not elapsed");
+        }
+
+        let staking: Map<Address, StakingPosition> = env.storage().instance().get(&STAKING).unwrap_optimized();
+        let mut total_staked: u64 = 0;
+        for (_, pos) in staking.iter() {
+            total_staked += pos.staked_amount;
+        }
+
+        let distributable = fee_dist.fees_to_stakers;
+        if total_staked > 0 && distributable > 0 {
+            // share price scaled by 1_000_000; increases by fees per unit staked
+            fee_dist.staking_share_price += (distributable * 1_000_000) / total_staked;
+            fee_dist.fees_to_stakers = 0;
+        }
+        fee_dist.last_distribution = now;
+        env.storage().instance().set(&FEE_DIST, &fee_dist);
+
+        env.events().publish(
+            (Symbol::short("FEEDIST"),),
+            (distributable, fee_dist.staking_share_price),
+        );
+        distributable
+    }
+
     /// List a new synthetic asset (admin only)
     /// 
     /// # Arguments
