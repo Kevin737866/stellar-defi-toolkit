@@ -36,6 +36,10 @@ pub struct GovernanceContract {
     execution_delay: u64,
     /// Minimum voting power required to create a proposal
     proposal_threshold: u64,
+    /// Voting requirements keyed by proposal category.
+    category_requirements: HashMap<ProposalCategory, CategoryRequirements>,
+    /// Optional module-specific voting requirements.
+    module_requirements: HashMap<(String, ProposalCategory), CategoryRequirements>,
     /// Contract address
     address: Option<Address>,
     /// Proposals stored by ID
@@ -57,12 +61,44 @@ impl GovernanceContract {
         execution_delay: u64,
         proposal_threshold: u64,
     ) -> Self {
+        let category_requirements = HashMap::from([
+            (
+                ProposalCategory::Parameter,
+                CategoryRequirements {
+                    quorum_percentage,
+                    voting_period,
+                },
+            ),
+            (
+                ProposalCategory::Upgrade,
+                CategoryRequirements {
+                    quorum_percentage: 2_000,
+                    voting_period: 1_209_600,
+                },
+            ),
+            (
+                ProposalCategory::Treasury,
+                CategoryRequirements {
+                    quorum_percentage: 3_300,
+                    voting_period: 2_592_000,
+                },
+            ),
+            (
+                ProposalCategory::Emergency,
+                CategoryRequirements {
+                    quorum_percentage: 500,
+                    voting_period: 259_200,
+                },
+            ),
+        ]);
         Self {
             governance_token,
             quorum_percentage,
             voting_period,
             execution_delay,
             proposal_threshold,
+            category_requirements,
+            module_requirements: HashMap::new(),
             address: None,
             proposals: HashMap::new(),
             votes: HashMap::new(),
@@ -108,6 +144,28 @@ impl GovernanceContract {
         actions: Vec<ProposalAction>,
         now: u64,
     ) -> Result<u64, String> {
+        self.create_proposal_with_category(
+            proposer,
+            title,
+            description,
+            actions,
+            ProposalCategory::Parameter,
+            None,
+            now,
+        )
+    }
+
+    /// Create a proposal in a category and, optionally, a protocol module's sub-governance.
+    pub fn create_proposal_with_category(
+        &mut self,
+        proposer: Address,
+        title: String,
+        description: String,
+        actions: Vec<ProposalAction>,
+        category: ProposalCategory,
+        module: Option<String>,
+        now: u64,
+    ) -> Result<u64, String> {
         if self.get_voting_power(proposer.clone()) < self.proposal_threshold {
             return Err("Insufficient voting power to create a proposal".to_string());
         }
@@ -124,24 +182,42 @@ impl GovernanceContract {
             return Err("At least one action is required".to_string());
         }
 
+        if module.as_ref().is_some_and(|module| module.trim().is_empty()) {
+            return Err("Module name must not be empty".to_string());
+        }
+
+        let requirements = self.requirements_for(&category, module.as_deref());
         let proposal_id = self.next_proposal_id;
-        self.next_proposal_id += 1;
+        let next_proposal_id = self
+            .next_proposal_id
+            .checked_add(1)
+            .ok_or("Proposal ID overflow")?;
+        let voting_deadline = now
+            .checked_add(requirements.voting_period)
+            .ok_or("Voting deadline overflow")?;
+        let execution_time = voting_deadline
+            .checked_add(self.execution_delay)
+            .ok_or("Execution time overflow")?;
 
         let proposal = Proposal {
             id: proposal_id,
             proposer,
             title,
             description,
+            category,
+            module,
+            quorum_percentage: requirements.quorum_percentage,
             actions,
             votes_for: 0,
             votes_against: 0,
             total_voting_power: 0,
             created_at: now,
-            voting_deadline: now + self.voting_period,
-            execution_time: now + self.voting_period + self.execution_delay,
+            voting_deadline,
+            execution_time,
             status: ProposalStatus::Active,
         };
 
+        self.next_proposal_id = next_proposal_id;
         self.proposals.insert(proposal_id, proposal);
         Ok(proposal_id)
     }
@@ -211,7 +287,8 @@ impl GovernanceContract {
         }
 
         let total_possible_votes: u64 = 10_000; // Mock total supply
-        let quorum_votes = (total_possible_votes * self.quorum_percentage as u64) / 10_000;
+        let quorum_votes =
+            (total_possible_votes * proposal.quorum_percentage as u64) / 10_000;
 
         if proposal.total_voting_power < quorum_votes
             || proposal.votes_for <= proposal.votes_against
@@ -273,12 +350,98 @@ impl GovernanceContract {
             .collect()
     }
 
+    /// Get proposals in one category.
+    pub fn get_proposals_by_category(&self, category: ProposalCategory) -> Vec<Proposal> {
+        self.proposals
+            .values()
+            .filter(|proposal| proposal.category == category)
+            .cloned()
+            .collect()
+    }
+
+    /// Get proposals scoped to one protocol module's sub-governance.
+    pub fn get_proposals_by_module(&self, module: &str) -> Vec<Proposal> {
+        self.proposals
+            .values()
+            .filter(|proposal| proposal.module.as_deref() == Some(module))
+            .cloned()
+            .collect()
+    }
+
+    /// Configure voting requirements for a proposal category.
+    pub fn update_category_requirements(
+        &mut self,
+        category: ProposalCategory,
+        quorum_percentage: u32,
+        voting_period: u64,
+    ) -> Result<(), String> {
+        Self::validate_requirements(quorum_percentage, voting_period)?;
+        self.category_requirements.insert(
+            category,
+            CategoryRequirements {
+                quorum_percentage,
+                voting_period,
+            },
+        );
+        Ok(())
+    }
+
+    /// Configure category requirements for a specific protocol module.
+    pub fn update_module_requirements(
+        &mut self,
+        module: String,
+        category: ProposalCategory,
+        quorum_percentage: u32,
+        voting_period: u64,
+    ) -> Result<(), String> {
+        if module.trim().is_empty() {
+            return Err("Module name must not be empty".to_string());
+        }
+        Self::validate_requirements(quorum_percentage, voting_period)?;
+        self.module_requirements.insert(
+            (module, category),
+            CategoryRequirements {
+                quorum_percentage,
+                voting_period,
+            },
+        );
+        Ok(())
+    }
+
+    fn validate_requirements(quorum_percentage: u32, voting_period: u64) -> Result<(), String> {
+        if quorum_percentage > 10_000 {
+            return Err("Quorum must be <= 10000 basis points".to_string());
+        }
+        if voting_period == 0 {
+            return Err("Voting period must be greater than 0".to_string());
+        }
+        Ok(())
+    }
+
+    fn requirements_for(
+        &self,
+        category: &ProposalCategory,
+        module: Option<&str>,
+    ) -> CategoryRequirements {
+        module
+            .and_then(|module| {
+                self.module_requirements
+                    .get(&(module.to_string(), category.clone()))
+            })
+            .or_else(|| self.category_requirements.get(category))
+            .cloned()
+            .unwrap_or(CategoryRequirements {
+                quorum_percentage: self.quorum_percentage,
+                voting_period: self.voting_period,
+            })
+    }
+
     /// Check whether a proposal has passed quorum and majority.
     pub fn has_proposal_passed(&self, proposal_id: u64) -> bool {
         if let Some(proposal) = self.get_proposal(proposal_id) {
             let total_possible_votes: u64 = 10_000;
             let quorum_votes =
-                (total_possible_votes * self.quorum_percentage as u64) / 10_000;
+                (total_possible_votes * proposal.quorum_percentage as u64) / 10_000;
             proposal.total_voting_power >= quorum_votes
                 && proposal.votes_for > proposal.votes_against
         } else {
@@ -302,12 +465,17 @@ impl GovernanceContract {
         new_voting_period: u64,
         new_execution_delay: u64,
     ) -> Result<(), String> {
-        if new_quorum > 10_000 {
-            return Err("Quorum must be <= 10000 basis points".to_string());
-        }
+        Self::validate_requirements(new_quorum, new_voting_period)?;
         self.quorum_percentage = new_quorum;
         self.voting_period = new_voting_period;
         self.execution_delay = new_execution_delay;
+        self.category_requirements.insert(
+            ProposalCategory::Parameter,
+            CategoryRequirements {
+                quorum_percentage: new_quorum,
+                voting_period: new_voting_period,
+            },
+        );
         Ok(())
     }
 
@@ -354,7 +522,12 @@ impl GovernanceContract {
             notice_period
         };
 
-        let delist_at = now + self.voting_period + self.execution_delay + effective_notice;
+        let requirements = self.requirements_for(&ProposalCategory::Parameter, None);
+        let delist_at = now
+            .checked_add(requirements.voting_period)
+            .and_then(|time| time.checked_add(self.execution_delay))
+            .and_then(|time| time.checked_add(effective_notice))
+            .ok_or("Delisting timestamp overflow")?;
 
         let action = ProposalAction {
             action_type: ActionType::DelistAsset {
@@ -397,6 +570,11 @@ pub struct Proposal {
     pub proposer: Address,
     pub title: String,
     pub description: String,
+    pub category: ProposalCategory,
+    /// `Some` scopes this proposal to a protocol module's sub-governance.
+    pub module: Option<String>,
+    /// Quorum is snapshotted when the proposal is created.
+    pub quorum_percentage: u32,
     pub actions: Vec<ProposalAction>,
     pub votes_for: u64,
     pub votes_against: u64,
@@ -405,6 +583,22 @@ pub struct Proposal {
     pub voting_deadline: u64,
     pub execution_time: u64,
     pub status: ProposalStatus,
+}
+
+/// Proposal risk category.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProposalCategory {
+    Parameter,
+    Upgrade,
+    Treasury,
+    Emergency,
+}
+
+/// Quorum and voting duration for a proposal category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CategoryRequirements {
+    pub quorum_percentage: u32,
+    pub voting_period: u64,
 }
 
 /// Proposal action
