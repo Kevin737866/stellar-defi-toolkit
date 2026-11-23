@@ -1,6 +1,6 @@
 //! Type definitions for the Stablecoin contract
 
-use soroban_sdk::{Address, Map, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Map, Symbol, Vec};
 
 /// Collateral type enumeration
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +59,30 @@ pub struct StabilityPoolInfo {
     pub reward_per_share: u64,
     /// Last reward update timestamp
     pub last_update: u64,
+}
+
+/// Recapitalization auction category.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum AuctionKind {
+    /// Sell fee-surplus stablecoins for governance tokens.
+    Surplus,
+    /// Sell newly minted governance tokens to cover uncovered bad debt.
+    Debt,
+}
+
+/// Persisted Dutch auction state. Prices and amounts use the relevant token's
+/// smallest unit, with the auction kind defining which token is being sold.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Auction {
+    pub kind: AuctionKind,
+    pub lot_amount: u64,
+    pub start_price: u64,
+    pub minimum_price: u64,
+    pub minimum_bid: u64,
+    pub started_at: u64,
+    pub duration: u64,
 }
 
 /// Oracle price feed data

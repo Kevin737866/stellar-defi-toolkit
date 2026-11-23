@@ -21,10 +21,10 @@
 //! - **User**: `mint`, `redeem`, `deposit_stability_pool`, `withdraw_stability_pool` —
 //!   none of these call `require_auth()` on the acting address (`to`/`from`/`depositor`).
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String as SorobanString, Symbol, Vec, unwrap::UnwrapOptimized};
 use soroban_token_sdk::{Token, TokenInterface};
 use crate::types::{
-    stablecoin::{CollateralInfo, CollateralType, VaultPosition, StabilityPoolInfo, OraclePrice},
+    stablecoin::{Auction, AuctionKind, CollateralInfo, CollateralType, VaultPosition, StabilityPoolInfo, OraclePrice},
     token::TokenInfo,
 };
 
@@ -44,6 +44,9 @@ const LIQUIDATION_PENALTY_BPS: u32 = 1000;
 const MIN_DEBT: u64 = 100_000_000; // 100 USD with 7 decimals
 /// Maximum debt per vault (10,000 stablecoins)
 const MAX_DEBT: u64 = 10_000_000_000; // 10,000 USD with 7 decimals
+const SURPLUS_AUCTION_THRESHOLD: u64 = 100_000_000;
+const MIN_AUCTION_BID: u64 = 1_000_000;
+const AUCTION_DURATION: u64 = 60 * 60;
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -57,6 +60,11 @@ const COLLATERALS: Symbol = Symbol::short("COLLATLS");
 const VAULTS: Symbol = Symbol::short("VAULTS");
 const MINTING_FEE_BPS: Symbol = Symbol::short("MFEE");
 const REDEMPTION_FEE_BPS: Symbol = Symbol::short("RFEE");
+const FEE_SURPLUS: Symbol = Symbol::short("FSURPLUS");
+const BAD_DEBT: Symbol = Symbol::short("BADDEBT");
+const INSURANCE_FUND: Symbol = Symbol::short("INSURANCE");
+const SURPLUS_AUCTION: Symbol = Symbol::short("SURAUCT");
+const DEBT_AUCTION: Symbol = Symbol::short("DEBTAUCT");
 
 // ─── Stablecoin Contract ─────────────────────────────────────────────────────
 
@@ -76,8 +84,8 @@ impl StablecoinContract {
     pub fn initialize(
         env: Env,
         admin: Address,
-        name: String,
-        symbol: String,
+        name: SorobanString,
+        symbol: SorobanString,
         oracle: Address,
     ) {
         if env.storage().instance().has(&ADMIN) {
@@ -91,6 +99,9 @@ impl StablecoinContract {
         env.storage().instance().set(&ORACLE, &oracle);
         env.storage().instance().set(&MINTING_FEE_BPS, &50u32); // 0.5%
         env.storage().instance().set(&REDEMPTION_FEE_BPS, &50u32); // 0.5%
+        env.storage().instance().set(&FEE_SURPLUS, &0u64);
+        env.storage().instance().set(&BAD_DEBT, &0u64);
+        env.storage().instance().set(&INSURANCE_FUND, &0u64);
 
         // Initialize stability pool
         let stability_pool = StabilityPoolInfo {
@@ -162,6 +173,7 @@ impl StablecoinContract {
         let minting_fee_bps = env.storage().instance().get(&MINTING_FEE_BPS).unwrap();
         let minting_fee = (stablecoin_amount * minting_fee_bps as u64) / 10000;
         let mint_amount = stablecoin_amount - minting_fee;
+        Self::accrue_fee_surplus(&env, minting_fee);
         
         // Update storage
         Self::set_vault_position(&env, to.clone(), vault);
@@ -219,6 +231,7 @@ impl StablecoinContract {
         let redemption_fee_bps = env.storage().instance().get(&REDEMPTION_FEE_BPS).unwrap();
         let redemption_fee = (stablecoin_amount * redemption_fee_bps as u64) / 10000;
         let burn_amount = stablecoin_amount + redemption_fee;
+        Self::accrue_fee_surplus(&env, redemption_fee);
         
         // Update vault position
         vault.debt_amount -= stablecoin_amount;
@@ -394,6 +407,114 @@ impl StablecoinContract {
             (Symbol::short("STABILITY_WITHDRAW"), depositor.clone()),
             amount,
         );
+    }
+
+    // ─── Recapitalization Auctions ────────────────────────────────────────────
+
+    /// Contribute to the insurance fund. The contributor authorizes the amount.
+    pub fn contribute_insurance(env: Env, contributor: Address, amount: u64) {
+        if amount == 0 {
+            panic!("Amount must be greater than zero");
+        }
+        contributor.require_auth();
+
+        let insurance: u64 = env.storage().instance().get(&INSURANCE_FUND).unwrap();
+        env.storage().instance().set(&INSURANCE_FUND, &(insurance + amount));
+        env.events().publish((Symbol::short("INSFUND"), contributor), amount);
+        Self::refresh_debt_auction(&env);
+    }
+
+    /// Record bad debt and open an auction for any amount beyond insurance.
+    pub fn record_bad_debt(env: Env, amount: u64) {
+        if amount == 0 {
+            panic!("Amount must be greater than zero");
+        }
+        let admin: Address = env.storage().instance().get(&ADMIN).unwrap();
+        admin.require_auth();
+
+        let bad_debt: u64 = env.storage().instance().get(&BAD_DEBT).unwrap();
+        env.storage().instance().set(&BAD_DEBT, &(bad_debt + amount));
+        Self::refresh_debt_auction(&env);
+    }
+
+    /// Bid stablecoins for the governance-token lot in the active debt auction.
+    pub fn bid_debt_auction(env: Env, bidder: Address, bid_amount: u64) {
+        bidder.require_auth();
+        let auction = Self::get_active_auction(&env, &DEBT_AUCTION);
+        let price = Self::auction_price(&auction, env.ledger().timestamp());
+        Self::validate_bid(&auction, bid_amount, price, &env);
+
+        env.storage().instance().remove(&DEBT_AUCTION);
+        let bad_debt: u64 = env.storage().instance().get(&BAD_DEBT).unwrap();
+        env.storage().instance().set(&BAD_DEBT, &bad_debt.saturating_sub(price));
+        env.events().publish(
+            (Symbol::short("DEBTBID"), bidder),
+            (auction.lot_amount, bid_amount, price),
+        );
+        Self::maybe_start_debt_auction(&env);
+    }
+
+    /// Bid governance tokens for the stablecoin lot in the active surplus auction.
+    pub fn bid_surplus_auction(env: Env, bidder: Address, bid_amount: u64) {
+        bidder.require_auth();
+        let auction = Self::get_active_auction(&env, &SURPLUS_AUCTION);
+        let price = Self::auction_price(&auction, env.ledger().timestamp());
+        Self::validate_bid(&auction, bid_amount, price, &env);
+
+        env.storage().instance().remove(&SURPLUS_AUCTION);
+        let surplus: u64 = env.storage().instance().get(&FEE_SURPLUS).unwrap();
+        env.storage().instance().set(&FEE_SURPLUS, &(surplus - auction.lot_amount));
+        env.events().publish(
+            (Symbol::short("SURPBID"), bidder),
+            (auction.lot_amount, bid_amount, price),
+        );
+        Self::maybe_start_surplus_auction(&env);
+    }
+
+    /// Close an expired surplus auction so the remaining surplus can be relisted.
+    pub fn expire_surplus_auction(env: Env) {
+        Self::expire_auction(&env, &SURPLUS_AUCTION);
+        Self::maybe_start_surplus_auction(&env);
+    }
+
+    /// Close an expired debt auction and relist any remaining uncovered debt.
+    pub fn expire_debt_auction(env: Env) {
+        Self::expire_auction(&env, &DEBT_AUCTION);
+        Self::maybe_start_debt_auction(&env);
+    }
+
+    pub fn get_surplus_auction(env: Env) -> Option<Auction> {
+        env.storage().instance().get(&SURPLUS_AUCTION)
+    }
+
+    pub fn get_debt_auction(env: Env) -> Option<Auction> {
+        env.storage().instance().get(&DEBT_AUCTION)
+    }
+
+    pub fn surplus_auction_price(env: Env) -> Option<u64> {
+        env.storage()
+            .instance()
+            .get::<_, Auction>(&SURPLUS_AUCTION)
+            .map(|auction| Self::auction_price(&auction, env.ledger().timestamp()))
+    }
+
+    pub fn debt_auction_price(env: Env) -> Option<u64> {
+        env.storage()
+            .instance()
+            .get::<_, Auction>(&DEBT_AUCTION)
+            .map(|auction| Self::auction_price(&auction, env.ledger().timestamp()))
+    }
+
+    pub fn fee_surplus(env: Env) -> u64 {
+        env.storage().instance().get(&FEE_SURPLUS).unwrap()
+    }
+
+    pub fn bad_debt(env: Env) -> u64 {
+        env.storage().instance().get(&BAD_DEBT).unwrap()
+    }
+
+    pub fn insurance_fund(env: Env) -> u64 {
+        env.storage().instance().get(&INSURANCE_FUND).unwrap()
     }
 
     // ─── Admin Functions ───────────────────────────────────────────────────────
@@ -610,5 +731,114 @@ impl StablecoinContract {
             stability_pool.reward_per_share += rewards / stability_pool.total_deposits;
             stability_pool.last_update = current_time;
         }
+    }
+
+    fn accrue_fee_surplus(env: &Env, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        let surplus: u64 = env.storage().instance().get(&FEE_SURPLUS).unwrap();
+        let surplus = surplus + amount;
+        env.storage().instance().set(&FEE_SURPLUS, &surplus);
+        Self::maybe_start_surplus_auction(env);
+    }
+
+    fn maybe_start_surplus_auction(env: &Env) {
+        let surplus: u64 = env.storage().instance().get(&FEE_SURPLUS).unwrap();
+        if surplus >= SURPLUS_AUCTION_THRESHOLD
+            && !env.storage().instance().has(&SURPLUS_AUCTION)
+        {
+            Self::start_auction(env, AuctionKind::Surplus, surplus);
+        }
+    }
+
+    fn maybe_start_debt_auction(env: &Env) {
+        let bad_debt: u64 = env.storage().instance().get(&BAD_DEBT).unwrap();
+        let insurance: u64 = env.storage().instance().get(&INSURANCE_FUND).unwrap();
+        if bad_debt > insurance && !env.storage().instance().has(&DEBT_AUCTION) {
+            Self::start_auction(env, AuctionKind::Debt, bad_debt - insurance);
+        }
+    }
+
+    fn refresh_debt_auction(env: &Env) {
+        if env.storage().instance().has(&DEBT_AUCTION) {
+            env.storage().instance().remove(&DEBT_AUCTION);
+            env.events().publish(Symbol::short("DEBTCAN"), env.ledger().timestamp());
+        }
+        Self::maybe_start_debt_auction(env);
+    }
+
+    fn start_auction(env: &Env, kind: AuctionKind, lot_amount: u64) {
+        let start_price = ((lot_amount as u128 * 12_000) / 10_000)
+            .min(u64::MAX as u128) as u64;
+        let minimum_price = (((lot_amount as u128 * 8_000) / 10_000).max(1)) as u64;
+        let auction = Auction {
+            kind: kind.clone(),
+            lot_amount,
+            start_price,
+            minimum_price,
+            minimum_bid: MIN_AUCTION_BID.min(minimum_price),
+            started_at: env.ledger().timestamp(),
+            duration: AUCTION_DURATION,
+        };
+        let key = match kind {
+            AuctionKind::Surplus => &SURPLUS_AUCTION,
+            AuctionKind::Debt => &DEBT_AUCTION,
+        };
+        env.storage().instance().set(key, &auction);
+        let event = match auction.kind {
+            AuctionKind::Surplus => Symbol::short("SURPSTART"),
+            AuctionKind::Debt => Symbol::short("DEBTSTART"),
+        };
+        env.events().publish(
+            event,
+            (
+                auction.lot_amount,
+                auction.start_price,
+                auction.minimum_price,
+                auction.minimum_bid,
+                auction.started_at,
+                auction.duration,
+            ),
+        );
+    }
+
+    fn get_active_auction(env: &Env, key: &Symbol) -> Auction {
+        match env.storage().instance().get(key) {
+            Some(auction) => auction,
+            None => panic!("No active auction"),
+        }
+    }
+
+    fn auction_price(auction: &Auction, now: u64) -> u64 {
+        let elapsed = now.saturating_sub(auction.started_at).min(auction.duration);
+        let price_drop = ((auction.start_price - auction.minimum_price) as u128
+            * elapsed as u128
+            / auction.duration as u128) as u64;
+        auction.start_price - price_drop
+    }
+
+    fn validate_bid(auction: &Auction, bid_amount: u64, price: u64, env: &Env) {
+        if env.ledger().timestamp() > auction.started_at.saturating_add(auction.duration) {
+            panic!("Auction has expired");
+        }
+        if bid_amount < auction.minimum_bid {
+            panic!("Bid below minimum");
+        }
+        if bid_amount < price {
+            panic!("Bid below current auction price");
+        }
+    }
+
+    fn expire_auction(env: &Env, key: &Symbol) {
+        let auction = Self::get_active_auction(env, key);
+        if env.ledger().timestamp() <= auction.started_at.saturating_add(auction.duration) {
+            panic!("Auction has not expired");
+        }
+        env.storage().instance().remove(key);
+        env.events().publish(
+            Symbol::short("AUCTEXP"),
+            (auction.kind, auction.lot_amount, env.ledger().timestamp()),
+        );
     }
 }
