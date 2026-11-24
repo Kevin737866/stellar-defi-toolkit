@@ -3,6 +3,9 @@ pub struct Proposal {
     pub proposer: Address,
     pub title: String,
     pub description: String,
+    pub target_contract: Address,
+    pub calldata: Bytes,
+    pub quorum_required: u64,
 
     pub status: ProposalStatus,
 
