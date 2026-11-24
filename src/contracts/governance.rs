@@ -13,11 +13,7 @@
 //! - **Keeper**: `execute_proposal` — permissionless by design.
 //! - **Admin**: `update_parameters` — doc comment says it should be
 //!   proposal-gated, but the code enforces no such restriction.
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
-
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol};
-
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
 use std::collections::HashMap;
 use crate::utils::StellarClient;
 
@@ -36,6 +32,10 @@ pub struct GovernanceContract {
     execution_delay: u64,
     /// Minimum voting power required to create a proposal
     proposal_threshold: u64,
+    /// Circulating supply of the governance token used for quorum calculations
+    circulating_supply: u64,
+    /// Token balances (voting power) per address string
+    token_balances: HashMap<String, u64>,
     /// Contract address
     address: Option<Address>,
     /// Proposals stored by ID
@@ -44,6 +44,8 @@ pub struct GovernanceContract {
     votes: HashMap<(u64, String), u64>,
     /// Next proposal ID counter
     next_proposal_id: u64,
+    /// Emitted governance proposal events
+    events: Vec<ProposalEvent>,
 }
 
 impl GovernanceContract {
@@ -63,10 +65,13 @@ impl GovernanceContract {
             voting_period,
             execution_delay,
             proposal_threshold,
+            circulating_supply: 10_000,
+            token_balances: HashMap::new(),
             address: None,
             proposals: HashMap::new(),
             votes: HashMap::new(),
             next_proposal_id: 1,
+            events: Vec::new(),
         }
     }
 
@@ -127,22 +132,109 @@ impl GovernanceContract {
         let proposal_id = self.next_proposal_id;
         self.next_proposal_id += 1;
 
+        let target_contract = actions[0].target.clone();
+        let quorum_required = self.calculate_quorum();
+        let voting_deadline = now + self.voting_period;
+
         let proposal = Proposal {
             id: proposal_id,
-            proposer,
-            title,
+            proposer: proposer.clone(),
+            title: title.clone(),
             description,
+            target_contract: target_contract.clone(),
+            calldata: Vec::new(),
+            quorum_required,
             actions,
             votes_for: 0,
             votes_against: 0,
             total_voting_power: 0,
             created_at: now,
-            voting_deadline: now + self.voting_period,
+            voting_deadline,
             execution_time: now + self.voting_period + self.execution_delay,
             status: ProposalStatus::Active,
         };
 
         self.proposals.insert(proposal_id, proposal);
+        self.events.push(ProposalEvent::ProposalCreated {
+            proposal_id,
+            proposer,
+            title,
+            target_contract,
+            quorum_required,
+            created_at: now,
+            voting_deadline,
+        });
+        Ok(proposal_id)
+    }
+
+    /// Create a new governance proposal with explicit target contract and calldata.
+    ///
+    /// # Arguments
+    /// * `proposer`        – Address of the proposer (must hold >= `proposal_threshold` tokens).
+    /// * `title`           – Short title (1–200 chars).
+    /// * `description`     – Detailed description (1–5 000 chars).
+    /// * `target_contract` – Target contract address or identifier to invoke.
+    /// * `calldata`        – Encoded calldata bytes for the target contract.
+    /// * `now`             – Current UNIX timestamp (injected for testability).
+    pub fn create_proposal_with_calldata(
+        &mut self,
+        proposer: Address,
+        title: String,
+        description: String,
+        target_contract: String,
+        calldata: Vec<u8>,
+        now: u64,
+    ) -> Result<u64, String> {
+        if self.get_voting_power(proposer.clone()) < self.proposal_threshold {
+            return Err("Insufficient voting power to create a proposal".to_string());
+        }
+
+        if title.is_empty() || title.len() > 200 {
+            return Err("Title must be 1-200 characters".to_string());
+        }
+
+        if description.is_empty() || description.len() > 5000 {
+            return Err("Description must be 1-5000 characters".to_string());
+        }
+
+        if target_contract.is_empty() {
+            return Err("Target contract is required".to_string());
+        }
+
+        let proposal_id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+
+        let quorum_required = self.calculate_quorum();
+        let voting_deadline = now + self.voting_period;
+
+        let proposal = Proposal {
+            id: proposal_id,
+            proposer: proposer.clone(),
+            title: title.clone(),
+            description,
+            target_contract: target_contract.clone(),
+            calldata,
+            quorum_required,
+            actions: Vec::new(),
+            votes_for: 0,
+            votes_against: 0,
+            total_voting_power: 0,
+            created_at: now,
+            voting_deadline,
+            execution_time: now + self.voting_period + self.execution_delay,
+            status: ProposalStatus::Active,
+        };
+
+        self.proposals.insert(proposal_id, proposal);
+        self.events.push(ProposalEvent::ProposalCreated {
+            proposal_id,
+            proposer,
+            title,
+            target_contract,
+            quorum_required,
+            created_at: now,
+            voting_deadline,
+        });
         Ok(proposal_id)
     }
 
@@ -210,8 +302,7 @@ impl GovernanceContract {
             return Err("Proposal cannot be executed".to_string());
         }
 
-        let total_possible_votes: u64 = 10_000; // Mock total supply
-        let quorum_votes = (total_possible_votes * self.quorum_percentage as u64) / 10_000;
+        let quorum_votes = proposal.quorum_required;
 
         if proposal.total_voting_power < quorum_votes
             || proposal.votes_for <= proposal.votes_against
@@ -226,6 +317,10 @@ impl GovernanceContract {
         }
 
         proposal.status = ProposalStatus::Executed;
+        self.events.push(ProposalEvent::ProposalExecuted {
+            proposal_id,
+            executor,
+        });
         Ok(())
     }
 
@@ -249,6 +344,10 @@ impl GovernanceContract {
         }
 
         proposal.status = ProposalStatus::Cancelled;
+        self.events.push(ProposalEvent::ProposalCancelled {
+            proposal_id,
+            proposer,
+        });
         Ok(())
     }
 
@@ -276,21 +375,48 @@ impl GovernanceContract {
     /// Check whether a proposal has passed quorum and majority.
     pub fn has_proposal_passed(&self, proposal_id: u64) -> bool {
         if let Some(proposal) = self.get_proposal(proposal_id) {
-            let total_possible_votes: u64 = 10_000;
-            let quorum_votes =
-                (total_possible_votes * self.quorum_percentage as u64) / 10_000;
-            proposal.total_voting_power >= quorum_votes
+            proposal.total_voting_power >= proposal.quorum_required
                 && proposal.votes_for > proposal.votes_against
         } else {
             false
         }
     }
 
+    /// Calculate the minimum votes required for quorum as a percentage of circulating supply.
+    pub fn calculate_quorum(&self) -> u64 {
+        ((self.circulating_supply as u128 * self.quorum_percentage as u128) / 10_000) as u64
+    }
+
+    /// Set the circulating supply used for quorum calculations.
+    pub fn set_circulating_supply(&mut self, supply: u64) {
+        self.circulating_supply = supply;
+    }
+
+    /// Get the current circulating supply.
+    pub fn get_circulating_supply(&self) -> u64 {
+        self.circulating_supply
+    }
+
+    /// Set the minimum token balance required to create a proposal.
+    pub fn set_proposal_threshold(&mut self, new_threshold: u64) {
+        self.proposal_threshold = new_threshold;
+    }
+
+    /// Set the governance token balance (voting power) for a holder.
+    pub fn set_token_balance(&mut self, holder: Address, balance: u64) {
+        self.token_balances.insert(holder.to_string(), balance);
+    }
+
+    /// Get all emitted proposal events.
+    pub fn get_events(&self) -> &[ProposalEvent] {
+        &self.events
+    }
+
     /// Get voting power for an address.
     ///
-    /// In a real implementation this queries the governance-token balance.
-    pub fn get_voting_power(&self, _voter: Address) -> u64 {
-        0
+    /// Queries the tracked governance-token balance for `voter`.
+    pub fn get_voting_power(&self, voter: Address) -> u64 {
+        *self.token_balances.get(&voter.to_string()).unwrap_or(&0)
     }
 
     // ── Parameter Management ──────────────────────────────────────────────────
@@ -397,6 +523,9 @@ pub struct Proposal {
     pub proposer: Address,
     pub title: String,
     pub description: String,
+    pub target_contract: String,
+    pub calldata: Vec<u8>,
+    pub quorum_required: u64,
     pub actions: Vec<ProposalAction>,
     pub votes_for: u64,
     pub votes_against: u64,
@@ -405,6 +534,28 @@ pub struct Proposal {
     pub voting_deadline: u64,
     pub execution_time: u64,
     pub status: ProposalStatus,
+}
+
+/// Governance proposal lifecycle events
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProposalEvent {
+    ProposalCreated {
+        proposal_id: u64,
+        proposer: Address,
+        title: String,
+        target_contract: String,
+        quorum_required: u64,
+        created_at: u64,
+        voting_deadline: u64,
+    },
+    ProposalCancelled {
+        proposal_id: u64,
+        proposer: Address,
+    },
+    ProposalExecuted {
+        proposal_id: u64,
+        executor: Address,
+    },
 }
 
 /// Proposal action
