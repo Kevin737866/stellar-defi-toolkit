@@ -32,6 +32,10 @@ pub use contracts::price_feed_adapters::{DexAdapterConfig, DexOrderBook};
 pub use utils::fixed_point::{
     bps_mul, mul_div, wad_div, wad_mul, BPS_DENOMINATOR, WAD, YEAR_IN_SECONDS,
 };
+pub use utils::session_keys::{
+    format_utc_timestamp, validate_public_key, ActiveSessionKeyView, SessionKeyError,
+    SessionKeyRegistration, SessionKeyRegistry, SessionScope, MAX_SESSION_TIMESTAMP,
+};
 
 #[cfg(test)]
 mod tests {

@@ -6,5 +6,10 @@
 
 pub mod fixed_point;
 pub mod helpers;
+pub mod session_keys;
 
 pub use fixed_point::*;
+pub use session_keys::{
+    ActiveSessionKeyView, SessionKeyError, SessionKeyRegistration, SessionKeyRegistry,
+    SessionScope,
+};
