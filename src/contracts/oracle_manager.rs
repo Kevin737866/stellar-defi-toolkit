@@ -9,6 +9,7 @@
 //! - Oracle reputation system
 //! - Price deviation detection
 //! - Automatic oracle failover
+//! - Delayed collateral price updates with emergency freezes
 //!
 //! ## Access Control
 //! - **Admin**: `register_oracle`, `deactivate_oracle`, `update_oracle_weight`,
@@ -52,6 +53,25 @@ const AGGREGATION_PARAMS: Symbol = Symbol::short("AGG_PARAMS");
 const HEARTBEAT_CONFIGS: Symbol = Symbol::short("HB_CONF");
 const HEARTBEAT_STATUS: Symbol = Symbol::short("HB_STAT");
 const HEARTBEAT_ALERTS: Symbol = Symbol::short("HB_ALERT");
+const OSM_PRICES: Symbol = Symbol::short("OSM_PRICE");
+const DEFAULT_OSM_DELAY_SECONDS: u64 = 3600;
+
+/// Delayed price state for one collateral asset.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct OsmPriceState {
+    pub current_price: Option<u64>,
+    pub current_decimals: u32,
+    pub current_updated_at: u64,
+    pub next_price: Option<u64>,
+    pub next_decimals: u32,
+    pub next_update_at: u64,
+    pub staged_price: Option<u64>,
+    pub staged_decimals: u32,
+    pub staged_update_at: u64,
+    pub delay_seconds: u64,
+    pub frozen: bool,
+}
 
 // ─── Oracle Information ─────────────────────────────────────────────────────
 
@@ -151,7 +171,7 @@ pub struct HeartbeatStatus {
     pub last_heartbeat: u64,
     /// Number of consecutive missed heartbeats
     pub missed_count: u32,
-    /// Total missed heartbeats over lifetime
+    /// Total missed heartbeats over lifetime
     pub total_missed: u32,
     /// Whether the oracle is currently flagged for missed heartbeats
     pub flagged: bool,
@@ -211,6 +231,9 @@ impl OracleManagerContract {
 
         let reputation: Map<Address, u32> = Map::new(&env);
         env.storage().instance().set(&REPUTATION, &reputation);
+
+        let osm_prices: Map<Address, OsmPriceState> = Map::new(&env);
+        env.storage().instance().set(&OSM_PRICES, &osm_prices);
 
         // Initialize aggregation parameters
         let agg_params = AggregationParams {
@@ -468,7 +491,8 @@ impl OracleManagerContract {
         if interval_seconds == 0 {
             panic!("Heartbeat interval must be positive");
         }
-n        let config = HeartbeatConfig {
+
+        let config = HeartbeatConfig {
             oracle_address: oracle_address.clone(),
             interval_seconds,
             max_missed,
@@ -561,11 +585,13 @@ impl OracleManagerContract {
         let current_time = env.ledger().timestamp();
         let mut alerts = Vec::new(&env);
         let mut rep_updates: Vec<(Address, u32)> = Vec::new(&env);
-n        for config in configs.values() {
+
+        for config in configs.values() {
             if !config.enabled {
                 continue;
             }
-n            let mut status = statuses.get(config.oracle_address.clone())
+
+            let mut status = statuses.get(config.oracle_address.clone())
                 .unwrap_or(HeartbeatStatus {
                     oracle_address: config.oracle_address.clone(),
                     last_heartbeat: 0,
@@ -617,7 +643,8 @@ impl OracleManagerContract {
                     reputation_downgraded,
                 };
                 alerts.push_back(alert);
-n                env.events().publish(
+
+                env.events().publish(
                     Symbol::short("HB_MISSED"),
                     (
                         config.oracle_address.clone(),
@@ -685,7 +712,164 @@ impl OracleManagerContract {
         }
     }
 
+    /// Configure the update delay for a collateral asset.
+    pub fn set_osm_delay(env: Env, asset: Address, delay_seconds: u64) {
+        Self::require_osm_admin(&env);
+
+        let mut prices = Self::get_osm_prices(&env);
+        let mut state = prices
+            .get(asset.clone())
+            .unwrap_or_else(|| Self::empty_osm_state());
+        Self::advance_osm_price(&env, &asset, &mut state);
+        state.delay_seconds = delay_seconds;
+        prices.set(asset.clone(), state);
+        env.storage().instance().set(&OSM_PRICES, &prices);
+
+        env.events().publish(
+            (Symbol::new(&env, "OSM_DELAY_UPDATED"), asset),
+            delay_seconds,
+        );
+    }
+
+    /// Queue a price update. It becomes current only after the configured delay.
+    pub fn queue_osm_price(env: Env, asset: Address, price: u64, decimals: u32) {
+        Self::require_osm_admin(&env);
+        if price == 0 {
+            panic!("OSM price must be greater than zero");
+        }
+        if decimals > 18 {
+            panic!("OSM decimals must not exceed 18");
+        }
+
+        let now = env.ledger().timestamp();
+        let mut prices = Self::get_osm_prices(&env);
+        let mut state = prices
+            .get(asset.clone())
+            .unwrap_or_else(|| Self::empty_osm_state());
+        Self::advance_osm_price(&env, &asset, &mut state);
+        if state.frozen {
+            panic!("OSM price is frozen");
+        }
+
+        let update_at = now
+            .checked_add(state.delay_seconds)
+            .unwrap_or_else(|| panic!("OSM update timestamp overflow"));
+        if state.next_price.is_some() {
+            state.staged_price = Some(price);
+            state.staged_decimals = decimals;
+            state.staged_update_at = update_at;
+        } else {
+            state.next_price = Some(price);
+            state.next_decimals = decimals;
+            state.next_update_at = update_at;
+        }
+        env.events().publish(
+            (Symbol::new(&env, "OSM_PRICE_QUEUED"), asset.clone()),
+            (price, decimals, update_at),
+        );
+
+        Self::advance_osm_price(&env, &asset, &mut state);
+        prices.set(asset, state);
+        env.storage().instance().set(&OSM_PRICES, &prices);
+    }
+
+    /// Return the current and pending prices, promoting a matured price if possible.
+    pub fn get_osm_price(env: Env, asset: Address) -> OsmPriceState {
+        let mut prices = Self::get_osm_prices(&env);
+        let mut state = prices
+            .get(asset.clone())
+            .unwrap_or_else(|| Self::empty_osm_state());
+        Self::advance_osm_price(&env, &asset, &mut state);
+        prices.set(asset, state.clone());
+        env.storage().instance().set(&OSM_PRICES, &prices);
+        state
+    }
+
+    /// Freeze or unfreeze price transitions for a collateral asset.
+    pub fn set_osm_frozen(env: Env, asset: Address, frozen: bool) {
+        Self::require_osm_admin(&env);
+
+        let mut prices = Self::get_osm_prices(&env);
+        let mut state = prices
+            .get(asset.clone())
+            .unwrap_or_else(|| Self::empty_osm_state());
+        Self::advance_osm_price(&env, &asset, &mut state);
+        state.frozen = frozen;
+        prices.set(asset.clone(), state);
+        env.storage().instance().set(&OSM_PRICES, &prices);
+
+        env.events().publish(
+            (Symbol::new(&env, "OSM_FREEZE_CHANGED"), asset),
+            frozen,
+        );
+    }
+
     // ─── Internal Helpers ─────────────────────────────────────────────────────
+
+    fn empty_osm_state() -> OsmPriceState {
+        OsmPriceState {
+            current_price: None,
+            current_decimals: 0,
+            current_updated_at: 0,
+            next_price: None,
+            next_decimals: 0,
+            next_update_at: 0,
+            staged_price: None,
+            staged_decimals: 0,
+            staged_update_at: 0,
+            delay_seconds: DEFAULT_OSM_DELAY_SECONDS,
+            frozen: false,
+        }
+    }
+
+    fn get_osm_prices(env: &Env) -> Map<Address, OsmPriceState> {
+        env.storage()
+            .instance()
+            .get(&OSM_PRICES)
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    fn advance_osm_price(env: &Env, asset: &Address, state: &mut OsmPriceState) {
+        if state.frozen {
+            return;
+        }
+
+        let now = env.ledger().timestamp();
+        loop {
+            let Some(next_price) = state.next_price else {
+                return;
+            };
+            if now < state.next_update_at {
+                return;
+            }
+
+            state.current_price = Some(next_price);
+            state.current_decimals = state.next_decimals;
+            state.current_updated_at = state.next_update_at;
+            state.next_price = None;
+            state.next_update_at = 0;
+            env.events().publish(
+                (Symbol::new(env, "OSM_PRICE_APPLIED"), asset.clone()),
+                (next_price, state.current_decimals, state.current_updated_at),
+            );
+
+            if let Some(staged_price) = state.staged_price.take() {
+                state.next_price = Some(staged_price);
+                state.next_decimals = state.staged_decimals;
+                state.next_update_at = state.staged_update_at;
+                state.staged_update_at = 0;
+            }
+        }
+    }
+
+    fn require_osm_admin(env: &Env) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN)
+            .unwrap_or_else(|| panic!("Oracle manager is not initialized"));
+        admin.require_auth();
+    }
 
     fn aggregate_price(env: &Env, asset_id: u32) {
         let prices = Self::get_prices(env).get(asset_id)
