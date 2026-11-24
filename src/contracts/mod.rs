@@ -14,6 +14,7 @@ pub mod arbitrage;
 pub mod asset_registry_protocol;
 /// synthetic_governance, synthetic_protocol, vault.
 pub mod asset_registry;
+pub mod fee_auction_governance;
 pub mod governance;
 pub mod lending;
 pub mod oracle;

@@ -630,3 +630,12 @@ impl GovernanceV2Contract {
         env.events().publish((Symbol::new(&env, "VetoPowerRemoved"),), admin);
     }
 }
+
+// ─── Stability Fee Auction Governance ─────────────────────────────────────────
+
+/// The stability fee auction governance interface lives in its own module so
+/// it can be compiled independently of the legacy governance contracts here.
+pub use crate::contracts::fee_auction_governance::{
+    FeeAuctionGovernanceContract, FeeAuctionGovernanceContractClient,
+    StabilityFeeAuctionGovernance,
+};

@@ -10,6 +10,7 @@
 //! - Stability pool for liquidation protection
 //! - Oracle integration for price feeds
 //! - Governance controls for parameter management
+//! - Market-driven stability fee auctions
 //! - Emergency shutdown functionality
 //!
 //! ## Access Control
@@ -20,8 +21,11 @@
 //! - **Keeper**: `liquidate` — intended for any external liquidator, no auth check.
 //! - **User**: `mint`, `redeem`, `deposit_stability_pool`, `withdraw_stability_pool` —
 //!   none of these call `require_auth()` on the acting address (`to`/`from`/`depositor`).
+//! - **Auction**: `configure_fee_auction` requires `admin.require_auth()` against the
+//!   stored admin; `bid_stability_fee` requires `bidder.require_auth()`. `start_fee_auction`
+//!   and `settle_fee_auction` are permissionless keepers.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use soroban_token_sdk::{Token, TokenInterface};
 use crate::types::{
     stablecoin::{CollateralInfo, CollateralType, VaultPosition, StabilityPoolInfo, OraclePrice},
@@ -45,6 +49,10 @@ const MIN_DEBT: u64 = 100_000_000; // 100 USD with 7 decimals
 /// Maximum debt per vault (10,000 stablecoins)
 const MAX_DEBT: u64 = 10_000_000_000; // 10,000 USD with 7 decimals
 
+/// Stability fee applied before the first auction settles (5%)
+const DEFAULT_STABILITY_FEE_BPS: u32 = 500;
+/// Absolute hard cap on any stability fee (100%)
+const MAX_STABILITY_FEE_BPS: u32 = 10_000;
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 const ADMIN: Symbol = Symbol::short("ADMIN");
@@ -57,6 +65,53 @@ const COLLATERALS: Symbol = Symbol::short("COLLATLS");
 const VAULTS: Symbol = Symbol::short("VAULTS");
 const MINTING_FEE_BPS: Symbol = Symbol::short("MFEE");
 const REDEMPTION_FEE_BPS: Symbol = Symbol::short("RFEE");
+const FEE_AUCTION_CONFIG: Symbol = Symbol::short("FACONF");
+const ACTIVE_FEE_AUCTION: Symbol = Symbol::short("FEAUCT");
+const FEE_AUCTION_HISTORY: Symbol = Symbol::short("FAHIST");
+const NEXT_AUCTION_ID: Symbol = Symbol::short("FANEXT");
+const STABILITY_FEE_BPS: Symbol = Symbol::short("SFEE");
+const FEE_PERIOD_END: Symbol = Symbol::short("SFEEND");
+const TREASURY_PROCEEDS: Symbol = Symbol::short("TPROCDS");
+
+// ─── Auction Types ────────────────────────────────────────────────────────────
+
+/// Bounds and timing for stability fee auctions.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct FeeAuctionConfig {
+    /// Account credited with the winning bid proceeds
+    pub treasury: Address,
+    /// Lowest fee rate that may be bid, in basis points
+    pub min_fee_bps: u32,
+    /// Highest fee rate that may be bid, in basis points
+    pub max_fee_bps: u32,
+    /// How long an auction stays open, in seconds
+    pub auction_duration: u64,
+    /// How long the winning rate stays in effect, in seconds
+    pub fee_period: u64,
+    /// Smallest accepted bid
+    pub minimum_bid: u64,
+}
+
+/// A single stability fee auction and its current best bid.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct StabilityFeeAuction {
+    /// Unique auction identifier
+    pub auction_id: u64,
+    /// Current highest bidder, or `None` before the first bid
+    pub bidder: Option<Address>,
+    /// Stability fee proposed by the current highest bidder, in basis points
+    pub fee_bps: u32,
+    /// Amount of the current highest bid
+    pub bid_amount: u64,
+    /// When the auction opened
+    pub start_time: u64,
+    /// When the auction closes
+    pub end_time: u64,
+    /// Whether the auction has been settled
+    pub settled: bool,
+}
 
 // ─── Stablecoin Contract ─────────────────────────────────────────────────────
 
@@ -91,6 +146,17 @@ impl StablecoinContract {
         env.storage().instance().set(&ORACLE, &oracle);
         env.storage().instance().set(&MINTING_FEE_BPS, &50u32); // 0.5%
         env.storage().instance().set(&REDEMPTION_FEE_BPS, &50u32); // 0.5%
+
+        // Initialize the stability fee auction state. A conservative default rate
+        // stays in force until the first auction settles.
+        env.storage().instance().set(&STABILITY_FEE_BPS, &DEFAULT_STABILITY_FEE_BPS);
+        env.storage().instance().set(&FEE_PERIOD_END, &0u64);
+        env.storage().instance().set(&NEXT_AUCTION_ID, &1u64);
+        env.storage().instance().set(&TREASURY_PROCEEDS, &0u64);
+        env.storage().instance().set(
+            &FEE_AUCTION_HISTORY,
+            &Map::<u64, StabilityFeeAuction>::new(&env),
+        );
 
         // Initialize stability pool
         let stability_pool = StabilityPoolInfo {
@@ -396,6 +462,175 @@ impl StablecoinContract {
         );
     }
 
+    // ─── Stability Fee Auction ─────────────────────────────────────────────────
+
+    /// Configure the stability fee auction (admin only).
+    ///
+    /// Bounds are enforced on every bid and again at settlement, so a malformed
+    /// bid can never install a rate outside `[min_fee_bps, max_fee_bps]`.
+    pub fn configure_fee_auction(
+        env: Env,
+        admin: Address,
+        treasury: Address,
+        min_fee_bps: u32,
+        max_fee_bps: u32,
+        auction_duration: u64,
+        fee_period: u64,
+        minimum_bid: u64,
+    ) {
+        Self::require_admin_auth(&env, &admin);
+        Self::require_not_paused(&env);
+
+        if min_fee_bps >= max_fee_bps || max_fee_bps > MAX_STABILITY_FEE_BPS {
+            panic!("Invalid fee bounds");
+        }
+        if auction_duration == 0 || fee_period == 0 {
+            panic!("Auction periods must be positive");
+        }
+        if minimum_bid == 0 {
+            panic!("Minimum bid must be positive");
+        }
+
+        let config = FeeAuctionConfig {
+            treasury: treasury.clone(),
+            min_fee_bps,
+            max_fee_bps,
+            auction_duration,
+            fee_period,
+            minimum_bid,
+        };
+        env.storage().instance().set(&FEE_AUCTION_CONFIG, &config);
+
+        env.events().publish(
+            (Symbol::new(&env, "FEE_AUCTION_CONFIGURED"), treasury),
+            (min_fee_bps, max_fee_bps, auction_duration, fee_period),
+        );
+    }
+
+    /// Open a new auction. Callable by any keeper while none is active.
+    pub fn start_fee_auction(env: Env) -> u64 {
+        Self::require_not_paused(&env);
+
+        let config = Self::load_fee_auction_config(&env);
+        if env.storage().instance().has(&ACTIVE_FEE_AUCTION) {
+            panic!("Auction already active");
+        }
+
+        let auction_id: u64 = env.storage().instance().get(&NEXT_AUCTION_ID).unwrap();
+        let start_time = env.ledger().timestamp();
+        let auction = StabilityFeeAuction {
+            auction_id,
+            bidder: None,
+            fee_bps: 0,
+            bid_amount: 0,
+            start_time,
+            end_time: start_time + config.auction_duration,
+            settled: false,
+        };
+
+        env.storage().instance().set(&ACTIVE_FEE_AUCTION, &auction);
+        env.storage().instance().set(&NEXT_AUCTION_ID, &(auction_id + 1));
+
+        env.events().publish(
+            (Symbol::new(&env, "FEE_AUCTION_STARTED"), auction_id),
+            (config.min_fee_bps, config.max_fee_bps, auction.end_time),
+        );
+        auction_id
+    }
+
+    /// Submit a bid for a stability fee rate. The highest bid at settlement wins.
+    ///
+    /// Bids must be within the configured bounds and strictly larger than the
+    /// current best bid. The winning amount is credited to the treasury on settlement.
+    pub fn bid_stability_fee(env: Env, bidder: Address, fee_bps: u32, bid_amount: u64) {
+        bidder.require_auth();
+        Self::require_not_paused(&env);
+
+        let config = Self::load_fee_auction_config(&env);
+        let mut auction = Self::load_active_auction(&env);
+
+        if env.ledger().timestamp() >= auction.end_time {
+            panic!("Auction has ended");
+        }
+        if fee_bps < config.min_fee_bps || fee_bps > config.max_fee_bps {
+            panic!("Fee out of bounds");
+        }
+        if bid_amount < config.minimum_bid {
+            panic!("Bid below minimum");
+        }
+        if bid_amount <= auction.bid_amount {
+            panic!("Bid must exceed current bid");
+        }
+
+        auction.bidder = Some(bidder.clone());
+        auction.fee_bps = fee_bps;
+        auction.bid_amount = bid_amount;
+        env.storage().instance().set(&ACTIVE_FEE_AUCTION, &auction);
+
+        env.events().publish(
+            (Symbol::new(&env, "FEE_AUCTION_BID"), bidder),
+            (auction.auction_id, fee_bps, bid_amount),
+        );
+    }
+
+    /// Close an expired auction, install the winning fee for the configured
+    /// period, and credit the winning bid to the treasury.
+    pub fn settle_fee_auction(env: Env) -> u32 {
+        Self::require_not_paused(&env);
+
+        let config = Self::load_fee_auction_config(&env);
+        let mut auction = Self::load_active_auction(&env);
+        let now = env.ledger().timestamp();
+
+        if now < auction.end_time {
+            panic!("Auction is still open");
+        }
+
+        let winner = auction
+            .bidder
+            .clone()
+            .unwrap_or_else(|| panic!("No bids placed"));
+        if auction.fee_bps < config.min_fee_bps || auction.fee_bps > config.max_fee_bps {
+            panic!("Winning fee out of bounds");
+        }
+
+        auction.settled = true;
+        let period_end = now + config.fee_period;
+        env.storage().instance().set(&STABILITY_FEE_BPS, &auction.fee_bps);
+        env.storage().instance().set(&FEE_PERIOD_END, &period_end);
+
+        let proceeds: u64 = env.storage().instance().get(&TREASURY_PROCEEDS).unwrap();
+        env.storage().instance().set(&TREASURY_PROCEEDS, &(proceeds + auction.bid_amount));
+
+        let mut history: Map<u64, StabilityFeeAuction> =
+            env.storage().instance().get(&FEE_AUCTION_HISTORY).unwrap();
+        history.set(auction.auction_id, auction.clone());
+        env.storage().instance().set(&FEE_AUCTION_HISTORY, &history);
+        env.storage().instance().remove(&ACTIVE_FEE_AUCTION);
+
+        env.events().publish(
+            (Symbol::new(&env, "FEE_AUCTION_SETTLED"), winner),
+            (auction.auction_id, auction.fee_bps, auction.bid_amount, config.treasury),
+        );
+        env.events().publish(
+            (Symbol::new(&env, "STABILITY_FEE_UPDATED"), auction.auction_id),
+            (auction.fee_bps, period_end),
+        );
+
+        auction.fee_bps
+    }
+
+    /// Discard an active auction without changing the stability fee (admin only).
+    pub fn cancel_fee_auction(env: Env, admin: Address) {
+        Self::require_admin_auth(&env, &admin);
+        let auction = Self::load_active_auction(&env);
+        env.storage().instance().remove(&ACTIVE_FEE_AUCTION);
+        env.events().publish(
+            (Symbol::new(&env, "FEE_AUCTION_CANCELLED"), admin),
+            auction.auction_id,
+        );
+    }
+
     // ─── Admin Functions ───────────────────────────────────────────────────────
 
     /// Add a new collateral type (admin only)
@@ -510,11 +745,43 @@ impl StablecoinContract {
         Self::get_stability_pool(&env)
     }
 
+    /// Get the current auction configuration
+    pub fn get_fee_auction_config(env: Env) -> FeeAuctionConfig {
+        Self::load_fee_auction_config(&env)
+    }
+
+    /// Get the active auction, if one is open
+    pub fn get_active_fee_auction(env: Env) -> Option<StabilityFeeAuction> {
+        env.storage().instance().get(&ACTIVE_FEE_AUCTION)
+    }
+
+    /// Get a settled auction by id
+    pub fn get_fee_auction(env: Env, auction_id: u64) -> StabilityFeeAuction {
+        let history: Map<u64, StabilityFeeAuction> =
+            env.storage().instance().get(&FEE_AUCTION_HISTORY).unwrap();
+        history.get(auction_id).unwrap_or_else(|| panic!("Auction not found"))
+    }
+
+    /// Stability fee currently in force, in basis points
+    pub fn get_current_stability_fee(env: Env) -> u32 {
+        env.storage().instance().get(&STABILITY_FEE_BPS).unwrap()
+    }
+
+    /// Timestamp at which the current fee period ends
+    pub fn get_stability_fee_period_end(env: Env) -> u64 {
+        env.storage().instance().get(&FEE_PERIOD_END).unwrap()
+    }
+
+    /// Total bid proceeds credited to the treasury so far
+    pub fn get_treasury_fee_proceeds(env: Env) -> u64 {
+        env.storage().instance().get(&TREASURY_PROCEEDS).unwrap()
+    }
+
     /// Get token info
     pub fn get_token_info(env: Env) -> TokenInfo {
         TokenInfo {
-            name: "Stable USD".to_string(),
-            symbol: "SUSD".to_string(),
+            name: String::from_str(&env, "Stable USD"),
+            symbol: String::from_str(&env, "SUSD"),
             total_supply: Self::total_supply(env),
             decimals: 7,
         }
@@ -534,6 +801,28 @@ impl StablecoinContract {
         if paused {
             panic!("Contract is paused");
         }
+    }
+
+    fn require_admin_auth(env: &Env, admin: &Address) {
+        admin.require_auth();
+        let expected: Address = env.storage().instance().get(&ADMIN).unwrap();
+        if *admin != expected {
+            panic!("Not authorized");
+        }
+    }
+
+    fn load_fee_auction_config(env: &Env) -> FeeAuctionConfig {
+        env.storage()
+            .instance()
+            .get(&FEE_AUCTION_CONFIG)
+            .unwrap_or_else(|| panic!("Fee auction not configured"))
+    }
+
+    fn load_active_auction(env: &Env) -> StabilityFeeAuction {
+        env.storage()
+            .instance()
+            .get(&ACTIVE_FEE_AUCTION)
+            .unwrap_or_else(|| panic!("No active auction"))
     }
 
     fn get_vault_position(env: &Env, owner: Address) -> VaultPosition {
