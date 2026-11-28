@@ -23,6 +23,7 @@
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map, unwrap::UnwrapOptimized};
 use soroban_token_sdk::{Token, TokenInterface};
+use crate::contracts::oracle_manager::OracleManagerContractClient;
 use crate::types::{
     stablecoin::{CollateralInfo, CollateralType, VaultPosition, StabilityPoolInfo, OraclePrice},
     token::TokenInfo,
@@ -570,13 +571,18 @@ impl StablecoinContract {
     }
 
     fn get_price(env: &Env, asset_address: Address) -> OraclePrice {
-        // In production, this would call the oracle contract
-        // For now, return a mock price
+        let oracle_address: Address = env.storage().instance().get(&ORACLE).unwrap();
+        let oracle = OracleManagerContractClient::new(env, &oracle_address);
+        let osm_price = oracle.get_osm_price(&asset_address);
+        let price = osm_price
+            .current_price
+            .unwrap_or_else(|| panic!("OSM price is not yet available"));
+
         OraclePrice {
             asset_address,
-            price: 1_000_000, // $1.00 with 6 decimals
-            decimals: 6,
-            last_update: env.ledger().timestamp(),
+            price,
+            decimals: osm_price.current_decimals,
+            last_update: osm_price.current_updated_at,
         }
     }
 
