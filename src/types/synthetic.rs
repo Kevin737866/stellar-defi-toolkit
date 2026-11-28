@@ -321,7 +321,6 @@ pub struct AssetProposal {
 }
 
 /// Types of asset governance proposals
-#[derive(Clone, Debug, PartialEq)]
 #[derive(Clone, Debug)]
 #[contracttype]
 pub enum AssetProposalType {
@@ -367,6 +366,8 @@ pub struct StakingPosition {
     pub last_claim: u64,
     /// Total rewards claimed
     pub total_rewards_claimed: u64,
+    /// Whether accrued rewards are automatically re-staked on claim
+    pub auto_compound: bool,
 }
 
 /// Market data for an asset
@@ -410,73 +411,4 @@ pub struct DebtPool {
     /// Cumulative debt index, scaled by `DEBT_INDEX_SCALE`. Every position's
     /// share of the pool is `position_debt_index_value / debt_index`.
     pub debt_index: u64,
-    /// Number of positions currently contributing debt
-    pub active_positions: u32,
-    /// Timestamp of the last update
-    pub last_updated: u64,
-}
-
-/// Per-position bookkeeping inside the debt pool
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct DebtShare {
-    /// Owner of the position
-    pub owner: Address,
-    /// Asset the position is denominated in
-    pub asset_id: u32,
-    /// Debt in base currency at the last sync
-    pub base_debt: u64,
-    /// Debt index value when `base_debt` was recorded
-    pub debt_index_entry: u64,
-    /// Fraction of the pool owned by this position, in basis points
-    pub share_bps: u32,
-    /// Last time the share was written
-    pub updated_at: u64,
-}
-
-/// Immutable record of a global settlement calculation
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct DebtSnapshot {
-    /// Snapshot sequence number
-    pub id: u64,
-    /// Total pool debt in base currency
-    pub total_debt: u64,
-    /// Debt index at snapshot time
-    pub debt_index: u64,
-    /// Synthetic supply backing the pool
-    pub total_synth_supply: u64,
-    /// Timestamp the snapshot was taken
-    pub timestamp: u64,
-}
-
-/// Debt pool lifecycle events
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum DebtPoolEvent {
-    /// Debt added: owner, asset id, base-currency amount, new total debt
-    DebtIncreased(Address, u32, u64, u64),
-    /// Debt removed: owner, asset id, base-currency amount, new total debt
-    DebtDecreased(Address, u32, u64, u64),
-    /// Pool revalued after a price change: old total, new total
-    DebtRevalued(u64, u64),
-    /// Global settlement snapshot taken: snapshot id, total debt
-    DebtSnapshotTaken(u64, u64),
-}
-
-/// Keys for debt pool storage
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum DebtPoolKey {
-    /// Singleton pool record
-    Pool,
-    /// Per-position share, keyed by asset and owner
-    Share(u32, Address),
-    /// Number of settlement snapshots taken so far
-    SnapshotCount,
-    /// Latest oracle price reported for an asset
-    Price(u32),
-}
-
-/// Scale applied to the debt index so integer division keeps precision
-pub const DEBT_INDEX_SCALE: u64 = 1_000_000;
+    /// Number of posi
