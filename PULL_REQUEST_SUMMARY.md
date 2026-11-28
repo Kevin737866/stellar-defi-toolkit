@@ -8,7 +8,7 @@ This PR implements comprehensive enhancements to the circuit breaker system, add
 
 **Issue**: Add circuit breakers to stop operations if prices become too volatile  
 **Labels**: security, enhancement, contracts, oracle  
-**Repository**: https://github.com/frankosakwe/stellar-defi-toolkit.
+**Repository**: https://github.com/frankosakwe/stellar-defi-toolkit
 
 ## Changes Overview
 
